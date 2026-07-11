@@ -1,3 +1,8 @@
 AGENTS.md
 CLAUDE.md
 heroui-react-mcp/
+node_modules/
+dist/
+.env
+.env.local
+*.log
