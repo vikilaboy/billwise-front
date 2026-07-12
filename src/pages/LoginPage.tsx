@@ -1,5 +1,5 @@
 import {FormEvent, useState} from "react";
-import {Link, Navigate, useNavigate} from "react-router";
+import {Link, Navigate, useNavigate, useSearchParams} from "react-router";
 import {Button} from "@heroui/react";
 import {ApiError, api, session} from "../lib/api";
 import type {AuthPayload} from "../lib/types";
@@ -11,6 +11,8 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [params] = useSearchParams();
+  const justReset = params.get("reset") === "1";
 
   if (session.token()) return <Navigate to="/dashboard" replace />;
 
@@ -37,6 +39,12 @@ export function LoginPage() {
       <form onSubmit={submit}>
         <h2 className="mb-1.5 text-[26px] font-bold tracking-tight text-[var(--text)]">Bine ai revenit</h2>
         <p className="mb-7 text-[14.5px] text-[var(--text-muted)]">Autentifică-te în contul BillWise.</p>
+
+        {justReset && (
+          <div className="mb-5 rounded-[11px] bg-[var(--success-soft)] px-3.5 py-3 text-[13px] font-medium text-[var(--success)]">
+            Parola a fost resetată. Autentifică-te cu noua parolă.
+          </div>
+        )}
 
         <label className={authLabelCls}>Email</label>
         <input
