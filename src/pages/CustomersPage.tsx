@@ -407,7 +407,7 @@ function AddCustomerModal({
           </label>
 
           {create.isError && !(create.error instanceof ApiError && create.error.problem.errors) ? (
-            <div className="rounded-lg bg-[var(--danger-soft,var(--muted))] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
+            <div className="rounded-lg bg-[var(--danger-soft,var(--bg-muted))] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
               {problemMessage(create.error)}
             </div>
           ) : null}

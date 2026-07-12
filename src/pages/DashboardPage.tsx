@@ -307,7 +307,7 @@ export function DashboardPage() {
           <Card.Content className="mt-1 flex flex-1 flex-col">
             <div
               className="my-5 flex overflow-hidden rounded-md"
-              style={{height: 12, background: "var(--muted)"}}
+              style={{height: 12, background: "var(--bg-muted)"}}
             >
               {model.bucketTotal > 0 &&
                 model.buckets
@@ -372,7 +372,7 @@ export function DashboardPage() {
                       <tr
                         key={inv.id}
                         onClick={() => navigate(`/facturi/${inv.id}`)}
-                        className="cursor-pointer transition-colors hover:bg-[var(--muted)]"
+                        className="cursor-pointer transition-colors hover:bg-[var(--bg-muted)]"
                       >
                         <td className="border-b border-[var(--border)] px-5 py-3">
                           <b className="tabular-nums">{inv.formatted_number}</b>

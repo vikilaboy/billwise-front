@@ -528,7 +528,7 @@ export function NewInvoicePage() {
               )}
             </dl>
 
-            <label className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-[var(--muted)] p-3">
+            <label className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-[var(--bg-muted)] p-3">
               <span className="min-w-0">
                 <span className="flex items-center gap-1.5 text-[13px] font-semibold">
                   <Send size={14} className="text-[var(--accent)]" /> Trimite în e-Factura

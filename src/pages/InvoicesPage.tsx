@@ -155,7 +155,7 @@ export function InvoicesPage() {
     <div className="flex flex-col gap-5">
       {/* Top row: segmented filters + primary action */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex flex-wrap gap-[3px] rounded-xl bg-[var(--muted)] p-[3px]">
+        <div className="inline-flex flex-wrap gap-[3px] rounded-xl bg-[var(--bg-muted)] p-[3px]">
           {FILTERS.map((f) => {
             const active = filter === f.key;
             return (
