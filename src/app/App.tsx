@@ -4,6 +4,8 @@ import {Spinner} from "@heroui/react";
 import {session} from "../lib/api";
 import {AppShell} from "../components/AppShell";
 import {LoginPage} from "../pages/LoginPage";
+import {SignupPage} from "../pages/SignupPage";
+import {ForgotPasswordPage} from "../pages/ForgotPasswordPage";
 
 // Route-level code splitting: each page (and its heavy deps — charts, timeline,
 // data-grid) loads on navigation, keeping the initial bundle small.
@@ -32,6 +34,8 @@ export function App() {
     <Suspense fallback={<PageFallback />}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/inregistrare" element={<SignupPage />} />
+        <Route path="/recuperare-parola" element={<ForgotPasswordPage />} />
         <Route element={<Protected />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
