@@ -166,7 +166,7 @@ export function InvoiceSeriesPage() {
                     </td>
                     <td className="px-4 py-3">
                       {s.prefix ? (
-                        <span className="rounded bg-[var(--muted)] px-2 py-0.5 font-semibold tabular-nums">
+                        <span className="rounded bg-[var(--bg-muted)] px-2 py-0.5 font-semibold tabular-nums">
                           {s.prefix}
                         </span>
                       ) : (
@@ -346,7 +346,7 @@ function SeriesModal({
           </label>
 
           {problem && !problem.errors && (
-            <div className="rounded-lg bg-[var(--danger-soft,var(--muted))] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
+            <div className="rounded-lg bg-[var(--danger-soft,var(--bg-muted))] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
               {problem.detail ?? problem.title}
             </div>
           )}

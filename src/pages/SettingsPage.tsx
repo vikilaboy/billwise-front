@@ -239,7 +239,7 @@ export function SettingsPage() {
       {/* Card 1 — issuer company data */}
       <section className={cardClass}>
         <header className="mb-5 flex items-center gap-2.5">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--muted)] text-[var(--accent)]">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
             <Building2 size={18} />
           </span>
           <div>
@@ -299,7 +299,7 @@ export function SettingsPage() {
             </p>
           </Field>
 
-          <div className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--muted)] px-3.5 py-3 sm:col-span-2">
+          <div className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--bg-muted)] px-3.5 py-3 sm:col-span-2">
             <div>
               <div className="text-[13.5px] font-semibold">Plătitor de TVA</div>
               <div className="text-[12px] text-[var(--text-muted)]">Firma colectează și declară TVA</div>
@@ -369,7 +369,7 @@ export function SettingsPage() {
       {/* Card 2 — preferences */}
       <section className={cardClass}>
         <header className="mb-5 flex items-center gap-2.5">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--muted)] text-[var(--accent)]">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
             <Landmark size={18} />
           </span>
           <div>
@@ -392,7 +392,7 @@ export function SettingsPage() {
               <div className="text-[13.5px] font-semibold">Limbă</div>
               <div className="text-[12px] text-[var(--text-muted)]">Interfața aplicației</div>
             </div>
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-2.5 py-1 text-[12.5px] font-semibold text-[var(--text-muted)]">
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-muted)] px-2.5 py-1 text-[12.5px] font-semibold text-[var(--text-muted)]">
               <Globe size={13} /> Română (RO)
             </span>
           </div>

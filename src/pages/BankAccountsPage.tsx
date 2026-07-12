@@ -359,7 +359,7 @@ export function BankAccountsPage() {
 
                 <div className="flex items-center justify-between gap-3">
                   {code ? (
-                    <span className="rounded-lg bg-[var(--muted)] px-2.5 py-1 text-[11.5px] font-bold text-[var(--text-muted)]">
+                    <span className="rounded-lg bg-[var(--bg-muted)] px-2.5 py-1 text-[11.5px] font-bold text-[var(--text-muted)]">
                       {code}
                     </span>
                   ) : (
