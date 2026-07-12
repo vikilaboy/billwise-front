@@ -6,6 +6,7 @@ import {AppShell} from "../components/AppShell";
 import {LoginPage} from "../pages/LoginPage";
 import {SignupPage} from "../pages/SignupPage";
 import {ForgotPasswordPage} from "../pages/ForgotPasswordPage";
+import {ResetPasswordPage} from "../pages/ResetPasswordPage";
 
 // Route-level code splitting: each page (and its heavy deps — charts, timeline,
 // data-grid) loads on navigation, keeping the initial bundle small.
@@ -36,6 +37,7 @@ export function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/inregistrare" element={<SignupPage />} />
         <Route path="/recuperare-parola" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
         <Route element={<Protected />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
