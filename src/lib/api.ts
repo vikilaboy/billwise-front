@@ -23,7 +23,16 @@ export class ApiError extends Error {
 // "/v1" — never localhost, so a misconfigured prod build fails same-origin
 // instead of trying to reach the developer's machine.
 declare const __API_URL__: string;
-const API_URL = __API_URL__ || import.meta.env.VITE_API_URL || "/v1";
+
+// Request paths omit the API version (e.g. "/auth/login"), so the base must end
+// with the `/v1` prefix. Append it if the configured base doesn't already carry
+// a version segment — a base of "https://api.billwise.ro" (no /v1) would 404.
+function apiBase(raw: string): string {
+  const base = raw.replace(/\/+$/, "");
+  if (!base) return "/v1";
+  return /\/v\d+$/.test(base) ? base : `${base}/v1`;
+}
+const API_URL = apiBase(__API_URL__ || import.meta.env.VITE_API_URL || "/v1");
 const TOKEN_KEY = "billwise_access_token";
 
 export const session = {
