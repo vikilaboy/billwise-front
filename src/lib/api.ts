@@ -18,7 +18,12 @@ export class ApiError extends Error {
   }
 }
 
-const API_URL = import.meta.env.VITE_API_URL ?? "https://api.billwise.localhost/v1";
+// Injected at build time by vite.config (from VITE_API_URL / API_BASE_URL /
+// NEXT_PUBLIC_API_BASE_URL). Falls back to the dev proxy path, then same-origin
+// "/v1" — never localhost, so a misconfigured prod build fails same-origin
+// instead of trying to reach the developer's machine.
+declare const __API_URL__: string;
+const API_URL = __API_URL__ || import.meta.env.VITE_API_URL || "/v1";
 const TOKEN_KEY = "billwise_access_token";
 
 export const session = {
