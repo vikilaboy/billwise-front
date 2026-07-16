@@ -6,5 +6,6 @@ dist/
 .env
 .env.local
 *.log
+.idea
 
 *.tsbuildinfo
