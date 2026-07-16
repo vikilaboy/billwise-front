@@ -3,12 +3,13 @@ import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Avatar, Button, Input, Spinner} from "@heroui/react";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
-import {Building2, Plus, Search, X} from "lucide-react";
+import {Building2, Plus, RotateCcw, Search, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
+import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
 import {ApiError, api, listQuery} from "../lib/api";
 import type {Customer} from "../lib/types";
-import {useDebouncedValue} from "../lib/useDebouncedValue";
+import {useServerDataGridState} from "../lib/useServerDataGridState";
 
 // ---------------------------------------------------------------------------
 // ANAF fiscal lookup response (GET /fiscal/lookup?cui=) — mirrors FiscalEntityData.
@@ -59,27 +60,24 @@ function problemMessage(error: unknown): string {
 
 // ---------------------------------------------------------------------------
 const PER_PAGE = 20;
+const DEFAULT_SORT: DataGridSortDescriptor = {column: "name", direction: "ascending"};
+const SORT_COLUMNS = ["name", "tax_id"] as const;
 
 export function CustomersPage() {
   const {company} = useCompany();
   const queryClient = useQueryClient();
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
-  const debouncedSearch = useDebouncedValue(search.trim());
-  const [sort, setSort] = useState<DataGridSortDescriptor>({column: "name", direction: "ascending"});
   const [modalOpen, setModalOpen] = useState(false);
-
-  const apiSort = `${sort.direction === "descending" ? "-" : ""}${String(sort.column)}`;
+  const grid = useServerDataGridState({defaultSort: DEFAULT_SORT, sortColumns: SORT_COLUMNS});
 
   const customers = useQuery({
-    queryKey: ["customers", company?.id, "list", page, debouncedSearch, apiSort],
+    queryKey: ["customers", company?.id, "list", grid.page, grid.debouncedSearch, grid.apiSort],
     queryFn: () =>
       api<Customer[]>(
         `/companies/${company!.id}/customers${listQuery({
-          page,
+          page: grid.page,
           perPage: PER_PAGE,
-          sort: apiSort,
-          filter: debouncedSearch ? {name: {contains: debouncedSearch}} : undefined,
+          sort: grid.apiSort,
+          filter: grid.debouncedSearch ? {name: {contains: grid.debouncedSearch}} : undefined,
         })}`,
       ),
     enabled: Boolean(company?.id),
@@ -113,34 +111,32 @@ export function CustomersPage() {
     [],
   );
 
-  function changeSort(descriptor: DataGridSortDescriptor) {
-    setSort(descriptor);
-    setPage(1);
-  }
-
   return (
     <div className="flex flex-col gap-5">
       {/* Top row: primary action */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="flex h-10 min-w-[260px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3">
-          <Search size={16} className="text-[var(--faint)]" />
-          <input
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
-            placeholder="Caută după denumire…"
-            className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
-          />
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex h-10 min-w-[260px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3">
+            <Search size={16} className="text-[var(--faint)]" />
+            <input
+              value={grid.search}
+              onChange={(event) => grid.setSearch(event.target.value)}
+              placeholder="Caută după denumire…"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
+            />
+          </label>
+          <Button variant="outline" size="sm" isDisabled={!grid.isDirty} onPress={grid.reset}>
+            <RotateCcw size={15} /> Resetează
+          </Button>
+        </div>
         <Button variant="primary" onPress={() => setModalOpen(true)}>
           <Plus size={17} /> Adaugă firmă
         </Button>
       </div>
 
       {/* Table card */}
-      <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
+      <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
+        <DataTableLoadingOverlay isLoading={customers.isFetching && !customers.isLoading} />
         {customers.isLoading ? (
           <div className="flex items-center justify-center gap-2.5 py-24 text-sm text-[var(--text-muted)]">
             <Spinner size="sm" /> Se încarcă clienții…
@@ -174,11 +170,11 @@ export function CustomersPage() {
             columns={columns}
             data={rows}
             getRowId={(customer) => customer.id}
-            sortDescriptor={sort}
-            onSortChange={changeSort}
+            sortDescriptor={grid.sort}
+            onSortChange={grid.setSort}
           />
         )}
-        <DataTablePagination pagination={customers.data?.meta?.pagination} onPageChange={setPage} />
+        <DataTablePagination pagination={customers.data?.meta?.pagination} onPageChange={grid.setPage} />
       </div>
 
       {modalOpen && company?.id ? (

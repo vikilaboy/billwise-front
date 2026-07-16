@@ -3,11 +3,12 @@ import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Chip, Input, Spinner, Switch} from "@heroui/react";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
-import {Hash, Plus, Search, X} from "lucide-react";
+import {Hash, Plus, RotateCcw, Search, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
+import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
 import {api, ApiError, listQuery} from "../lib/api";
-import {useDebouncedValue} from "../lib/useDebouncedValue";
+import {useServerDataGridState} from "../lib/useServerDataGridState";
 
 // The API models `document_type` as a free-form string (max 50); only `invoice`
 // is used in practice. These are the document kinds the UI offers, with RO labels.
@@ -78,28 +79,35 @@ const EMPTY_FORM: FormState = {
 
 const PER_PAGE = 20;
 type ActiveFilter = "all" | "active" | "inactive";
+const DEFAULT_SORT: DataGridSortDescriptor = {column: "name", direction: "ascending"};
+const SORT_COLUMNS = ["name", "document_type", "prefix", "next_number"] as const;
+const FILTER_CONFIG = {
+  param: "active",
+  defaultValue: "all" as ActiveFilter,
+  values: ["all", "active", "inactive"] as const,
+};
 
 export function InvoiceSeriesPage() {
   const {company} = useCompany();
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
-  const debouncedSearch = useDebouncedValue(search.trim());
-  const [activeFilter, setActiveFilter] = useState<ActiveFilter>("all");
-  const [sort, setSort] = useState<DataGridSortDescriptor>({column: "name", direction: "ascending"});
-  const apiSort = `${sort.direction === "descending" ? "-" : ""}${String(sort.column)}`;
+  const grid = useServerDataGridState<ActiveFilter>({
+    defaultSort: DEFAULT_SORT,
+    sortColumns: SORT_COLUMNS,
+    filter: FILTER_CONFIG,
+  });
+  const activeFilter = grid.filter ?? "all";
 
   const series = useQuery({
-    queryKey: ["invoice-series", company?.id, page, debouncedSearch, activeFilter, apiSort],
+    queryKey: ["invoice-series", company?.id, grid.page, grid.debouncedSearch, activeFilter, grid.apiSort],
     queryFn: () =>
       api<Series[]>(
         `/companies/${company!.id}/invoice-series${listQuery({
-          page,
+          page: grid.page,
           perPage: PER_PAGE,
-          sort: apiSort,
+          sort: grid.apiSort,
           filter: {
-            ...(debouncedSearch ? {name: {contains: debouncedSearch}} : {}),
+            ...(grid.debouncedSearch ? {name: {contains: grid.debouncedSearch}} : {}),
             ...(activeFilter === "all" ? {} : {is_active: activeFilter === "active" ? 1 : 0}),
           },
         })}`,
@@ -174,10 +182,6 @@ export function InvoiceSeriesPage() {
     [],
   );
 
-  function resetPage() {
-    setPage(1);
-  }
-
   return (
     <div className="flex flex-col gap-5">
       {/* Top row: primary action */}
@@ -186,21 +190,15 @@ export function InvoiceSeriesPage() {
           <label className="flex h-10 min-w-[260px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3">
             <Search size={16} className="text-[var(--faint)]" />
             <input
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                resetPage();
-              }}
+              value={grid.search}
+              onChange={(event) => grid.setSearch(event.target.value)}
               placeholder="Caută o serie…"
               className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
             />
           </label>
           <select
             value={activeFilter}
-            onChange={(event) => {
-              setActiveFilter(event.target.value as ActiveFilter);
-              resetPage();
-            }}
+            onChange={(event) => grid.setFilter(event.target.value as ActiveFilter)}
             aria-label="Filtrează după stare"
             className="h-10 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm outline-none"
           >
@@ -208,6 +206,9 @@ export function InvoiceSeriesPage() {
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
+          <Button variant="outline" size="sm" isDisabled={!grid.isDirty} onPress={grid.reset}>
+            <RotateCcw size={15} /> Resetează
+          </Button>
         </div>
         <Button variant="primary" onPress={() => setModalOpen(true)}>
           <Plus size={17} /> Serie nouă
@@ -215,7 +216,8 @@ export function InvoiceSeriesPage() {
       </div>
 
       {/* Table card */}
-      <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
+      <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
+        <DataTableLoadingOverlay isLoading={series.isFetching && !series.isLoading} />
         {series.isLoading ? (
           <div className="flex items-center justify-center gap-2.5 py-24 text-sm text-[var(--text-muted)]">
             <Spinner size="sm" /> Se încarcă seriile…
@@ -251,14 +253,11 @@ export function InvoiceSeriesPage() {
             columns={columns}
             data={rows}
             getRowId={(item) => item.id}
-            sortDescriptor={sort}
-            onSortChange={(descriptor) => {
-              setSort(descriptor);
-              resetPage();
-            }}
+            sortDescriptor={grid.sort}
+            onSortChange={grid.setSort}
           />
         )}
-        <DataTablePagination pagination={series.data?.meta?.pagination} onPageChange={setPage} />
+        <DataTablePagination pagination={series.data?.meta?.pagination} onPageChange={grid.setPage} />
       </div>
 
       {modalOpen && company?.id && (

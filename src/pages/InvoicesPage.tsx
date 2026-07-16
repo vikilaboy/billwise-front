@@ -15,16 +15,18 @@ import {
   FileText,
   MoreHorizontal,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
   X,
 } from "lucide-react";
 import {useCompany} from "../components/AppShell";
+import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
 import {api, listQuery} from "../lib/api";
 import type {Invoice} from "../lib/types";
 import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
-import {useDebouncedValue} from "../lib/useDebouncedValue";
+import {useServerDataGridState} from "../lib/useServerDataGridState";
 
 type FilterKey = "toate" | "ciorne" | "emise" | "restante" | "anulate";
 
@@ -37,6 +39,13 @@ const FILTERS: {key: FilterKey; label: string}[] = [
 ];
 
 const PER_PAGE = 20;
+const DEFAULT_SORT: DataGridSortDescriptor = {column: "issue_date", direction: "descending"};
+const SORT_COLUMNS = ["formatted_number", "customer_name", "issue_date", "due_date", "total_cents"] as const;
+const FILTER_CONFIG = {
+  param: "status",
+  defaultValue: "toate" as FilterKey,
+  values: FILTERS.map((item) => item.key),
+};
 
 const displayFilter: Record<Exclude<FilterKey, "toate">, string> = {
   ciorne: "draft",
@@ -48,25 +57,25 @@ const displayFilter: Record<Exclude<FilterKey, "toate">, string> = {
 export function InvoicesPage() {
   const {company} = useCompany();
   const navigate = useNavigate();
-  const [page, setPage] = useState(1);
-  const [filter, setFilter] = useState<FilterKey>("toate");
-  const [search, setSearch] = useState("");
-  const debouncedSearch = useDebouncedValue(search.trim());
-  const [sort, setSort] = useState<DataGridSortDescriptor>({column: "issue_date", direction: "descending"});
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const apiSort = `${sort.direction === "descending" ? "-" : ""}${String(sort.column)}`;
+  const grid = useServerDataGridState<FilterKey>({
+    defaultSort: DEFAULT_SORT,
+    sortColumns: SORT_COLUMNS,
+    filter: FILTER_CONFIG,
+  });
+  const filter = grid.filter ?? "toate";
 
   const invoices = useQuery({
-    queryKey: ["invoices", company?.id, "list", page, filter, debouncedSearch, apiSort],
+    queryKey: ["invoices", company?.id, "list", grid.page, filter, grid.debouncedSearch, grid.apiSort],
     queryFn: () =>
       api<Invoice[]>(
         `/companies/${company!.id}/invoices${listQuery({
-          page,
+          page: grid.page,
           perPage: PER_PAGE,
-          sort: apiSort,
+          sort: grid.apiSort,
           filter: {
             ...(filter === "toate" ? {} : {display_status: displayFilter[filter]}),
-            ...(debouncedSearch ? {formatted_number: {contains: debouncedSearch}} : {}),
+            ...(grid.debouncedSearch ? {formatted_number: {contains: grid.debouncedSearch}} : {}),
           },
         })}`,
       ),
@@ -200,10 +209,7 @@ export function InvoicesPage() {
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() => {
-                    setFilter(item.key);
-                    setPage(1);
-                  }}
+                  onClick={() => grid.setFilter(item.key)}
                   aria-pressed={active}
                   className={
                     "rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors " +
@@ -220,15 +226,15 @@ export function InvoicesPage() {
           <label className="flex h-10 min-w-[220px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3">
             <Search size={16} className="text-[var(--faint)]" />
             <input
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
+              value={grid.search}
+              onChange={(event) => grid.setSearch(event.target.value)}
               placeholder="Caută după număr…"
               className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
             />
           </label>
+          <Button variant="outline" size="sm" isDisabled={!grid.isDirty} onPress={grid.reset}>
+            <RotateCcw size={15} /> Resetează
+          </Button>
         </div>
 
         <Button variant="primary" onPress={() => navigate("/facturi/noi")}>
@@ -237,7 +243,8 @@ export function InvoicesPage() {
       </div>
 
       {/* Table card */}
-      <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
+      <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
+        <DataTableLoadingOverlay isLoading={invoices.isFetching && !invoices.isLoading} />
         {invoices.isLoading ? (
           <div className="flex items-center justify-center gap-2.5 py-24 text-sm text-[var(--text-muted)]">
             <Spinner size="sm" /> Se încarcă facturile…
@@ -275,15 +282,12 @@ export function InvoicesPage() {
             showSelectionCheckboxes
             selectedKeys={selected}
             onSelectionChange={changeSelection}
-            sortDescriptor={sort}
-            onSortChange={(descriptor) => {
-              setSort(descriptor);
-              setPage(1);
-            }}
+            sortDescriptor={grid.sort}
+            onSortChange={grid.setSort}
             onRowAction={(key) => navigate(`/facturi/${String(key)}`)}
           />
         )}
-        <DataTablePagination pagination={invoices.data?.meta?.pagination} onPageChange={setPage} />
+        <DataTablePagination pagination={invoices.data?.meta?.pagination} onPageChange={grid.setPage} />
       </div>
 
       {/* Floating selection action bar */}
