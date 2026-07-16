@@ -1,10 +1,13 @@
-import {useState} from "react";
+import {useMemo, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Chip, Input, Spinner, Switch} from "@heroui/react";
+import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
-import {Hash, Plus, X} from "lucide-react";
+import {Hash, Plus, Search, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
-import {api, ApiError} from "../lib/api";
+import {DataTablePagination} from "../components/DataTablePagination";
+import {api, ApiError, listQuery} from "../lib/api";
+import {useDebouncedValue} from "../lib/useDebouncedValue";
 
 // The API models `document_type` as a free-form string (max 50); only `invoice`
 // is used in practice. These are the document kinds the UI offers, with RO labels.
@@ -73,23 +76,139 @@ const EMPTY_FORM: FormState = {
   is_active: true,
 };
 
+const PER_PAGE = 20;
+type ActiveFilter = "all" | "active" | "inactive";
+
 export function InvoiceSeriesPage() {
   const {company} = useCompany();
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search.trim());
+  const [activeFilter, setActiveFilter] = useState<ActiveFilter>("all");
+  const [sort, setSort] = useState<DataGridSortDescriptor>({column: "name", direction: "ascending"});
+  const apiSort = `${sort.direction === "descending" ? "-" : ""}${String(sort.column)}`;
 
   const series = useQuery({
-    queryKey: ["invoice-series", company?.id],
-    queryFn: () => api<Series[]>(`/companies/${company!.id}/invoice-series`),
+    queryKey: ["invoice-series", company?.id, page, debouncedSearch, activeFilter, apiSort],
+    queryFn: () =>
+      api<Series[]>(
+        `/companies/${company!.id}/invoice-series${listQuery({
+          page,
+          perPage: PER_PAGE,
+          sort: apiSort,
+          filter: {
+            ...(debouncedSearch ? {name: {contains: debouncedSearch}} : {}),
+            ...(activeFilter === "all" ? {} : {is_active: activeFilter === "active" ? 1 : 0}),
+          },
+        })}`,
+      ),
     enabled: Boolean(company?.id),
+    placeholderData: (previous) => previous,
   });
 
   const rows = series.data?.data ?? [];
+  const columns = useMemo<DataGridColumn<Series>[]>(
+    () => [
+      {
+        id: "name",
+        header: "Denumire",
+        accessorKey: "name",
+        isRowHeader: true,
+        allowsSorting: true,
+        minWidth: 220,
+        cell: (item) => (
+          <span className="inline-flex items-center gap-2 font-semibold text-[var(--text)]">
+            {item.name}
+            {item.is_default ? (
+              <Chip size="sm" color="success" variant="soft">
+                <Chip.Label>Implicită</Chip.Label>
+              </Chip>
+            ) : null}
+          </span>
+        ),
+      },
+      {
+        id: "document_type",
+        header: "Tip document",
+        accessorKey: "document_type",
+        allowsSorting: true,
+        minWidth: 170,
+        cell: (item) => documentTypeLabel(item.document_type),
+      },
+      {
+        id: "prefix",
+        header: "Prefix",
+        accessorKey: "prefix",
+        allowsSorting: true,
+        minWidth: 120,
+        cell: (item) =>
+          item.prefix ? (
+            <span className="rounded bg-[var(--bg-muted)] px-2 py-0.5 font-semibold tabular-nums">{item.prefix}</span>
+          ) : (
+            "—"
+          ),
+      },
+      {
+        id: "next_number",
+        header: "Următorul număr",
+        accessorKey: "next_number",
+        allowsSorting: true,
+        align: "end",
+        minWidth: 170,
+        cellClassName: "font-semibold tabular-nums",
+        cell: nextNumberDisplay,
+      },
+      {
+        id: "status",
+        header: "Stare",
+        minWidth: 130,
+        cell: (item) => (
+          <Chip size="sm" color={item.is_active ? "success" : "default"} variant="soft">
+            <Chip.Label>{item.is_active ? "Activă" : "Inactivă"}</Chip.Label>
+          </Chip>
+        ),
+      },
+    ],
+    [],
+  );
+
+  function resetPage() {
+    setPage(1);
+  }
 
   return (
     <div className="flex flex-col gap-5">
       {/* Top row: primary action */}
-      <div className="flex items-center justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex h-10 min-w-[260px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3">
+            <Search size={16} className="text-[var(--faint)]" />
+            <input
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                resetPage();
+              }}
+              placeholder="Caută o serie…"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
+            />
+          </label>
+          <select
+            value={activeFilter}
+            onChange={(event) => {
+              setActiveFilter(event.target.value as ActiveFilter);
+              resetPage();
+            }}
+            aria-label="Filtrează după stare"
+            className="h-10 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm outline-none"
+          >
+            <option value="all">Toate stările</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
         <Button variant="primary" onPress={() => setModalOpen(true)}>
           <Plus size={17} /> Serie nouă
         </Button>
@@ -125,68 +244,21 @@ export function InvoiceSeriesPage() {
             </EmptyState.Content>
           </EmptyState>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-[13px]">
-              <thead>
-                <tr className="border-b border-[var(--border)] bg-[var(--subtle)]">
-                  {["Denumire", "Tip document", "Prefix"].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left text-[10.5px] font-bold uppercase tracking-wide text-[var(--faint)]"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                  <th className="px-4 py-3 text-right text-[10.5px] font-bold uppercase tracking-wide text-[var(--faint)]">
-                    Următorul număr
-                  </th>
-                  <th className="px-4 py-3 text-left text-[10.5px] font-bold uppercase tracking-wide text-[var(--faint)]">
-                    Stare
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((s) => (
-                  <tr
-                    key={s.id}
-                    className="border-b border-[var(--border)] transition-colors last:border-0 hover:bg-[var(--subtle)]"
-                  >
-                    <td className="px-4 py-3 font-semibold text-[var(--text)]">
-                      <span className="inline-flex items-center gap-2">
-                        {s.name}
-                        {s.is_default && (
-                          <Chip size="sm" color="success" variant="soft">
-                            <Chip.Label>Implicită</Chip.Label>
-                          </Chip>
-                        )}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-[var(--text-muted)]">
-                      {documentTypeLabel(s.document_type)}
-                    </td>
-                    <td className="px-4 py-3">
-                      {s.prefix ? (
-                        <span className="rounded bg-[var(--bg-muted)] px-2 py-0.5 font-semibold tabular-nums">
-                          {s.prefix}
-                        </span>
-                      ) : (
-                        <span className="text-[var(--faint)]">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-[var(--text)]">
-                      {nextNumberDisplay(s)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Chip size="sm" color={s.is_active ? "success" : "default"} variant="soft">
-                        <Chip.Label>{s.is_active ? "Activă" : "Inactivă"}</Chip.Label>
-                      </Chip>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataGrid
+            aria-label="Serii de documente"
+            className="w-full"
+            contentClassName="min-w-[820px]"
+            columns={columns}
+            data={rows}
+            getRowId={(item) => item.id}
+            sortDescriptor={sort}
+            onSortChange={(descriptor) => {
+              setSort(descriptor);
+              resetPage();
+            }}
+          />
         )}
+        <DataTablePagination pagination={series.data?.meta?.pagination} onPageChange={setPage} />
       </div>
 
       {modalOpen && company?.id && (

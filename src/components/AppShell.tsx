@@ -235,7 +235,7 @@ export function AppShell() {
           </header>
 
           <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-[30px]">
-            <div className="mx-auto max-w-[1180px]">
+            <div className="w-full">
               {companies.isLoading ? (
                 <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
                   <Building2 size={16} /> Se încarcă firma…

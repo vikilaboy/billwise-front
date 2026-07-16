@@ -1,11 +1,14 @@
 import {useMemo, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Avatar, Button, Input, Spinner} from "@heroui/react";
+import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
-import {Building2, ChevronDown, ChevronUp, Plus, Search, X} from "lucide-react";
+import {Building2, Plus, Search, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
+import {DataTablePagination} from "../components/DataTablePagination";
 import {ApiError, api, listQuery} from "../lib/api";
 import type {Customer} from "../lib/types";
+import {useDebouncedValue} from "../lib/useDebouncedValue";
 
 // ---------------------------------------------------------------------------
 // ANAF fiscal lookup response (GET /fiscal/lookup?cui=) — mirrors FiscalEntityData.
@@ -55,51 +58,82 @@ function problemMessage(error: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-type SortKey = "name" | "tax_id";
-type SortDir = "asc" | "desc";
-
-const COLUMNS: {key: SortKey | null; label: string; align?: "start"; sortable?: boolean}[] = [
-  {key: "name", label: "Firmă", sortable: true},
-  {key: "tax_id", label: "CUI", sortable: true},
-  {key: null, label: "Reg. Com."},
-  {key: null, label: "Adresă"},
-  {key: null, label: "Email"},
-];
-
-function compareCustomers(a: Customer, b: Customer, key: SortKey): number {
-  if (key === "name") return a.name.localeCompare(b.name, "ro");
-  return (a.tax_id ?? "").localeCompare(b.tax_id ?? "", "ro");
-}
+const PER_PAGE = 20;
 
 export function CustomersPage() {
   const {company} = useCompany();
   const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search.trim());
+  const [sort, setSort] = useState<DataGridSortDescriptor>({column: "name", direction: "ascending"});
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const apiSort = `${sort.direction === "descending" ? "-" : ""}${String(sort.column)}`;
 
   const customers = useQuery({
-    queryKey: ["customers", company?.id, "list"],
+    queryKey: ["customers", company?.id, "list", page, debouncedSearch, apiSort],
     queryFn: () =>
-      api<Customer[]>(`/companies/${company!.id}/customers${listQuery({perPage: 100, sort: "name"})}`),
+      api<Customer[]>(
+        `/companies/${company!.id}/customers${listQuery({
+          page,
+          perPage: PER_PAGE,
+          sort: apiSort,
+          filter: debouncedSearch ? {name: {contains: debouncedSearch}} : undefined,
+        })}`,
+      ),
     enabled: Boolean(company?.id),
+    placeholderData: (previous) => previous,
   });
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [sort, setSort] = useState<{key: SortKey; dir: SortDir}>({key: "name", dir: "asc"});
+  const rows = customers.data?.data ?? [];
+  const columns = useMemo<DataGridColumn<Customer>[]>(
+    () => [
+      {
+        id: "name",
+        header: "Firmă",
+        accessorKey: "name",
+        isRowHeader: true,
+        allowsSorting: true,
+        minWidth: 220,
+        cell: (customer) => (
+          <div className="flex items-center gap-3">
+            <Avatar className="h-9 w-9 shrink-0 rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]">
+              <Avatar.Fallback className="text-[12px] font-bold">{initials(customer.name)}</Avatar.Fallback>
+            </Avatar>
+            <span className="font-semibold text-[var(--text)]">{customer.name}</span>
+          </div>
+        ),
+      },
+      {id: "tax_id", header: "CUI", accessorKey: "tax_id", allowsSorting: true, minWidth: 140},
+      {id: "registration_number", header: "Reg. Com.", accessorKey: "registration_number", minWidth: 150},
+      {id: "address", header: "Adresă", minWidth: 240, cell: oneLineAddress},
+      {id: "email", header: "Email", accessorKey: "email", minWidth: 200},
+    ],
+    [],
+  );
 
-  const all = useMemo(() => customers.data?.data ?? [], [customers.data]);
-
-  const visible = useMemo(() => {
-    const dir = sort.dir === "asc" ? 1 : -1;
-    return [...all].sort((a, b) => compareCustomers(a, b, sort.key) * dir);
-  }, [all, sort]);
-
-  function toggleSort(key: SortKey) {
-    setSort((prev) => (prev.key === key ? {key, dir: prev.dir === "asc" ? "desc" : "asc"} : {key, dir: "asc"}));
+  function changeSort(descriptor: DataGridSortDescriptor) {
+    setSort(descriptor);
+    setPage(1);
   }
 
   return (
     <div className="flex flex-col gap-5">
       {/* Top row: primary action */}
-      <div className="flex items-center justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="flex h-10 min-w-[260px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3">
+          <Search size={16} className="text-[var(--faint)]" />
+          <input
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Caută după denumire…"
+            className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
+          />
+        </label>
         <Button variant="primary" onPress={() => setModalOpen(true)}>
           <Plus size={17} /> Adaugă firmă
         </Button>
@@ -115,7 +149,7 @@ export function CustomersPage() {
           <div className="py-24 text-center text-sm font-medium text-[var(--danger)]">
             {problemMessage(customers.error)}
           </div>
-        ) : visible.length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState className="py-16">
             <EmptyState.Header>
               <EmptyState.Media variant="icon">
@@ -133,67 +167,18 @@ export function CustomersPage() {
             </EmptyState.Content>
           </EmptyState>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] border-collapse text-[13px]">
-              <thead>
-                <tr className="border-b border-[var(--border)] bg-[var(--subtle)]">
-                  {COLUMNS.map((col, i) => {
-                    const activeSort = col.key !== null && sort.key === col.key;
-                    return (
-                      <th
-                        key={i}
-                        className="px-4 py-3 text-left text-[10.5px] font-bold uppercase tracking-wide text-[var(--faint)]"
-                      >
-                        {col.sortable && col.key ? (
-                          <button
-                            type="button"
-                            onClick={() => toggleSort(col.key as SortKey)}
-                            className={
-                              "inline-flex items-center gap-1 uppercase transition-colors hover:text-[var(--text)] " +
-                              (activeSort ? "text-[var(--text)]" : "")
-                            }
-                          >
-                            {col.label}
-                            {activeSort ? (
-                              sort.dir === "asc" ? (
-                                <ChevronUp size={13} />
-                              ) : (
-                                <ChevronDown size={13} />
-                              )
-                            ) : null}
-                          </button>
-                        ) : (
-                          col.label
-                        )}
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((c) => (
-                  <tr
-                    key={c.id}
-                    className="border-b border-[var(--border)] transition-colors last:border-0 hover:bg-[var(--subtle)]"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-9 w-9 shrink-0 rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]">
-                          <Avatar.Fallback className="text-[12px] font-bold">{initials(c.name)}</Avatar.Fallback>
-                        </Avatar>
-                        <span className="font-semibold text-[var(--text)]">{c.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-[var(--text-muted)]">{c.tax_id ?? "—"}</td>
-                    <td className="px-4 py-3 text-[var(--text-muted)]">{c.registration_number ?? "—"}</td>
-                    <td className="px-4 py-3 text-[var(--text-muted)]">{oneLineAddress(c)}</td>
-                    <td className="px-4 py-3 text-[var(--text-muted)]">{c.email ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataGrid
+            aria-label="Clienți"
+            className="w-full"
+            contentClassName="min-w-[900px]"
+            columns={columns}
+            data={rows}
+            getRowId={(customer) => customer.id}
+            sortDescriptor={sort}
+            onSortChange={changeSort}
+          />
         )}
+        <DataTablePagination pagination={customers.data?.meta?.pagination} onPageChange={setPage} />
       </div>
 
       {modalOpen && company?.id ? (
