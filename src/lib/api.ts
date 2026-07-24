@@ -18,6 +18,12 @@ export class ApiError extends Error {
   }
 }
 
+export function apiErrorMessage(error: unknown, fallback = "Cererea nu a putut fi procesată."): string {
+  if (error instanceof ApiError) return error.problem.detail ?? error.problem.title;
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
 // Injected at build time by vite.config (from VITE_API_URL / API_BASE_URL /
 // NEXT_PUBLIC_API_BASE_URL). Falls back to the dev proxy path, then same-origin
 // "/v1" — never localhost, so a misconfigured prod build fails same-origin

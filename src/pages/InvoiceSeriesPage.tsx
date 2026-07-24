@@ -7,7 +7,7 @@ import {Hash, Pencil, Plus, RotateCcw, Search, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {api, ApiError, listQuery} from "../lib/api";
+import {api, apiErrorMessage, ApiError, listQuery} from "../lib/api";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
 // Other document families require distinct legal flows. The current product
@@ -186,7 +186,7 @@ export function InvoiceSeriesPage() {
         ),
       },
     ],
-    [],
+    [remove],
   );
 
   return (
@@ -221,6 +221,11 @@ export function InvoiceSeriesPage() {
           <Plus size={17} /> Serie nouă
         </Button>
       </div>
+      {remove.isError ? (
+        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          {apiErrorMessage(remove.error, "Seria nu a putut fi ștearsă.")}
+        </p>
+      ) : null}
 
       {/* Table card */}
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">

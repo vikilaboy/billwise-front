@@ -6,7 +6,7 @@ import {Timeline} from "@heroui-pro/react/timeline";
 import type {TimelineStatus} from "@heroui-pro/react/timeline";
 import {Ban, Banknote, Check, ChevronLeft, Copy, Download, FileCode2, Mail, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
-import {api, ApiError, downloadApiFile} from "../lib/api";
+import {api, apiErrorMessage, ApiError, downloadApiFile} from "../lib/api";
 import type {Address, EfacturaSubmission, Invoice, InvoiceDelivery, InvoicePayment, PaymentMethod} from "../lib/types";
 import {
   cents,
@@ -322,6 +322,11 @@ export function InvoiceDetailPage() {
           {lifecycleMutation.error instanceof ApiError
             ? lifecycleMutation.error.problem.detail ?? lifecycleMutation.error.problem.title
             : "Operația nu a putut fi finalizată."}
+        </p>
+      ) : null}
+      {retryDelivery.isError || deletePayment.isError ? (
+        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          {apiErrorMessage(retryDelivery.error ?? deletePayment.error, "Operația nu a putut fi finalizată.")}
         </p>
       ) : null}
 

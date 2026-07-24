@@ -322,7 +322,7 @@ export function AppShell() {
 
           <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-[30px]">
             <div className="w-full">
-              <Outlet />
+              <Outlet key={company?.id} />
             </div>
           </main>
         </Sidebar.Main>
