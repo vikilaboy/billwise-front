@@ -222,7 +222,9 @@ export function InvoicesPage() {
                 }}><Trash2 size={14} className="text-[var(--danger)]" /></Button>
               </>
             ) : null}
-            <Button isIconOnly size="sm" variant="ghost" aria-label="Duplică" onPress={() => action.mutate({invoice, kind: "duplicate"})}><Copy size={14} /></Button>
+            {invoice.document_type === "invoice" ? (
+              <Button isIconOnly size="sm" variant="ghost" aria-label="Duplică" onPress={() => action.mutate({invoice, kind: "duplicate"})}><Copy size={14} /></Button>
+            ) : null}
           </div>
         ),
       },

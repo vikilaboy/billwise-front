@@ -16,6 +16,10 @@ const invoice = {
   company_profile: {id: "company-1", legal_name: "ACME SRL", tax_id: "12345674", address: null},
   customer: {name: "CLIENT SRL", tax_id: "34567894", registration_number: null, address: null},
   status: "issued",
+  document_type: "invoice",
+  corrects_invoice_id: null,
+  corrected_invoice: null,
+  corrections: [],
   number: 1,
   formatted_number: "INV-0001",
   issue_date: "2026-07-24",
@@ -89,5 +93,37 @@ describe("InvoiceDetailPage SPV", () => {
     await waitFor(() => expect(submitCount).toBe(1));
     expect(window.confirm).toHaveBeenCalledWith("Trimiți explicit această factură în ANAF SPV?");
     expect(await screen.findByText("În coadă")).toBeInTheDocument();
+  });
+
+  it("nu permite duplicarea unei corecții", async () => {
+    const correction = {
+      ...invoice,
+      id: "correction-1",
+      document_type: "correction",
+      formatted_number: "INV-0002",
+      total_cents: -11900,
+      total_cents_ron: -11900,
+      efactura_eligibility: {eligible: false, reason: "Correction"},
+    };
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/invoices/correction-1")) return Promise.resolve(json(correction));
+      if (url.endsWith("/payments") || url.endsWith("/deliveries") || url.endsWith("/efactura/submissions")) {
+        return Promise.resolve(json([]));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/facturi/correction-1"]}>
+          <Routes><Route path="/facturi/:id" element={<InvoiceDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("INV-0002")).toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "Duplică"})).not.toBeInTheDocument();
   });
 });

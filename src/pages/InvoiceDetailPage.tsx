@@ -299,7 +299,9 @@ export function InvoiceDetailPage() {
             }}><Trash2 size={16} /> Șterge</Button>
           </>
         ) : null}
-        <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => lifecycleMutation.mutate("duplicate")}><Copy size={16} /> Duplică</Button>
+        {invoice.document_type === "invoice" ? (
+          <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => lifecycleMutation.mutate("duplicate")}><Copy size={16} /> Duplică</Button>
+        ) : null}
         {invoice.status === "issued" ? (
           <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => {
             if (window.confirm("Anularea nu creează un storno și nu modifică documentul original. Continui?")) lifecycleMutation.mutate("cancel");
