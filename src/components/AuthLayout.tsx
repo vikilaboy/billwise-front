@@ -2,8 +2,8 @@ import type {ReactNode} from "react";
 import {Check} from "lucide-react";
 
 const FEATURES = [
-  "Conectare directă la SPV / e-Factura",
-  "Curs valutar BNR actualizat automat",
+  "Cont protejat prin activarea emailului",
+  "Datele firmei verificate prin ANAF",
   "Facturi conforme, fără griji",
 ];
 
@@ -41,7 +41,7 @@ export function AuthLayout({children}: {children: ReactNode}) {
           </div>
         </div>
         <small className="text-[12.5px] text-[color-mix(in_srgb,var(--bg)_45%,transparent)]">
-          Conform cerințelor ANAF · SPV / e-Factura · GDPR
+          Date structurate ANAF · Pregătit pentru e-Factura · GDPR
         </small>
       </section>
 

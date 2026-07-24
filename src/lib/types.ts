@@ -8,9 +8,16 @@ export type User = {
   id: string;
   name: string;
   email: string;
+  phone: string | null;
+  email_verified_at: string | null;
   tenant: Tenant;
   roles: string[];
   permissions: string[];
+};
+
+export type RegisterPayload = {
+  message: string;
+  email: string;
 };
 
 export type AuthPayload = {
@@ -46,8 +53,34 @@ export type CompanyProfile = {
   phone: string | null;
   website: string | null;
   address: Address | null;
+  archived_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+};
+
+export type FiscalEntity = {
+  cui: string;
+  name: string;
+  is_vat_payer: boolean;
+  registration_number: string | null;
+  address: string | null;
+  is_active: boolean;
+};
+
+export type State = {
+  id: string;
+  country_code: string;
+  code: string;
+  name: string;
+};
+
+export type Locality = {
+  id: string;
+  state_id: string;
+  siruta_code: string;
+  name: string;
+  type: string | null;
+  superior_siruta: string | null;
 };
 
 export type Customer = {
@@ -60,7 +93,18 @@ export type Customer = {
   registration_number: string | null;
   is_vat_payer: boolean;
   notes: string | null;
+  locale: "ro" | "en";
   address: Address | null;
+  bank_accounts?: BankAccount[];
+  recent_invoices?: Array<{
+    id: string;
+    formatted_number: string;
+    status: InvoiceStatus;
+    issue_date: string | null;
+    due_date: string | null;
+    currency: string;
+    total_cents: number;
+  }>;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -79,6 +123,25 @@ export type BankAccount = {
   is_active: boolean;
   is_primary: boolean;
   position: number;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type Product = {
+  id: string;
+  company_profile_id: string;
+  type: "product" | "service";
+  name: string;
+  description: string | null;
+  unit: string;
+  unit_code: string;
+  unit_price_cents: number;
+  currency: string;
+  vat_rate: string;
+  vat_category: VatCategory;
+  vat_exemption_code: string | null;
+  vat_exemption_reason: string | null;
+  is_active: boolean;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -120,6 +183,22 @@ export type Invoice = {
   company_profile: CompanyProfile | null;
   customer: Customer | null;
   status: InvoiceStatus;
+  document_type: "invoice" | "correction";
+  corrects_invoice_id: string | null;
+  corrected_invoice: {
+    id: string;
+    formatted_number: string;
+    status: InvoiceStatus;
+    total_cents: number;
+    currency: string;
+  } | null;
+  corrections: Array<{
+    id: string;
+    formatted_number: string;
+    status: InvoiceStatus;
+    total_cents: number;
+    currency: string;
+  }>;
   number: number;
   formatted_number: string;
   issue_date: string | null;
@@ -131,16 +210,132 @@ export type Invoice = {
   exchange_rate: string | null; // decimal:6
   exchange_rate_day: string | null;
   notes: string | null;
+  locale: "ro" | "en";
   subtotal_cents: number;
   vat_cents: number;
   total_cents: number;
   subtotal_cents_ron: number | null;
   vat_cents_ron: number | null;
   total_cents_ron: number | null;
+  paid_cents: number;
+  balance_cents: number;
+  payment_status: "unpaid" | "partial" | "paid" | "overdue" | "not_applicable";
+  last_paid_at: string | null;
   lines: InvoiceLine[]; // [] in list, populated in show
   vat_breakdown: VatBreakdownGroup[]; // [] in list, populated in show
+  latest_efactura_submission: EfacturaSubmission | null;
+  efactura_eligibility: {
+    eligible: boolean;
+    reason: "invoice_not_issued" | "customer_address_missing" | "outside_jurisdiction" | null;
+  };
   created_at: string | null;
   updated_at: string | null;
+};
+
+export type PaymentMethod = "bank_transfer" | "card" | "cash" | "other";
+
+export type InvoicePayment = {
+  id: string;
+  invoice_id: string;
+  amount_cents: number;
+  currency: string;
+  paid_at: string;
+  method: PaymentMethod;
+  reference: string | null;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type InvoiceDelivery = {
+  id: string;
+  channel: "email";
+  recipient: string;
+  cc: string[];
+  subject: string;
+  message: string | null;
+  status: "queued" | "sending" | "sent" | "failed";
+  provider_message_id: string | null;
+  error: string | null;
+  sent_at: string | null;
+  created_at: string | null;
+};
+
+export type DashboardSummary = {
+  total_invoiced_ron_cents: number;
+  total_paid_ron_cents: number;
+  balance_ron_cents: number;
+  overdue_count: number;
+  draft_count: number;
+  billed_this_month_ron_cents: number;
+  issued_this_month_count: number;
+  previous_month_invoiced_ron_cents: number;
+  same_month_last_year_invoiced_ron_cents: number;
+  outstanding_balance_ron_cents: number;
+  overdue_balance_ron_cents: number;
+  outstanding_count: number;
+  draft_total_ron_cents: number;
+  weekly_invoiced_ron_cents: number[];
+  weekly_overdue_balance_ron_cents: number[];
+  monthly_invoiced_ron_cents: Array<{
+    month: string;
+    total_ron_cents: number;
+  }>;
+  recent_invoices: Invoice[];
+};
+
+export type RecurringInvoiceTemplate = {
+  id: string;
+  company_profile_id: string;
+  customer_id: string;
+  invoice_series_id: string;
+  name: string;
+  frequency: "monthly" | "quarterly";
+  timezone: string;
+  start_date: string;
+  end_date: string | null;
+  next_run_at: string;
+  payment_terms_days: number;
+  currency: string;
+  locale: "ro" | "en";
+  lines: Array<{
+    description: string;
+    quantity: string;
+    unit: string;
+    unit_code: string;
+    unit_price_cents: number;
+    vat_rate: string;
+    vat_category: VatCategory;
+    vat_exemption_code: string | null;
+    vat_exemption_reason: string | null;
+  }>;
+  notes: string | null;
+  status: "active" | "paused";
+  mode: "create_draft";
+  customer: {id: string; name: string} | null;
+  series: {id: string; name: string} | null;
+  runs: Array<{
+    id: string;
+    scheduled_for: string;
+    status: "running" | "created" | "failed";
+    error: string | null;
+    invoice_id: string | null;
+  }>;
+};
+
+export type ActivityNotification = {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  url: string | null;
+  read_at: string | null;
+  created_at: string;
+};
+
+export type ActivityNotificationFeed = {
+  unread_count: number;
+  items: ActivityNotification[];
 };
 
 export type SpvSubmissionStatus =
@@ -158,6 +353,31 @@ export type EfacturaSubmission = {
   download_id: string | null;
   error: string | null;
   has_confirmation: boolean;
+  next_poll_after: string | null;
   submitted_at: string | null;
   created_at: string | null;
+};
+
+export type SpvConnection = {
+  connected: boolean;
+  expires_at: string | null;
+};
+
+export type SpvAuthorize = {
+  authorize_url: string;
+};
+
+export type Currency = {
+  id: string;
+  code: string;
+  name: string;
+  symbol: string;
+  auto_update: boolean;
+  is_local: boolean;
+  is_active: boolean;
+  latest_rate: {
+    day: string | null;
+    rate: string;
+    source: string;
+  } | null;
 };

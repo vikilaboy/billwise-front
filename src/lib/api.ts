@@ -32,14 +32,21 @@ function apiBase(raw: string): string {
   if (!base) return "/v1";
   return /\/v\d+$/.test(base) ? base : `${base}/v1`;
 }
-const API_URL = apiBase(__API_URL__ || import.meta.env.VITE_API_URL || "/v1");
+export const API_URL = apiBase(__API_URL__ || import.meta.env.VITE_API_URL || "/v1");
 const TOKEN_KEY = "billwise_access_token";
+export const AUTH_EXPIRED_EVENT = "billwise:auth-expired";
 
 export const session = {
   token: () => localStorage.getItem(TOKEN_KEY),
   save: (token: string) => localStorage.setItem(TOKEN_KEY, token),
   clear: () => localStorage.removeItem(TOKEN_KEY),
 };
+
+function expireSessionOnUnauthorized(status: number, token: string | null): void {
+  if (status !== 401 || !token) return;
+  session.clear();
+  window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+}
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T>> {
   const headers = new Headers(init.headers);
@@ -48,6 +55,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiE
   const token = session.token();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const response = await fetch(`${API_URL}${path}`, {...init, headers});
+  expireSessionOnUnauthorized(response.status, token);
   if (response.status === 204) return {data: undefined as T};
   const payload = await response.json();
   if (!response.ok)
@@ -59,6 +67,36 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiE
       type: payload.type,
     });
   return payload;
+}
+
+export async function downloadApiFile(path: string, fallbackName: string): Promise<void> {
+  const headers = new Headers({Accept: "*/*"});
+  const token = session.token();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(`${API_URL}${path}`, {headers});
+  expireSessionOnUnauthorized(response.status, token);
+  if (!response.ok) {
+    let problem: ProblemDetails = {title: "Fișierul nu a putut fi descărcat", status: response.status};
+    try {
+      problem = {...problem, ...(await response.json())};
+    } catch {
+      // A non-JSON upstream error still becomes a consistent client error.
+    }
+    throw new ApiError(problem);
+  }
+
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = /filename="?([^";]+)"?/i.exec(disposition);
+  const filename = (match?.[1] ?? fallbackName).replace(/[\\/\r\n"]/g, "_");
+  const url = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 // Build a `?_page=…&_filter[status][eq]=…` query string from the API's `_`-prefixed controls.

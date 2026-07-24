@@ -1,4 +1,4 @@
-import {FormEvent, useState} from "react";
+import {FormEvent, useEffect, useState} from "react";
 import {Link, Navigate, useNavigate, useSearchParams} from "react-router";
 import {Button} from "@heroui/react";
 import {ApiError, api, session} from "../lib/api";
@@ -10,9 +10,19 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resendMessage, setResendMessage] = useState("");
+  const [resending, setResending] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [loading, setLoading] = useState(false);
   const [params] = useSearchParams();
   const justReset = params.get("reset") === "1";
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setInterval(() => setResendCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [resendCooldown]);
 
   if (session.token()) return <Navigate to="/dashboard" replace />;
 
@@ -20,6 +30,8 @@ export function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setNeedsVerification(false);
+    setResendMessage("");
     try {
       const r = await api<AuthPayload>("/auth/login", {
         method: "POST",
@@ -28,9 +40,31 @@ export function LoginPage() {
       session.save(r.data.access_token);
       navigate("/dashboard", {replace: true});
     } catch (c) {
-      setError(c instanceof ApiError ? c.message : "Nu ne-am putut conecta la server.");
+      if (c instanceof ApiError && c.problem.type?.endsWith("/email-not-verified")) {
+        setNeedsVerification(true);
+        setError("Contul nu este activat. Verifică emailul sau solicită un link nou.");
+      } else {
+        setError(c instanceof ApiError ? c.message : "Nu ne-am putut conecta la server.");
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const resend = async () => {
+    setResending(true);
+    setResendMessage("");
+    try {
+      const response = await api<{message: string}>("/auth/email/verification-notification", {
+        method: "POST",
+        body: JSON.stringify({email}),
+      });
+      setResendMessage(response.data.message);
+      setResendCooldown(60);
+    } catch {
+      setResendMessage("Nu am putut retrimite linkul. Încearcă din nou.");
+    } finally {
+      setResending(false);
     }
   };
 
@@ -76,6 +110,24 @@ export function LoginPage() {
             {error}
           </div>
         )}
+
+        {needsVerification ? (
+          <div className="mb-4">
+            <Button
+              type="button"
+              variant="outline"
+              fullWidth
+              isPending={resending}
+              isDisabled={resendCooldown > 0}
+              onPress={resend}
+            >
+              {resendCooldown > 0 ? `Poți retrimite în ${resendCooldown}s` : "Retrimite linkul de activare"}
+            </Button>
+            {resendMessage ? (
+              <p className="mt-2 text-[12.5px] text-[var(--text-muted)]">{resendMessage}</p>
+            ) : null}
+          </div>
+        ) : null}
 
         <Button type="submit" variant="primary" fullWidth isPending={loading}>
           Autentificare

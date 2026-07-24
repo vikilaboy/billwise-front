@@ -3,31 +3,20 @@ import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Chip, Input, Spinner, Switch} from "@heroui/react";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
-import {Hash, Plus, RotateCcw, Search, X} from "lucide-react";
+import {Hash, Pencil, Plus, RotateCcw, Search, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
 import {api, ApiError, listQuery} from "../lib/api";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
-// The API models `document_type` as a free-form string (max 50); only `invoice`
-// is used in practice. These are the document kinds the UI offers, with RO labels.
-type DocumentType = "invoice" | "proforma" | "storno" | "receipt";
+// Other document families require distinct legal flows. The current product
+// exposes only invoice series; corrections reference the original invoice.
+type DocumentType = "invoice";
 
 const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   invoice: "Factură",
-  proforma: "Proformă",
-  storno: "Storno",
-  credit_note: "Storno",
-  receipt: "Chitanță",
 };
-
-const DOCUMENT_TYPE_OPTIONS: {value: DocumentType; label: string}[] = [
-  {value: "invoice", label: "Factură"},
-  {value: "proforma", label: "Proformă"},
-  {value: "storno", label: "Storno"},
-  {value: "receipt", label: "Chitanță"},
-];
 
 // Shape of `InvoiceSeriesResource` (billwise-api).
 type Series = {
@@ -90,7 +79,7 @@ const FILTER_CONFIG = {
 export function InvoiceSeriesPage() {
   const {company} = useCompany();
   const queryClient = useQueryClient();
-  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Series | null | undefined>(undefined);
   const grid = useServerDataGridState<ActiveFilter>({
     defaultSort: DEFAULT_SORT,
     sortColumns: SORT_COLUMNS,
@@ -117,6 +106,10 @@ export function InvoiceSeriesPage() {
   });
 
   const rows = series.data?.data ?? [];
+  const remove = useMutation({
+    mutationFn: (id: string) => api<void>(`/companies/${company!.id}/invoice-series/${id}`, {method: "DELETE"}),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["invoice-series", company?.id]}),
+  });
   const columns = useMemo<DataGridColumn<Series>[]>(
     () => [
       {
@@ -178,6 +171,20 @@ export function InvoiceSeriesPage() {
           </Chip>
         ),
       },
+      {
+        id: "actions",
+        header: "Acțiuni",
+        align: "end",
+        minWidth: 120,
+        cell: (item) => (
+          <div className="flex justify-end gap-1">
+            <Button isIconOnly size="sm" variant="ghost" aria-label={`Editează ${item.name}`} onPress={() => setEditing(item)}><Pencil size={15} /></Button>
+            <Button isIconOnly size="sm" variant="ghost" aria-label={`Șterge ${item.name}`} onPress={() => {
+              if (window.confirm("Ștergi seria? Documentele deja emise nu vor fi modificate, iar API-ul va bloca ștergerea dacă seria este folosită.")) remove.mutate(item.id);
+            }}><Trash2 size={15} className="text-[var(--danger)]" /></Button>
+          </div>
+        ),
+      },
     ],
     [],
   );
@@ -210,7 +217,7 @@ export function InvoiceSeriesPage() {
             <RotateCcw size={15} /> Resetează
           </Button>
         </div>
-        <Button variant="primary" onPress={() => setModalOpen(true)}>
+        <Button variant="primary" onPress={() => setEditing(null)}>
           <Plus size={17} /> Serie nouă
         </Button>
       </div>
@@ -240,7 +247,7 @@ export function InvoiceSeriesPage() {
               </EmptyState.Description>
             </EmptyState.Header>
             <EmptyState.Content>
-              <Button variant="primary" onPress={() => setModalOpen(true)}>
+              <Button variant="primary" onPress={() => setEditing(null)}>
                 <Plus size={17} /> Serie nouă
               </Button>
             </EmptyState.Content>
@@ -260,13 +267,14 @@ export function InvoiceSeriesPage() {
         <DataTablePagination pagination={series.data?.meta?.pagination} onPageChange={grid.setPage} />
       </div>
 
-      {modalOpen && company?.id && (
+      {editing !== undefined && company?.id && (
         <SeriesModal
           companyId={company.id}
-          onClose={() => setModalOpen(false)}
+          series={editing}
+          onClose={() => setEditing(undefined)}
           onSaved={() => {
             queryClient.invalidateQueries({queryKey: ["invoice-series"]});
-            setModalOpen(false);
+            setEditing(undefined);
           }}
         />
       )}
@@ -276,19 +284,29 @@ export function InvoiceSeriesPage() {
 
 function SeriesModal({
   companyId,
+  series,
   onClose,
   onSaved,
 }: {
   companyId: string;
+  series: Series | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [form, setForm] = useState<FormState>(() => series ? {
+    name: series.name,
+    document_type: series.document_type as DocumentType,
+    prefix: series.prefix ?? "",
+    next_number: String(series.next_number),
+    padding: String(series.padding),
+    is_default: series.is_default,
+    is_active: series.is_active,
+  } : EMPTY_FORM);
 
   const mutation = useMutation({
     mutationFn: () =>
-      api<Series>(`/companies/${companyId}/invoice-series`, {
-        method: "POST",
+      api<Series>(`/companies/${companyId}/invoice-series${series ? `/${series.id}` : ""}`, {
+        method: series ? "PUT" : "POST",
         body: JSON.stringify({
           name: form.name,
           document_type: form.document_type,
@@ -318,7 +336,7 @@ function SeriesModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Serie nouă"
+      aria-label={series ? "Editează seria" : "Serie nouă"}
       onClick={onClose}
     >
       <div
@@ -326,7 +344,10 @@ function SeriesModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-          <h2 className="text-[15px] font-semibold text-[var(--text)]">Serie nouă</h2>
+          <div>
+            <h2 className="text-[15px] font-semibold text-[var(--text)]">{series ? "Editează seria" : "Serie nouă"}</h2>
+            {series ? <p className="mt-1 text-xs text-[var(--text-muted)]">Schimbarea nu rescrie numerele documentelor deja emise.</p> : null}
+          </div>
           <Button isIconOnly variant="ghost" size="sm" aria-label="Închide" onPress={onClose}>
             <X size={17} />
           </Button>
@@ -343,17 +364,9 @@ function SeriesModal({
           </Field>
 
           <Field label="Tip document" error={fieldErrors.document_type?.[0]}>
-            <select
-              value={form.document_type}
-              onChange={(e) => update("document_type", e.target.value as DocumentType)}
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--accent)]"
-            >
-              {DOCUMENT_TYPE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+            <div className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-[13px] text-[var(--text)]">
+              Factură
+            </div>
           </Field>
 
           <Field label="Prefix" error={fieldErrors.prefix?.[0]}>

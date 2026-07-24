@@ -1,14 +1,14 @@
-import {useMemo, useState} from "react";
+import {useEffect, useMemo, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Avatar, Button, Input, Spinner} from "@heroui/react";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
-import {Building2, Plus, RotateCcw, Search, X} from "lucide-react";
+import {Building2, Download, Pencil, Plus, RotateCcw, Search, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {ApiError, api, listQuery} from "../lib/api";
-import type {Customer} from "../lib/types";
+import {ApiError, api, downloadApiFile, listQuery} from "../lib/api";
+import type {BankAccount, Customer, Locality, State} from "../lib/types";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
 // ---------------------------------------------------------------------------
@@ -30,9 +30,14 @@ type FiscalEntity = {
 // form for parity + ANAF display until the nomenclature pickers land.
 type CreatePayload = {
   name: string;
+  email: string | null;
+  phone: string | null;
   tax_id: string | null;
   registration_number: string | null;
   is_vat_payer: boolean;
+  locale: "ro" | "en";
+  notes: string | null;
+  address: Record<string, string | null> | null;
 };
 
 function initials(name?: string | null): string {
@@ -66,7 +71,7 @@ const SORT_COLUMNS = ["name", "tax_id"] as const;
 export function CustomersPage() {
   const {company} = useCompany();
   const queryClient = useQueryClient();
-  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Customer | null | undefined>(undefined);
   const grid = useServerDataGridState({defaultSort: DEFAULT_SORT, sortColumns: SORT_COLUMNS});
 
   const customers = useQuery({
@@ -85,6 +90,10 @@ export function CustomersPage() {
   });
 
   const rows = customers.data?.data ?? [];
+  const remove = useMutation({
+    mutationFn: (id: string) => api<void>(`/companies/${company!.id}/customers/${id}`, {method: "DELETE"}),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["customers", company?.id]}),
+  });
   const columns = useMemo<DataGridColumn<Customer>[]>(
     () => [
       {
@@ -107,6 +116,20 @@ export function CustomersPage() {
       {id: "registration_number", header: "Reg. Com.", accessorKey: "registration_number", minWidth: 150},
       {id: "address", header: "Adresă", minWidth: 240, cell: oneLineAddress},
       {id: "email", header: "Email", accessorKey: "email", minWidth: 200},
+      {
+        id: "actions",
+        header: "Acțiuni",
+        align: "end",
+        minWidth: 120,
+        cell: (customer) => (
+          <div className="flex justify-end gap-1">
+            <Button isIconOnly size="sm" variant="ghost" aria-label={`Editează ${customer.name}`} onPress={() => setEditing(customer)}><Pencil size={15} /></Button>
+            <Button isIconOnly size="sm" variant="ghost" aria-label={`Șterge ${customer.name}`} onPress={() => {
+              if (window.confirm(`Ștergi clientul „${customer.name}”? Dacă există facturi, operația va fi blocată pentru păstrarea istoricului legal.`)) remove.mutate(customer.id);
+            }}><Trash2 size={15} className="text-[var(--danger)]" /></Button>
+          </div>
+        ),
+      },
     ],
     [],
   );
@@ -129,8 +152,17 @@ export function CustomersPage() {
             <RotateCcw size={15} /> Resetează
           </Button>
         </div>
-        <Button variant="primary" onPress={() => setModalOpen(true)}>
+        <Button variant="primary" onPress={() => setEditing(null)}>
           <Plus size={17} /> Adaugă firmă
+        </Button>
+        <Button variant="outline" onPress={() => void downloadApiFile(
+          `/companies/${company!.id}/customers/export${listQuery({
+            sort: grid.apiSort,
+            filter: grid.debouncedSearch ? {name: {contains: grid.debouncedSearch}} : undefined,
+          })}`,
+          "clienti.csv",
+        )}>
+          <Download size={16} /> Exportă CSV
         </Button>
       </div>
 
@@ -157,7 +189,7 @@ export function CustomersPage() {
               </EmptyState.Description>
             </EmptyState.Header>
             <EmptyState.Content>
-              <Button variant="primary" onPress={() => setModalOpen(true)}>
+              <Button variant="primary" onPress={() => setEditing(null)}>
                 <Plus size={17} /> Adaugă firmă
               </Button>
             </EmptyState.Content>
@@ -172,18 +204,20 @@ export function CustomersPage() {
             getRowId={(customer) => customer.id}
             sortDescriptor={grid.sort}
             onSortChange={grid.setSort}
+            onRowAction={(key) => setEditing(rows.find((customer) => customer.id === String(key)) ?? undefined)}
           />
         )}
         <DataTablePagination pagination={customers.data?.meta?.pagination} onPageChange={grid.setPage} />
       </div>
 
-      {modalOpen && company?.id ? (
+      {editing !== undefined && company?.id ? (
         <AddCustomerModal
           companyId={company.id}
-          onClose={() => setModalOpen(false)}
+          customer={editing}
+          onClose={() => setEditing(undefined)}
           onSuccess={() => {
             queryClient.invalidateQueries({queryKey: ["customers"]});
-            setModalOpen(false);
+            setEditing(undefined);
           }}
         />
       ) : null}
@@ -196,19 +230,64 @@ type FormState = {
   cui: string;
   name: string;
   registration_number: string;
-  locality: string;
+  email: string;
+  phone: string;
+  countryCode: string;
+  stateId: string;
+  localityId: string;
+  regionName: string;
+  cityName: string;
   street: string;
+  streetDetails: string;
+  postalCode: string;
   is_vat_payer: boolean;
+  locale: "ro" | "en";
+  notes: string;
+  bankAccountIds: string[];
 };
 
 const EMPTY_FORM: FormState = {
   cui: "",
   name: "",
   registration_number: "",
-  locality: "",
+  email: "",
+  phone: "",
+  countryCode: "RO",
+  stateId: "",
+  localityId: "",
+  regionName: "",
+  cityName: "",
   street: "",
+  streetDetails: "",
+  postalCode: "",
   is_vat_payer: false,
+  locale: "ro",
+  notes: "",
+  bankAccountIds: [],
 };
+
+function formFromCustomer(customer: Customer): FormState {
+  return {
+    ...EMPTY_FORM,
+    cui: customer.tax_id ?? "",
+    name: customer.name,
+    registration_number: customer.registration_number ?? "",
+    email: customer.email ?? "",
+    phone: customer.phone ?? "",
+    countryCode: customer.address?.country_code ?? "RO",
+    stateId: customer.address?.state_id ?? "",
+    localityId: customer.address?.locality_id ?? "",
+    regionName: customer.address?.region_name ?? "",
+    cityName: customer.address?.city_name ?? "",
+    street: customer.address?.street ?? "",
+    streetDetails: customer.address?.street_details ?? "",
+    postalCode: customer.address?.postal_code ?? "",
+    is_vat_payer: customer.is_vat_payer,
+    locale: customer.locale,
+    notes: customer.notes ?? "",
+    bankAccountIds: customer.bank_accounts?.map((account) => account.id) ?? [],
+  };
+}
 
 function fieldLabel(label: string, children: React.ReactNode, error?: string) {
   return (
@@ -222,16 +301,40 @@ function fieldLabel(label: string, children: React.ReactNode, error?: string) {
 
 function AddCustomerModal({
   companyId,
+  customer,
   onClose,
   onSuccess,
 }: {
   companyId: string;
+  customer: Customer | null;
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [form, setForm] = useState<FormState>(() => customer ? formFromCustomer(customer) : EMPTY_FORM);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [lookupError, setLookupError] = useState<string | null>(null);
+  const detail = useQuery({
+    queryKey: ["customer", companyId, customer?.id],
+    queryFn: () => api<Customer>(`/companies/${companyId}/customers/${customer!.id}`),
+    enabled: Boolean(customer?.id),
+  });
+  const bankAccounts = useQuery({
+    queryKey: ["bank-accounts", companyId, "customer-form"],
+    queryFn: () => api<BankAccount[]>(`/companies/${companyId}/bank-accounts?_per_page=100&_sort=position`),
+  });
+  const states = useQuery({
+    queryKey: ["states", "RO"],
+    queryFn: () => api<State[]>(`/states${listQuery({perPage: 100, sort: "name", filter: {country_code: {eq: "RO"}}})}`),
+  });
+  const localities = useQuery({
+    queryKey: ["localities", form.stateId],
+    queryFn: () => api<Locality[]>(`/localities${listQuery({perPage: 100, sort: "name", filter: {state_id: {eq: form.stateId}}})}`),
+    enabled: form.countryCode === "RO" && Boolean(form.stateId),
+  });
+
+  useEffect(() => {
+    if (detail.data?.data) setForm(formFromCustomer(detail.data.data));
+  }, [detail.data]);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({...prev, [key]: value}));
@@ -253,11 +356,17 @@ function AddCustomerModal({
   });
 
   const create = useMutation({
-    mutationFn: (payload: CreatePayload) =>
-      api<Customer>(`/companies/${companyId}/customers`, {
-        method: "POST",
+    mutationFn: async (payload: CreatePayload) => {
+      const result = await api<Customer>(`/companies/${companyId}/customers${customer ? `/${customer.id}` : ""}`, {
+        method: customer ? "PUT" : "POST",
         body: JSON.stringify(payload),
-      }),
+      });
+      await api<void>(`/companies/${companyId}/customers/${result.data.id}/bank-accounts`, {
+        method: "PUT",
+        body: JSON.stringify({bank_account_ids: form.bankAccountIds}),
+      });
+      return result;
+    },
     onSuccess,
     onError: (error) => {
       if (error instanceof ApiError && error.problem.errors) setFieldErrors(error.problem.errors);
@@ -277,9 +386,23 @@ function AddCustomerModal({
     setFieldErrors({});
     create.mutate({
       name: form.name.trim(),
+      email: form.email.trim() || null,
+      phone: form.phone.trim() || null,
       tax_id: form.cui.trim() || null,
       registration_number: form.registration_number.trim() || null,
       is_vat_payer: form.is_vat_payer,
+      locale: form.locale,
+      notes: form.notes.trim() || null,
+      address: form.street.trim() ? {
+        country_code: form.countryCode,
+        state_id: form.countryCode === "RO" ? form.stateId : null,
+        locality_id: form.countryCode === "RO" ? form.localityId : null,
+        region_name: form.countryCode === "RO" ? null : form.regionName.trim() || null,
+        city_name: form.countryCode === "RO" ? null : form.cityName.trim() || null,
+        street: form.street.trim(),
+        street_details: form.streetDetails.trim() || null,
+        postal_code: form.postalCode.trim() || null,
+      } : null,
     });
   }
 
@@ -291,7 +414,7 @@ function AddCustomerModal({
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/45 p-4 sm:items-center"
       role="dialog"
       aria-modal="true"
-      aria-label="Adaugă firmă nouă"
+      aria-label={customer ? "Editează clientul" : "Adaugă client nou"}
       onClick={onClose}
     >
       <div
@@ -301,8 +424,8 @@ function AddCustomerModal({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--border)] px-6 py-4">
           <div>
-            <div className="text-[16px] font-bold tracking-tight text-[var(--text)]">Adaugă firmă nouă</div>
-            <div className="text-[12.5px] text-[var(--text-muted)]">Preia datele din registrul ANAF sau completează manual.</div>
+            <div className="text-[16px] font-bold tracking-tight text-[var(--text)]">{customer ? "Editează clientul" : "Adaugă client nou"}</div>
+            <div className="text-[12.5px] text-[var(--text-muted)]">Date fiscale, adresă, limbă și conturile afișate pe factură.</div>
           </div>
           <Button isIconOnly variant="outline" size="sm" aria-label="Închide" onPress={onClose}>
             <X size={17} />
@@ -358,22 +481,76 @@ function AddCustomerModal({
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {fieldLabel(
-              "Localitate",
-              <Input
-                className={inputCls}
-                placeholder="București"
-                value={form.locality}
-                onChange={(e) => set("locality", e.target.value)}
-              />,
+              "Țară",
+              <select className={inputCls} value={form.countryCode} onChange={(event) => set("countryCode", event.target.value.toUpperCase())}>
+                <option value="RO">România</option>
+                <option value="DE">Germania</option>
+                <option value="FR">Franța</option>
+                <option value="GB">Regatul Unit</option>
+                <option value="US">Statele Unite</option>
+              </select>,
             )}
             {fieldLabel(
-              "Adresă",
+              "Limba implicită a facturii",
+              <select aria-label="Limba implicită a facturii" value={form.locale} onChange={(event) => set("locale", event.target.value as "ro" | "en")} className={inputCls}>
+                <option value="ro">Română</option>
+                <option value="en">Română + Engleză</option>
+              </select>,
+            )}
+            {form.countryCode === "RO" ? fieldLabel(
+              "Județ",
+              <select className={inputCls} value={form.stateId} onChange={(event) => {
+                set("stateId", event.target.value);
+                set("localityId", "");
+              }}>
+                <option value="">Selectează județul</option>
+                {(states.data?.data ?? []).map((state) => <option key={state.id} value={state.id}>{state.name}</option>)}
+              </select>,
+              fieldErrors["address.state_id"]?.[0],
+            ) : fieldLabel(
+              "Stat / regiune",
+              <Input
+                className={inputCls}
+                value={form.regionName}
+                onChange={(e) => set("regionName", e.target.value)}
+              />,
+            )}
+            {form.countryCode === "RO" ? fieldLabel(
+              "Localitate",
+              <select className={inputCls} value={form.localityId} disabled={!form.stateId || localities.isLoading} onChange={(event) => set("localityId", event.target.value)}>
+                <option value="">Selectează localitatea</option>
+                {(localities.data?.data ?? []).map((locality) => <option key={locality.id} value={locality.id}>{locality.name}</option>)}
+              </select>,
+              fieldErrors["address.locality_id"]?.[0],
+            ) : fieldLabel(
+              "Localitate",
+              <Input className={inputCls} value={form.cityName} onChange={(event) => set("cityName", event.target.value)} />,
+            )}
+            {fieldLabel(
+              "Stradă și număr",
               <Input
                 className={inputCls}
                 placeholder="Str. Exemplu nr. 1"
                 value={form.street}
                 onChange={(e) => set("street", e.target.value)}
               />,
+              fieldErrors["address.street"]?.[0],
+            )}
+            {fieldLabel(
+              "Detalii adresă",
+              <Input className={inputCls} placeholder="Bloc, scară, etaj" value={form.streetDetails} onChange={(e) => set("streetDetails", e.target.value)} />,
+            )}
+            {fieldLabel(
+              "Cod poștal",
+              <Input className={inputCls} value={form.postalCode} onChange={(e) => set("postalCode", e.target.value)} />,
+            )}
+            {fieldLabel(
+              "Email",
+              <Input className={inputCls} type="email" value={form.email} onChange={(e) => set("email", e.target.value)} />,
+            )}
+            {fieldLabel(
+              "Telefon",
+              <Input className={inputCls} type="tel" value={form.phone} onChange={(e) => set("phone", e.target.value)} />,
             )}
           </div>
 
@@ -386,6 +563,45 @@ function AddCustomerModal({
             />
             <span className="text-[13px] font-medium text-[var(--text)]">Plătitor de TVA</span>
           </label>
+
+          <div>
+            <div className="text-[12.5px] font-semibold text-[var(--text-muted)]">Conturi ale emitentului afișate clientului</div>
+            <div className="mt-2 grid gap-2">
+              {(bankAccounts.data?.data ?? []).map((account) => (
+                <label key={account.id} className="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.bankAccountIds.includes(account.id)}
+                    onChange={(event) => set("bankAccountIds", event.target.checked
+                      ? [...form.bankAccountIds, account.id]
+                      : form.bankAccountIds.filter((id) => id !== account.id))}
+                  />
+                  {account.bank_name || account.scheme} · {account.iban || account.account_number}
+                </label>
+              ))}
+              {!bankAccounts.isLoading && (bankAccounts.data?.data ?? []).length === 0 ? <p className="text-xs text-[var(--text-muted)]">Nu există conturi bancare configurate.</p> : null}
+            </div>
+          </div>
+
+          {fieldLabel(
+            "Notițe interne",
+            <textarea className="min-h-20 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={form.notes} onChange={(event) => set("notes", event.target.value)} />,
+          )}
+
+          {customer && (detail.data?.data.recent_invoices?.length ?? 0) > 0 ? (
+            <div>
+              <div className="text-[12.5px] font-semibold text-[var(--text-muted)]">Facturi recente</div>
+              <div className="mt-2 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
+                {detail.data!.data.recent_invoices!.map((invoice) => (
+                  <div key={invoice.id} className="flex justify-between gap-3 px-3 py-2 text-xs">
+                    <span className="font-semibold">{invoice.formatted_number}</span>
+                    <span>{invoice.issue_date ?? "—"}</span>
+                    <span>{(invoice.total_cents / 100).toLocaleString("ro-RO", {minimumFractionDigits: 2})} {invoice.currency}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {create.isError && !(create.error instanceof ApiError && create.error.problem.errors) ? (
             <div className="rounded-lg bg-[var(--danger-soft,var(--bg-muted))] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
@@ -401,7 +617,7 @@ function AddCustomerModal({
           </Button>
           <Button variant="primary" onPress={submit} isDisabled={create.isPending || !form.name.trim()}>
             {create.isPending ? <Spinner size="sm" /> : null}
-            Salvează firma
+            Salvează clientul
           </Button>
         </div>
       </div>

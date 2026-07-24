@@ -1,10 +1,11 @@
 import {useEffect, useMemo, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner, Switch} from "@heroui/react";
-import {Building2, Check, Globe, Landmark, MapPin} from "lucide-react";
+import {useNavigate, useSearchParams} from "react-router";
+import {Building2, Check, Globe, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {api, ApiError} from "../lib/api";
-import type {Address, CompanyProfile} from "../lib/types";
+import type {Address, CompanyProfile, Currency, SpvAuthorize, SpvConnection} from "../lib/types";
 
 // Editable shape mirrors PUT /companies/{companyProfile} (UpdateCompanyProfileRequest).
 // The nested `address` requires RO nomenclature (state_id/locality_id) which this
@@ -21,7 +22,6 @@ type FormState = {
   street: string;
 };
 
-const AUTO_EFACTURA_KEY = "billwise_auto_efactura";
 const THEME_KEY = "billwise_theme";
 
 function emptyForm(): FormState {
@@ -110,6 +110,9 @@ function Field({
 export function SettingsPage() {
   const {company} = useCompany();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [spvFeedback] = useState(() => searchParams.get("spv"));
 
   const profileQuery = useQuery({
     queryKey: ["company", company?.id],
@@ -118,13 +121,80 @@ export function SettingsPage() {
   });
 
   const profile = profileQuery.data?.data;
+  const archivedCompaniesQuery = useQuery({
+    queryKey: ["companies", "archived"],
+    queryFn: () => api<CompanyProfile[]>("/companies?include_archived=1"),
+  });
+  const archivedCompanies = (archivedCompaniesQuery.data?.data ?? []).filter((item) => item.archived_at !== null);
+  const spvQuery = useQuery({
+    queryKey: ["spv-connection", company?.id],
+    queryFn: () => api<SpvConnection>(`/efactura/spv/connection?company_profile_id=${company!.id}`),
+    enabled: Boolean(company?.id),
+  });
+  const currenciesQuery = useQuery({
+    queryKey: ["currencies"],
+    queryFn: () => api<Currency[]>("/settings/currencies?_per_page=100&_sort=code"),
+  });
+  const currencyMutation = useMutation({
+    mutationFn: (currency: Currency) =>
+      api<Currency>(`/settings/currencies/${currency.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          code: currency.code,
+          name: currency.name,
+          symbol: currency.symbol,
+          auto_update: currency.auto_update,
+          is_local: currency.is_local,
+          is_active: currency.is_active,
+        }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["currencies"]}),
+  });
+
+  const connectMutation = useMutation({
+    mutationFn: () => api<SpvAuthorize>(`/efactura/spv/authorize?company_profile_id=${company!.id}`),
+    onSuccess: ({data}) => window.location.assign(data.authorize_url),
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: () =>
+      api<void>(`/efactura/spv/connection?company_profile_id=${company!.id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["spv-connection", company?.id]}),
+  });
+  const archiveMutation = useMutation({
+    mutationFn: () => api<void>(`/companies/${company!.id}`, {method: "DELETE"}),
+    onSuccess: async () => {
+      localStorage.removeItem("billwise_active_company_id");
+      await queryClient.invalidateQueries({queryKey: ["companies"]});
+      navigate("/dashboard", {replace: true});
+    },
+  });
+  const restoreMutation = useMutation({
+    mutationFn: (companyId: string) =>
+      api<CompanyProfile>(`/companies/${companyId}/restore`, {method: "POST"}),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({queryKey: ["companies"]}),
+        queryClient.invalidateQueries({queryKey: ["companies", "archived"]}),
+      ]);
+    },
+  });
+
+  useEffect(() => {
+    if (!spvFeedback) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("spv");
+    setSearchParams(next, {replace: true});
+    void queryClient.invalidateQueries({queryKey: ["spv-connection", company?.id]});
+  }, [company?.id, queryClient, searchParams, setSearchParams, spvFeedback]);
 
   const [form, setForm] = useState<FormState>(emptyForm);
   const [justSaved, setJustSaved] = useState(false);
 
-  // Preferences (local-only, no API).
+  // Theme is a device-local display preference.
   const [darkTheme, setDarkTheme] = useState(() => localStorage.getItem(THEME_KEY) === "dark");
-  const [autoEfactura, setAutoEfactura] = useState(() => localStorage.getItem(AUTO_EFACTURA_KEY) === "true");
 
   // Hydrate the form once the profile loads (or the active company changes).
   useEffect(() => {
@@ -170,11 +240,6 @@ export function SettingsPage() {
     setDarkTheme(checked);
     document.documentElement.classList.toggle("dark", checked);
     localStorage.setItem(THEME_KEY, checked ? "dark" : "light");
-  }
-
-  function handleAutoEfacturaChange(checked: boolean) {
-    setAutoEfactura(checked);
-    localStorage.setItem(AUTO_EFACTURA_KEY, checked ? "true" : "false");
   }
 
   function handleSave() {
@@ -364,9 +429,65 @@ export function SettingsPage() {
             </span>
           ) : null}
         </div>
+        <div className="mt-5 border-t border-[var(--border)] pt-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[13.5px] font-semibold">Arhivează firma</div>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                Doar firmele fără istoric de facturare pot fi arhivate. Recurențele active vor fi pauzate, iar firma poate fi restaurată ulterior.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              isDisabled={archiveMutation.isPending}
+              onPress={() => {
+                if (window.confirm(`Arhivezi firma „${profile.legal_name}”? Datele istorice nu vor fi șterse.`)) archiveMutation.mutate();
+              }}
+            >
+              <Trash2 size={14} /> Arhivează
+            </Button>
+          </div>
+          {archiveMutation.isError ? (
+            <p role="alert" className="mt-3 text-xs font-medium text-[var(--danger)]">
+              {archiveMutation.error instanceof ApiError
+                ? archiveMutation.error.problem.detail ?? archiveMutation.error.problem.title
+                : "Firma nu a putut fi arhivată."}
+            </p>
+          ) : null}
+          {archivedCompanies.length > 0 ? (
+            <div className="mt-4 border-t border-[var(--border)] pt-4">
+              <div className="text-[13px] font-semibold">Firme arhivate</div>
+              <div className="mt-2 flex flex-col gap-2">
+                {archivedCompanies.map((archived) => (
+                  <div key={archived.id} className="flex items-center justify-between gap-3 rounded-xl bg-[var(--bg-muted)] px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-[13px] font-medium">{archived.legal_name}</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">{archived.tax_id ?? "Fără CUI"}</div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      isDisabled={restoreMutation.isPending}
+                      onPress={() => restoreMutation.mutate(archived.id)}
+                    >
+                      <RefreshCw size={13} /> Restaurează
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              {restoreMutation.isError ? (
+                <p role="alert" className="mt-3 text-xs font-medium text-[var(--danger)]">
+                  Firma nu a putut fi restaurată.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </section>
 
       {/* Card 2 — preferences */}
+      <div className="flex flex-col gap-4">
       <section className={cardClass}>
         <header className="mb-5 flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
@@ -397,19 +518,135 @@ export function SettingsPage() {
             </span>
           </div>
 
-          <div className="flex items-center justify-between gap-4 py-3.5 last:pb-0">
-            <div>
-              <div className="text-[13.5px] font-semibold">Depunere automată e-Factura</div>
-              <div className="text-[12px] text-[var(--text-muted)]">Trimite în SPV la emitere</div>
-            </div>
-            <Toggle
-              isSelected={autoEfactura}
-              onChange={handleAutoEfacturaChange}
-              label="Depunere automată e-Factura"
-            />
-          </div>
         </div>
       </section>
+
+      <section className={cardClass}>
+        <header className="mb-4 flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
+            <Link2 size={18} />
+          </span>
+          <div>
+            <h2 className="text-[15px] font-bold tracking-tight">Conexiune ANAF SPV</h2>
+            <p className="text-[12.5px] text-[var(--text-muted)]">Configurată pentru firma selectată</p>
+          </div>
+        </header>
+
+        {spvFeedback === "connected" ? (
+          <p role="status" className="mb-3 rounded-lg bg-[var(--success-soft)] px-3 py-2 text-[12.5px] font-medium text-[var(--success)]">
+            Conexiunea SPV a fost realizată.
+          </p>
+        ) : null}
+        {spvFeedback === "error" ? (
+          <p role="alert" className="mb-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
+            Conectarea SPV nu a reușit. Încearcă din nou.
+          </p>
+        ) : null}
+
+        {spvQuery.isLoading ? (
+          <div className="flex items-center gap-2 text-[13px] text-[var(--text-muted)]"><Spinner size="sm" /> Verificăm conexiunea…</div>
+        ) : spvQuery.isError ? (
+          <div className="space-y-3">
+            <p className="text-[12.5px] text-[var(--danger)]">Starea conexiunii nu a putut fi verificată.</p>
+            <Button size="sm" variant="outline" onPress={() => spvQuery.refetch()}><RefreshCw size={14} /> Reîncearcă</Button>
+          </div>
+        ) : (() => {
+          const connection = spvQuery.data?.data;
+          const expired = Boolean(connection?.expires_at && new Date(connection.expires_at) <= new Date());
+          if (connection?.connected && !expired) {
+            return (
+              <div>
+                <div className="flex items-center gap-2 text-[13.5px] font-semibold text-[var(--success)]">
+                  <Check size={16} /> Conectat
+                </div>
+                <p className="mt-1 text-[12px] text-[var(--text-muted)]">
+                  {connection.expires_at ? `Token valabil până la ${new Date(connection.expires_at).toLocaleString("ro-RO")}.` : "Conexiune activă."}
+                </p>
+                <Button
+                  className="mt-4"
+                  size="sm"
+                  variant="outline"
+                  isDisabled={disconnectMutation.isPending}
+                  onPress={() => {
+                    if (window.confirm("Deconectezi firma selectată de la ANAF SPV?")) disconnectMutation.mutate();
+                  }}
+                >
+                  <Link2Off size={14} /> Deconectează
+                </Button>
+              </div>
+            );
+          }
+          return (
+            <div>
+              <p className="text-[12.5px] text-[var(--text-muted)]">
+                {expired ? "Tokenul SPV a expirat. Reconectează firma pentru a continua." : "Firma selectată nu este conectată la ANAF SPV."}
+              </p>
+              <Button
+                className="mt-4"
+                size="sm"
+                variant="primary"
+                isDisabled={connectMutation.isPending}
+                onPress={() => connectMutation.mutate()}
+              >
+                {connectMutation.isPending ? <Spinner size="sm" /> : <Link2 size={14} />}
+                {expired ? "Reconectează" : "Conectează SPV"}
+              </Button>
+            </div>
+          );
+        })()}
+
+        {connectMutation.isError || disconnectMutation.isError ? (
+          <p role="alert" className="mt-3 text-[12.5px] font-medium text-[var(--danger)]">
+            Operația SPV nu a putut fi finalizată.
+          </p>
+        ) : null}
+      </section>
+
+      <section className={cardClass}>
+        <header className="mb-4">
+          <h2 className="text-[15px] font-bold tracking-tight">Monede</h2>
+          <p className="text-[12.5px] text-[var(--text-muted)]">Configurare la nivelul întregului cont</p>
+        </header>
+        {currenciesQuery.isLoading ? <Spinner size="sm" /> : currenciesQuery.isError ? (
+          <p className="text-sm text-[var(--danger)]">Monedele nu au putut fi încărcate.</p>
+        ) : (
+          <div className="divide-y divide-[var(--border)]">
+            {(currenciesQuery.data?.data ?? []).map((currency) => (
+              <div key={currency.id} className="py-3 first:pt-0">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[13.5px] font-semibold">{currency.code} · {currency.name}</div>
+                    <div className="text-[11.5px] text-[var(--text-muted)]">
+                      {currency.is_local ? "Monedă locală" : currency.latest_rate ? `Ultimul curs: ${currency.latest_rate.rate} · ${currency.latest_rate.day}` : "Fără curs disponibil"}
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={currency.is_active}
+                      disabled={currencyMutation.isPending || currency.is_local}
+                      onChange={(event) => currencyMutation.mutate({...currency, is_active: event.target.checked})}
+                    />
+                    Activă
+                  </label>
+                </div>
+                {!currency.is_local ? (
+                  <label className="mt-2 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                    <input
+                      type="checkbox"
+                      checked={currency.auto_update}
+                      disabled={currencyMutation.isPending}
+                      onChange={(event) => currencyMutation.mutate({...currency, auto_update: event.target.checked})}
+                    />
+                    Actualizare automată BNR
+                  </label>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+      </div>
     </div>
   );
 }

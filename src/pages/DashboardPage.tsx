@@ -1,13 +1,13 @@
 import {useMemo} from "react";
-import {useNavigate} from "react-router";
+import {useNavigate, useSearchParams} from "react-router";
 import {useQuery} from "@tanstack/react-query";
 import {Button, Card, Chip, Spinner} from "@heroui/react";
 import {KPI} from "@heroui-pro/react/kpi";
 import {BarChart} from "@heroui-pro/react/bar-chart";
-import {AlertTriangle, ArrowRight, Check, Clock, FileText, TrendingUp} from "lucide-react";
+import {AlertTriangle, ArrowRight, CheckCircle2, Clock, FileText, TrendingUp} from "lucide-react";
 import {useCompany} from "../components/AppShell";
-import {api, listQuery} from "../lib/api";
-import type {Invoice} from "../lib/types";
+import {api} from "../lib/api";
+import type {DashboardSummary, Invoice} from "../lib/types";
 import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
 
 // ---------------------------------------------------------------------------
@@ -27,39 +27,15 @@ function ronCents(inv: Invoice): number {
   return inv.total_cents_ron ?? inv.total_cents;
 }
 
-// Parse a "YYYY-MM-DD" prefix into a UTC timestamp, ignoring time/zone noise.
-function dateMs(value: string | null): number | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value ?? "");
-  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
-}
-
-// Parse the calendar year/month (0-based) from a "YYYY-MM-DD" prefix.
-function yearMonth(value: string | null): {y: number; m: number} | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value ?? "");
-  return m ? {y: Number(m[1]), m: Number(m[2]) - 1} : null;
-}
-
-const isIssued = (inv: Invoice): boolean => inv.status === "issued";
-const isDraft = (inv: Invoice): boolean => inv.status === "draft";
-const isOverdue = (inv: Invoice, today: Date): boolean => displayStatus(inv, today) === "overdue";
-
-function sumRon(invoices: Invoice[]): number {
-  return invoices.reduce((acc, inv) => acc + ronCents(inv), 0);
-}
-
-// Issued RON totals bucketed into the last `weeks` weekly windows ending today.
-function weeklySpark(issued: Invoice[], today: Date, weeks = 8): SparkPoint[] {
-  const week = 7 * 24 * 3600 * 1000;
-  const now = today.getTime();
-  const buckets = Array.from({length: weeks}, () => 0);
-  for (const inv of issued) {
-    const t = dateMs(inv.issue_date);
-    if (t == null) continue;
-    const diff = Math.floor((now - t) / week);
-    if (diff >= 0 && diff < weeks) buckets[weeks - 1 - diff] += ronCents(inv) / 100;
+export function balanceRonCents(inv: Invoice): number {
+  if (inv.balance_cents <= 0) return 0;
+  if (inv.total_cents_ron != null && inv.total_cents > 0) {
+    return Math.round((inv.balance_cents * inv.total_cents_ron) / inv.total_cents);
   }
-  return buckets.map((v) => ({value: Math.round(v)}));
+  return inv.balance_cents;
 }
+
+export const isOverdue = (inv: Invoice): boolean => inv.payment_status === "overdue";
 
 // Running sum of a weekly series — a monotonic sparkline for cumulative KPIs.
 function cumulative(series: SparkPoint[]): SparkPoint[] {
@@ -67,111 +43,66 @@ function cumulative(series: SparkPoint[]): SparkPoint[] {
   return series.map((p) => ({value: (acc += p.value)}));
 }
 
-// Issued RON totals grouped by calendar month for the last `count` months (in thousands RON).
-function monthlyRevenue(issued: Invoice[], today: Date, count = 6): MonthPoint[] {
-  const y = today.getFullYear();
-  const mo = today.getMonth();
-  const out: MonthPoint[] = [];
-  for (let i = count - 1; i >= 0; i--) {
-    const d = new Date(y, mo - i, 1);
-    const dy = d.getFullYear();
-    const dm = d.getMonth();
-    let sum = 0;
-    for (const inv of issued) {
-      const ym = yearMonth(inv.issue_date);
-      if (ym && ym.y === dy && ym.m === dm) sum += ronCents(inv);
-    }
-    out.push({month: RO_MONTHS[dm], value: Math.round(sum / 100 / 1000)});
-  }
-  return out;
-}
-
-function monthTotal(issued: Invoice[], y: number, m: number): number {
-  let sum = 0;
-  for (const inv of issued) {
-    const ym = yearMonth(inv.issue_date);
-    if (ym && ym.y === y && ym.m === m) sum += ronCents(inv);
-  }
-  return sum;
-}
-
 // ---------------------------------------------------------------------------
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const {company} = useCompany();
 
-  const invoicesQuery = useQuery({
-    queryKey: ["invoices", company?.id, "dashboard"],
-    queryFn: () =>
-      api<Invoice[]>(`/companies/${company!.id}/invoices${listQuery({perPage: 100, sort: "-issue_date"})}`),
+  const dashboardQuery = useQuery({
+    queryKey: ["dashboard", company?.id],
+    queryFn: () => api<DashboardSummary>(`/companies/${company!.id}/dashboard`),
     enabled: Boolean(company?.id),
   });
 
-  const invoices = useMemo<Invoice[]>(() => invoicesQuery.data?.data ?? [], [invoicesQuery.data]);
+  const summary = dashboardQuery.data?.data;
 
   const model = useMemo(() => {
-    const today = new Date();
-    const curY = today.getFullYear();
-    const curM = today.getMonth();
-
-    const issued = invoices.filter(isIssued);
-    const overdue = issued.filter((inv) => isOverdue(inv, today));
-    const outstanding = issued.filter((inv) => !isOverdue(inv, today));
-    const drafts = invoices.filter(isDraft);
-    const issuedThisMonth = issued.filter((inv) => {
-      const ym = yearMonth(inv.issue_date);
-      return ym != null && ym.y === curY && ym.m === curM;
-    });
-
-    // KPI figures (all RON cents).
-    const billedThisMonth = sumRon(issuedThisMonth);
-    const totalBilled = sumRon(issued);
-    const toCollect = sumRon(outstanding);
-    const overdueAmount = sumRon(overdue);
-
-    // Real month-over-month growth for "Facturat luna aceasta".
-    const prev = new Date(curY, curM - 1, 1);
-    const billedPrevMonth = monthTotal(issued, prev.getFullYear(), prev.getMonth());
+    const billedThisMonth = summary?.billed_this_month_ron_cents ?? 0;
+    const billedPrevMonth = summary?.previous_month_invoiced_ron_cents ?? 0;
     const momPct = billedPrevMonth > 0 ? Math.round(((billedThisMonth - billedPrevMonth) / billedPrevMonth) * 100) : null;
-
-    // Real overdue share of everything billed — signals the "Restant" danger trend.
-    const overduePct = totalBilled > 0 ? Math.round((overdueAmount / totalBilled) * 100) : null;
-
-    // Real year-over-year delta for the revenue chart (same month, previous year).
-    const lastYearMonth = monthTotal(issued, curY - 1, curM);
+    const toCollect = summary?.balance_ron_cents ?? 0;
+    const overdueAmount = summary?.overdue_balance_ron_cents ?? 0;
+    const overduePct = toCollect > 0 ? Math.round((overdueAmount / toCollect) * 100) : null;
+    const lastYearMonth = summary?.same_month_last_year_invoiced_ron_cents ?? 0;
     const yoyPct = lastYearMonth > 0 ? Math.round(((billedThisMonth - lastYearMonth) / lastYearMonth) * 100) : null;
-
-    const spark = weeklySpark(issued, today);
-    const overdueSpark = weeklySpark(overdue, today);
+    const spark: SparkPoint[] = (summary?.weekly_invoiced_ron_cents ?? []).map((value) => ({
+      value: Math.round(value / 100),
+    }));
+    const overdueSpark: SparkPoint[] = (summary?.weekly_overdue_balance_ron_cents ?? []).map((value) => ({
+      value: Math.round(value / 100),
+    }));
 
     const buckets: Bucket[] = [
-      {key: "in-termen", label: "În termen", value: toCollect, color: "var(--success)", dot: "var(--success)"},
+      {key: "in-termen", label: "În termen", value: summary?.outstanding_balance_ron_cents ?? 0, color: "var(--success)", dot: "var(--success)"},
       {key: "restante", label: "Restante", value: overdueAmount, color: "var(--danger)", dot: "var(--danger)"},
-      {key: "ciorne", label: "Ciorne", value: sumRon(drafts), color: "var(--warning)", dot: "var(--warning)"},
+      {key: "ciorne", label: "Ciorne", value: summary?.draft_total_ron_cents ?? 0, color: "var(--warning)", dot: "var(--warning)"},
     ];
 
     return {
       billedThisMonth,
-      totalBilled,
+      totalBilled: summary?.total_invoiced_ron_cents ?? 0,
       toCollect,
       overdueAmount,
-      issuedThisMonthCount: issuedThisMonth.length,
-      outstandingCount: outstanding.length,
+      issuedThisMonthCount: summary?.issued_this_month_count ?? 0,
+      outstandingCount: summary?.outstanding_count ?? 0,
       momPct,
       overduePct,
       yoyPct,
       spark,
       cumulativeSpark: cumulative(spark),
       overdueSpark,
-      monthly: monthlyRevenue(issued, today),
+      monthly: (summary?.monthly_invoiced_ron_cents ?? []).map(({month, total_ron_cents}): MonthPoint => ({
+        month: RO_MONTHS[Number(month.slice(5, 7)) - 1] ?? month,
+        value: Math.round(total_ron_cents / 100 / 1000),
+      })),
       buckets,
       bucketTotal: buckets.reduce((acc, b) => acc + b.value, 0),
-      recent: invoices.slice(0, 5),
     };
-  }, [invoices]);
+  }, [summary]);
 
-  if (invoicesQuery.isLoading) {
+  if (dashboardQuery.isLoading) {
     return (
       <div className="flex items-center justify-center gap-3 py-24 text-sm text-[var(--text-muted)]">
         <Spinner size="sm" /> Se încarcă datele…
@@ -179,7 +110,7 @@ export function DashboardPage() {
     );
   }
 
-  if (invoicesQuery.isError) {
+  if (dashboardQuery.isError) {
     return (
       <div className="rounded-2xl border border-[var(--danger)] bg-[var(--danger-soft)] px-5 py-4 text-sm font-medium text-[var(--danger)]">
         Datele nu au putut fi încărcate.
@@ -193,9 +124,35 @@ export function DashboardPage() {
     letterSpacing: "-0.02em",
     fontVariantNumeric: "tabular-nums",
   };
+  const recent = summary?.recent_invoices ?? [];
 
   return (
     <div className="flex flex-col gap-4">
+      {searchParams.get("onboarding") === "complete" ? (
+        <section className="rounded-2xl border border-[var(--success)]/30 bg-[var(--success-soft)] p-5">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 size={21} className="mt-0.5 shrink-0 text-[var(--success)]" />
+            <div>
+              <h2 className="font-bold text-[var(--success)]">Firma este configurată</h2>
+              <p className="mt-1 text-sm text-[var(--text-muted)]">
+                Poți continua cu pașii neblocanți de mai jos.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onPress={() => navigate("/serii")}>
+                  Configurează seria
+                </Button>
+                <Button size="sm" variant="outline" onPress={() => navigate("/conturi")}>
+                  Adaugă un cont bancar
+                </Button>
+                <span className="inline-flex items-center rounded-lg border border-[var(--border)] px-3 text-xs text-[var(--text-muted)]">
+                  Conectarea SPV urmează în setările integrării
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       {/* 1. KPI grid ------------------------------------------------------ */}
       <section
         style={{display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 16}}
@@ -229,8 +186,8 @@ export function DashboardPage() {
             <KPI.Title className="text-[13px] text-[var(--text-muted)]">Total facturat</KPI.Title>
           </KPI.Header>
           <KPI.Content className="mt-3 flex flex-col gap-1">
-            <span style={kpiValueStyle}>{money(model.totalBilled)}</span>
-            <span className="text-xs text-[var(--text-muted)]">de la începutul anului</span>
+              <span style={kpiValueStyle}>{money(model.totalBilled)}</span>
+            <span className="text-xs text-[var(--text-muted)]">total emis</span>
           </KPI.Content>
           <KPI.Chart data={model.cumulativeSpark} color="var(--accent)" height={40} />
         </KPI>
@@ -244,7 +201,7 @@ export function DashboardPage() {
           </KPI.Header>
           <KPI.Content className="mt-3 flex flex-col gap-1">
             <span style={kpiValueStyle}>{money(model.toCollect)}</span>
-            <span className="text-xs text-[var(--text-muted)]">{model.outstandingCount} deschise</span>
+            <span className="text-xs text-[var(--text-muted)]">sold deschis</span>
           </KPI.Content>
           <KPI.Chart data={model.spark} color="var(--warning)" height={40} />
         </KPI>
@@ -258,14 +215,14 @@ export function DashboardPage() {
           </KPI.Header>
           <KPI.Content className="mt-3 flex flex-col gap-1">
             <div className="flex items-center gap-2">
-              <span style={kpiValueStyle}>{money(model.overdueAmount)}</span>
+              <span style={kpiValueStyle}>{summary?.overdue_count ?? 0}</span>
               {model.overduePct != null && (
                 <KPI.Trend trend="down" size="sm">
                   {`${model.overduePct}%`}
                 </KPI.Trend>
               )}
             </div>
-            <span className="text-xs text-[var(--text-muted)]">peste termen</span>
+            <span className="text-xs text-[var(--text-muted)]">facturi peste termen</span>
           </KPI.Content>
           <KPI.Chart data={model.overdueSpark} color="var(--danger)" height={40} />
         </KPI>
@@ -279,7 +236,7 @@ export function DashboardPage() {
         <Card className="p-5">
           <Card.Header className="flex items-start justify-between gap-3">
             <div>
-              <Card.Title className="text-[15px]">Venituri lunare</Card.Title>
+              <Card.Title className="text-[15px]">Facturat lunar</Card.Title>
               <Card.Description className="text-[12.5px]">Ultimele 6 luni · mii RON</Card.Description>
             </div>
             {model.yoyPct != null && (
@@ -326,13 +283,6 @@ export function DashboardPage() {
               </div>
             ))}
 
-            <div className="mt-auto flex items-center gap-2 border-t border-[var(--border)] pt-4">
-              <Chip color="success" variant="soft" size="sm">
-                <Chip.Label className="flex items-center gap-1.5">
-                  <Check size={14} /> Conectat la SPV / e-Factura
-                </Chip.Label>
-              </Chip>
-            </div>
           </Card.Content>
         </Card>
       </section>
@@ -349,7 +299,7 @@ export function DashboardPage() {
           </button>
         </Card.Header>
         <Card.Content className="p-0">
-          {model.recent.length === 0 ? (
+          {recent.length === 0 ? (
             <div className="px-5 py-12 text-center text-sm text-[var(--text-muted)]">
               Nu există facturi încă. Emite prima ta factură pentru a începe.
             </div>
@@ -366,7 +316,7 @@ export function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {model.recent.map((inv) => {
+                  {recent.map((inv) => {
                     const ds = displayStatus(inv);
                     return (
                       <tr

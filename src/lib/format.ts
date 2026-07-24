@@ -34,8 +34,11 @@ export const statusLabels: Record<InvoiceStatus, string> = {
 export type DisplayStatus = InvoiceStatus | "overdue";
 
 // Derive an "overdue" display state from an issued invoice past its due date.
-export function displayStatus(inv: Pick<Invoice, "status" | "due_date">, today = new Date()): DisplayStatus {
-  if (inv.status === "issued" && inv.due_date) {
+export function displayStatus(
+  inv: Pick<Invoice, "status" | "due_date" | "payment_status">,
+  today = new Date(),
+): DisplayStatus {
+  if (inv.status === "issued" && inv.payment_status !== "paid" && inv.due_date) {
     const due = new Date(inv.due_date + "T23:59:59");
     if (due < today) return "overdue";
   }

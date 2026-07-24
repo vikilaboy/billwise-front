@@ -1,13 +1,13 @@
-import type {CSSProperties, ReactNode} from "react";
+import {useRef, useState, type ReactNode} from "react";
 import {useNavigate, useParams} from "react-router";
-import {useQuery} from "@tanstack/react-query";
+import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Card, Chip, Spinner} from "@heroui/react";
 import {Timeline} from "@heroui-pro/react/timeline";
 import type {TimelineStatus} from "@heroui-pro/react/timeline";
-import {Banknote, Check, ChevronLeft, Copy, Download, Mail, RotateCcw, X} from "lucide-react";
+import {Ban, Banknote, Check, ChevronLeft, Copy, Download, FileCode2, Mail, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
-import {api} from "../lib/api";
-import type {Address, EfacturaSubmission, Invoice} from "../lib/types";
+import {api, ApiError, downloadApiFile} from "../lib/api";
+import type {Address, EfacturaSubmission, Invoice, InvoiceDelivery, InvoicePayment, PaymentMethod} from "../lib/types";
 import {
   cents,
   date,
@@ -108,6 +108,13 @@ export function InvoiceDetailPage() {
   const {id} = useParams();
   const navigate = useNavigate();
   const {company} = useCompany();
+  const queryClient = useQueryClient();
+  const submittingRef = useRef(false);
+  const [downloading, setDownloading] = useState<"pdf" | "xml" | "confirmation" | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [editingPayment, setEditingPayment] = useState<InvoicePayment | null | undefined>(undefined);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
 
   const invoiceQuery = useQuery({
     queryKey: ["invoice", company?.id, id],
@@ -120,6 +127,90 @@ export function InvoiceDetailPage() {
     queryFn: () =>
       api<EfacturaSubmission[]>(`/companies/${company!.id}/invoices/${id}/efactura/submissions`),
     enabled: Boolean(company?.id && id),
+    refetchInterval: (query) => {
+      const latestSubmission = query.state.data?.data?.[0];
+      return latestSubmission && ["queued", "sent", "processing"].includes(latestSubmission.status) ? 5000 : false;
+    },
+  });
+  const paymentsQuery = useQuery({
+    queryKey: ["invoice", company?.id, id, "payments"],
+    queryFn: () => api<InvoicePayment[]>(`/companies/${company!.id}/invoices/${id}/payments`),
+    enabled: Boolean(company?.id && id && invoiceQuery.data?.data.document_type === "invoice"),
+  });
+  const deliveriesQuery = useQuery({
+    queryKey: ["invoice", company?.id, id, "deliveries"],
+    queryFn: () => api<InvoiceDelivery[]>(`/companies/${company!.id}/invoices/${id}/deliveries`),
+    enabled: Boolean(company?.id && id),
+    refetchInterval: (query) => query.state.data?.data.some((delivery) => ["queued", "sending"].includes(delivery.status)) ? 5000 : false,
+  });
+  const retryDelivery = useMutation({
+    mutationFn: (deliveryId: string) =>
+      api<InvoiceDelivery>(`/companies/${company!.id}/invoices/${id}/deliveries/${deliveryId}/retry`, {method: "POST"}),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "deliveries"]}),
+  });
+  const deletePayment = useMutation({
+    mutationFn: (paymentId: string) =>
+      api<void>(`/companies/${company!.id}/invoices/${id}/payments/${paymentId}`, {method: "DELETE"}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id]});
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "payments"]});
+      void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+      void queryClient.invalidateQueries({queryKey: ["dashboard", company?.id]});
+    },
+  });
+  const settleInvoice = useMutation({
+    mutationFn: () =>
+      api<InvoicePayment>(`/companies/${company!.id}/invoices/${id}/payments`, {
+        method: "POST",
+        body: JSON.stringify({
+          amount_cents: invoiceQuery.data!.data.balance_cents,
+          currency: invoiceQuery.data!.data.currency,
+          paid_at: new Date().toISOString().slice(0, 10),
+          method: "bank_transfer",
+          reference: null,
+          notes: "Încasare integrală",
+        }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id]});
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "payments"]});
+      void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+      void queryClient.invalidateQueries({queryKey: ["dashboard", company?.id]});
+    },
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: () =>
+      api<EfacturaSubmission>(`/companies/${company!.id}/invoices/${id}/efactura/submissions`, {method: "POST"}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id]});
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "submissions"]});
+    },
+    onSettled: () => {
+      submittingRef.current = false;
+    },
+  });
+  const lifecycleMutation = useMutation({
+    mutationFn: async (action: "issue" | "cancel" | "delete" | "duplicate") => {
+      if (action === "delete") {
+        await api<void>(`/companies/${company!.id}/invoices/${id}`, {method: "DELETE"});
+        return null;
+      }
+      let body: string | undefined;
+      if (action === "cancel") {
+        const reason = window.prompt("Motivul anulării (rămâne în istoricul documentului):")?.trim();
+        if (!reason) throw new Error("Motivul anulării este obligatoriu.");
+        body = JSON.stringify({cancellation_reason: reason});
+      }
+      return api<Invoice>(`/companies/${company!.id}/invoices/${id}/${action}`, {method: "POST", body});
+    },
+    onSuccess: (result, action) => {
+      void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+      void queryClient.invalidateQueries({queryKey: ["dashboard", company?.id]});
+      if (action === "delete") navigate("/facturi", {replace: true});
+      else if (action === "duplicate" && result) navigate(`/facturi/${result.data.id}`);
+      else void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id]});
+    },
   });
 
   if (invoiceQuery.isLoading || !company) {
@@ -154,7 +245,37 @@ export function InvoiceDetailPage() {
   const submissions = submissionsQuery.data?.data ?? [];
   const latest = submissions[0];
   const steps = buildSteps(invoice, latest);
+  const payments = paymentsQuery.data?.data ?? [];
   const isDraft = invoice.status === "draft";
+  const formattedNumber = invoice.formatted_number;
+  const hasBlockingSubmission = Boolean(latest && ["queued", "sent", "processing", "accepted"].includes(latest.status));
+  const eligibilityMessages = {
+    invoice_not_issued: "Factura trebuie emisă înainte de trimiterea în SPV.",
+    customer_address_missing: "Completează adresa clientului înainte de trimitere.",
+    outside_jurisdiction: "Clientul este în afara jurisdicției e-Factura România.",
+  } as const;
+
+  async function download(kind: "pdf" | "xml" | "confirmation") {
+    if (!company?.id || !id) return;
+    setDownloading(kind);
+    setDownloadError(null);
+    try {
+      if (kind === "pdf") {
+        await downloadApiFile(`/companies/${company.id}/invoices/${id}/pdf`, `${formattedNumber}.pdf`);
+      } else if (kind === "xml") {
+        await downloadApiFile(`/companies/${company.id}/invoices/${id}/efactura`, `${formattedNumber}.xml`);
+      } else if (latest) {
+        await downloadApiFile(
+          `/companies/${company.id}/invoices/${id}/efactura/submissions/${latest.id}/download`,
+          `${formattedNumber}.zip`,
+        );
+      }
+    } catch (error) {
+      setDownloadError(error instanceof ApiError ? error.problem.detail ?? error.problem.title : "Descărcarea a eșuat.");
+    } finally {
+      setDownloading(null);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -167,13 +288,42 @@ export function InvoiceDetailPage() {
           <Chip.Label>{displayStatusLabels[ds]}</Chip.Label>
         </Chip>
         <div className="flex-1" />
-        <Button variant="outline">
-          <Mail size={16} /> Trimite pe email
-        </Button>
-        <Button variant="primary">
-          <Download size={16} /> Descarcă PDF
-        </Button>
+        {isDraft ? (
+          <>
+            <Button variant="outline" onPress={() => navigate(`/facturi/${id}/editeaza`)}><Pencil size={16} /> Editează</Button>
+            <Button variant="primary" isDisabled={lifecycleMutation.isPending} onPress={() => {
+              if (window.confirm("Emiți această ciornă? După emitere conținutul fiscal nu mai poate fi editat.")) lifecycleMutation.mutate("issue");
+            }}><Send size={16} /> Emite</Button>
+            <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => {
+              if (window.confirm("Ștergi definitiv această ciornă?")) lifecycleMutation.mutate("delete");
+            }}><Trash2 size={16} /> Șterge</Button>
+          </>
+        ) : null}
+        {invoice.document_type === "invoice" ? (
+          <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => lifecycleMutation.mutate("duplicate")}><Copy size={16} /> Duplică</Button>
+        ) : null}
+        {invoice.status === "issued" ? (
+          <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => {
+            if (window.confirm("Anularea nu creează un storno și nu modifică documentul original. Continui?")) lifecycleMutation.mutate("cancel");
+          }}><Ban size={16} /> Anulează</Button>
+        ) : null}
+        {invoice.status === "issued" && invoice.document_type === "invoice" ? (
+          <Button variant="outline" onPress={() => setCorrectionOpen(true)}><RotateCcw size={16} /> Stornează</Button>
+        ) : null}
+        {!isDraft ? (
+          <Button variant="outline" isDisabled={downloading !== null} onPress={() => void download("pdf")}>
+            {downloading === "pdf" ? <Spinner size="sm" /> : <Download size={16} />} Descarcă PDF
+          </Button>
+        ) : null}
+        {invoice.status === "issued" ? <Button variant="outline" onPress={() => setEmailOpen(true)}><Mail size={16} /> Trimite pe email</Button> : null}
       </div>
+      {lifecycleMutation.isError ? (
+        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          {lifecycleMutation.error instanceof ApiError
+            ? lifecycleMutation.error.problem.detail ?? lifecycleMutation.error.problem.title
+            : "Operația nu a putut fi finalizată."}
+        </p>
+      ) : null}
 
       {/* 2-column grid */}
       <div className="invoice-detail-grid">
@@ -337,6 +487,106 @@ export function InvoiceDetailPage() {
               <div className="mt-1 text-[26px] font-extrabold tracking-tight tabular-nums">
                 {cents(invoice.total_cents)} {currency}
               </div>
+              {!isDraft && invoice.document_type === "invoice" ? (
+                <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-[var(--bg-muted)] p-3 text-sm">
+                  <div>
+                    <div className="text-xs text-[var(--text-muted)]">Încasat</div>
+                    <div className="mt-1 font-semibold tabular-nums">{money(invoice.paid_cents, currency)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--text-muted)]">Sold</div>
+                    <div className="mt-1 font-semibold tabular-nums">{money(invoice.balance_cents, currency)}</div>
+                  </div>
+                </div>
+              ) : null}
+              {(invoice.corrections?.length ?? 0) > 0 ? (
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <div className="text-[12px] font-semibold">Documente de corecție</div>
+                  {invoice.corrections.map((correction) => (
+                    <button key={correction.id} className="mt-2 flex w-full justify-between rounded-lg bg-[var(--bg-muted)] px-3 py-2 text-xs" onClick={() => navigate(`/facturi/${correction.id}`)}>
+                      <span className="font-semibold">{correction.formatted_number}</span>
+                      <span>{money(correction.total_cents, correction.currency)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {invoice.corrected_invoice ? (
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <div className="text-[12px] font-semibold">Document original</div>
+                  <button className="mt-2 flex w-full justify-between rounded-lg bg-[var(--bg-muted)] px-3 py-2 text-xs" onClick={() => navigate(`/facturi/${invoice.corrected_invoice!.id}`)}>
+                    <span className="font-semibold">{invoice.corrected_invoice.formatted_number}</span>
+                    <span>{money(invoice.corrected_invoice.total_cents, invoice.corrected_invoice.currency)}</span>
+                  </button>
+                </div>
+              ) : null}
+
+              {!isDraft ? (
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <div className="text-[12px] font-semibold">Livrări email</div>
+                  {(deliveriesQuery.data?.data ?? []).length === 0 ? (
+                    <p className="mt-2 text-xs text-[var(--text-muted)]">Documentul nu a fost trimis încă.</p>
+                  ) : (
+                    <div className="mt-2 flex flex-col">
+                      {(deliveriesQuery.data?.data ?? []).map((delivery) => (
+                        <div key={delivery.id} className="flex items-center gap-2 border-b border-[var(--border)] py-2.5 text-xs last:border-0">
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-semibold">{delivery.recipient}</div>
+                            <div className={delivery.status === "failed" ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}>
+                              {delivery.status === "sent" ? `Trimisă ${delivery.sent_at ? date(delivery.sent_at) : ""}` : ["queued", "sending"].includes(delivery.status) ? "În curs de trimitere" : delivery.error ?? "Livrare eșuată"}
+                            </div>
+                          </div>
+                          {delivery.status === "failed" ? (
+                            <Button isIconOnly size="sm" variant="ghost" aria-label="Reîncearcă livrarea" onPress={() => retryDelivery.mutate(delivery.id)}><RefreshCw size={14} /></Button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {!isDraft && invoice.document_type === "invoice" ? (
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[12px] font-semibold">Încasări</div>
+                    <div className="flex gap-1">
+                      {invoice.balance_cents > 0 ? (
+                        <>
+                          <Button size="sm" variant="ghost" isDisabled={settleInvoice.isPending} onPress={() => {
+                            if (window.confirm(`Înregistrezi soldul integral de ${money(invoice.balance_cents, currency)} ca transfer bancar, cu data de azi?`)) settleInvoice.mutate();
+                          }}>
+                            <Check size={14} /> Încasează integral
+                          </Button>
+                          <Button size="sm" variant="outline" onPress={() => setEditingPayment(null)}>
+                            <Plus size={14} /> Adaugă
+                          </Button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                  {settleInvoice.isError ? <p role="alert" className="mt-2 text-xs text-[var(--danger)]">Încasarea integrală nu a putut fi salvată.</p> : null}
+                  {paymentsQuery.isLoading ? (
+                    <div className="mt-3 flex items-center gap-2 text-xs text-[var(--text-muted)]"><Spinner size="sm" /> Se încarcă…</div>
+                  ) : payments.length === 0 ? (
+                    <p className="mt-3 text-xs text-[var(--text-muted)]">Nu există încasări înregistrate.</p>
+                  ) : (
+                    <div className="mt-2 flex flex-col">
+                      {payments.map((payment) => (
+                        <div key={payment.id} className="flex items-center gap-2 border-b border-[var(--border)] py-2.5 text-xs last:border-0">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold">{money(payment.amount_cents, payment.currency)}</div>
+                            <div className="truncate text-[var(--text-muted)]">{date(payment.paid_at)} · {payment.reference || paymentMethodLabels[payment.method]}</div>
+                          </div>
+                          <Button isIconOnly size="sm" variant="ghost" aria-label="Editează încasarea" onPress={() => setEditingPayment(payment)}><Pencil size={14} /></Button>
+                          <Button isIconOnly size="sm" variant="ghost" aria-label="Șterge încasarea" onPress={() => {
+                            if (window.confirm("Ștergi această încasare? Soldul facturii va fi recalculat.")) deletePayment.mutate(payment.id);
+                          }}><Trash2 size={14} className="text-[var(--danger)]" /></Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
 
               <div className="mt-5 border-t border-[var(--border)] pt-4">
                 <div className="text-[12px] font-semibold text-[var(--text)]">Stare e-Factura</div>
@@ -361,27 +611,107 @@ export function InvoiceDetailPage() {
                     ))}
                   </Timeline>
                 )}
+
+                {!invoice.efactura_eligibility.eligible ? (
+                  <p className="mt-3 text-[12px] text-[var(--text-muted)]">
+                    {invoice.efactura_eligibility.reason
+                      ? eligibilityMessages[invoice.efactura_eligibility.reason]
+                      : "Factura nu este eligibilă pentru e-Factura."}
+                  </p>
+                ) : null}
+
+                {latest?.error ? (
+                  <p role="alert" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">
+                    {latest.error}
+                  </p>
+                ) : null}
+                {submitMutation.error ? (
+                  <p role="alert" className="mt-3 text-[12px] font-medium text-[var(--danger)]">
+                    {submitMutation.error instanceof ApiError
+                      ? submitMutation.error.problem.detail ?? submitMutation.error.problem.title
+                      : "Trimiterea în SPV nu a putut fi pornită."}
+                  </p>
+                ) : null}
+                {downloadError ? <p role="alert" className="mt-3 text-[12px] font-medium text-[var(--danger)]">{downloadError}</p> : null}
+
+                <div className="mt-4 flex flex-col gap-2">
+                  {invoice.efactura_eligibility.eligible && !hasBlockingSubmission ? (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      isDisabled={submitMutation.isPending}
+                      onPress={() => {
+                        if (submittingRef.current || !window.confirm("Trimiți explicit această factură în ANAF SPV?")) return;
+                        submittingRef.current = true;
+                        submitMutation.mutate();
+                      }}
+                    >
+                      {submitMutation.isPending ? <Spinner size="sm" /> : <Send size={14} />}
+                      Trimite în SPV
+                    </Button>
+                  ) : null}
+                  {invoice.efactura_eligibility.eligible ? (
+                    <Button size="sm" variant="outline" isDisabled={downloading !== null} onPress={() => void download("xml")}>
+                      {downloading === "xml" ? <Spinner size="sm" /> : <FileCode2 size={14} />}
+                      Descarcă XML validat
+                    </Button>
+                  ) : null}
+                  {latest?.has_confirmation ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      isDisabled={downloading !== null}
+                      onPress={() => void download("confirmation")}
+                    >
+                      {downloading === "confirmation" ? <Spinner size="sm" /> : <Download size={14} />}
+                      Descarcă confirmarea ZIP
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </Card.Content>
           </Card>
 
-          {/* Actions card */}
-          <Card className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
-            <Card.Content className="flex flex-col gap-2 p-0">
-              <div className="mb-1 text-[12px] font-semibold text-[var(--text)]">Acțiuni</div>
-              <Button variant="secondary" fullWidth>
-                <Check size={16} /> Marchează încasată
-              </Button>
-              <Button variant="secondary" fullWidth>
-                <Copy size={16} /> Duplică factura
-              </Button>
-              <Button variant="danger-soft" fullWidth>
-                <RotateCcw size={16} /> Stornează
-              </Button>
-            </Card.Content>
-          </Card>
         </div>
       </div>
+
+      {editingPayment !== undefined && company?.id && id ? (
+        <PaymentModal
+          companyId={company.id}
+          invoice={invoice}
+          payment={editingPayment}
+          onClose={() => setEditingPayment(undefined)}
+          onSaved={() => {
+            void queryClient.invalidateQueries({queryKey: ["invoice", company.id, id]});
+            void queryClient.invalidateQueries({queryKey: ["invoice", company.id, id, "payments"]});
+            void queryClient.invalidateQueries({queryKey: ["invoices", company.id]});
+            void queryClient.invalidateQueries({queryKey: ["dashboard", company.id]});
+            setEditingPayment(undefined);
+          }}
+        />
+      ) : null}
+      {emailOpen && company?.id && id ? (
+        <EmailDeliveryModal
+          companyId={company.id}
+          invoice={invoice}
+          onClose={() => setEmailOpen(false)}
+          onSaved={() => {
+            void queryClient.invalidateQueries({queryKey: ["invoice", company.id, id, "deliveries"]});
+            setEmailOpen(false);
+          }}
+        />
+      ) : null}
+      {correctionOpen && company?.id ? (
+        <CorrectionModal
+          companyId={company.id}
+          invoice={invoice}
+          onClose={() => setCorrectionOpen(false)}
+          onCreated={(correction) => {
+            void queryClient.invalidateQueries({queryKey: ["invoice", company.id, id]});
+            navigate(`/facturi/${correction.id}`);
+          }}
+        />
+      ) : null}
 
       {/* Scoped layout: responsive 2-col grid + sticky rail. */}
       <style>{`
@@ -400,6 +730,192 @@ export function InvoiceDetailPage() {
           .invoice-detail-rail { position: static; }
         }
       `}</style>
+    </div>
+  );
+}
+
+function CorrectionModal({companyId, invoice, onClose, onCreated}: {
+  companyId: string;
+  invoice: Invoice;
+  onClose: () => void;
+  onCreated: (invoice: Invoice) => void;
+}) {
+  const [mode, setMode] = useState<"total" | "partial">("total");
+  const [reason, setReason] = useState("");
+  const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const create = useMutation({
+    mutationFn: () => api<Invoice>(`/companies/${companyId}/invoices/${invoice.id}/corrections`, {
+      method: "POST",
+      body: JSON.stringify({
+        mode,
+        reason: reason.trim(),
+        lines: mode === "partial"
+          ? invoice.lines.filter((line) => Number(quantities[line.id]) > 0).map((line) => ({
+              invoice_line_id: line.id,
+              quantity: Number(quantities[line.id]),
+            }))
+          : undefined,
+      }),
+    }),
+    onSuccess: ({data}) => onCreated(data),
+  });
+  const error = create.error instanceof ApiError ? create.error.problem.detail ?? create.error.problem.title : null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="Creează factură de corecție">
+      <div className="w-full max-w-xl rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
+        <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">Creează factură de corecție</h2><p className="mt-1 text-xs text-[var(--text-muted)]">Originalul rămâne nemodificat. Se creează o ciornă separată, cu referință fiscală la {invoice.formatted_number}.</p></div><Button isIconOnly variant="ghost" onPress={onClose}><X size={17} /></Button></header>
+        <div className="grid gap-4 p-5">
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Tip corecție
+            <select className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm" value={mode} onChange={(event) => setMode(event.target.value as "total" | "partial")}>
+              <option value="total">Stornare totală</option><option value="partial">Corecție parțială</option>
+            </select>
+          </label>
+          {mode === "partial" ? (
+            <div>
+              <div className="text-xs font-semibold text-[var(--text-muted)]">Cantități de corectat</div>
+              <div className="mt-2 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
+                {invoice.lines.map((line) => (
+                  <label key={line.id} className="flex items-center gap-3 p-3 text-sm">
+                    <span className="min-w-0 flex-1 truncate">{line.description} (max. {Number(line.quantity)})</span>
+                    <input className="h-9 w-24 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-2" type="number" min="0" max={Number(line.quantity)} step="0.01" value={quantities[line.id] ?? ""} onChange={(event) => setQuantities((current) => ({...current, [line.id]: event.target.value}))} />
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Motiv<textarea className="mt-1.5 min-h-24 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+          {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={create.isPending || !reason.trim() || (mode === "partial" && !Object.values(quantities).some((value) => Number(value) > 0))} onPress={() => {
+          if (window.confirm("Creezi ciorna documentului de corecție? Aceasta nu se trimite automat în SPV sau pe email.")) create.mutate();
+        }}>{create.isPending ? <Spinner size="sm" /> : <RotateCcw size={15} />} Creează ciorna</Button></footer>
+      </div>
+    </div>
+  );
+}
+
+function EmailDeliveryModal({companyId, invoice, onClose, onSaved}: {
+  companyId: string;
+  invoice: Invoice;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [recipient, setRecipient] = useState(invoice.customer?.email ?? "");
+  const [cc, setCc] = useState("");
+  const [subject, setSubject] = useState(`Factura ${invoice.formatted_number}`);
+  const [message, setMessage] = useState("Bună ziua,\n\nVă transmitem factura atașată.");
+  const send = useMutation({
+    mutationFn: () => api<InvoiceDelivery>(`/companies/${companyId}/invoices/${invoice.id}/deliveries/email`, {
+      method: "POST",
+      body: JSON.stringify({
+        recipient: recipient.trim(),
+        cc: cc.split(",").map((value) => value.trim()).filter(Boolean),
+        subject: subject.trim(),
+        message: message.trim() || null,
+      }),
+    }),
+    onSuccess: onSaved,
+  });
+  const errors = send.error instanceof ApiError ? send.error.problem.errors ?? {} : {};
+  const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="Trimite factura pe email">
+      <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
+        <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">Trimite factura pe email</h2><p className="mt-1 text-xs text-[var(--text-muted)]">PDF-ul este atașat; trimiterea în SPV nu este afectată.</p></div><Button isIconOnly variant="ghost" aria-label="Închide" onPress={onClose}><X size={17} /></Button></header>
+        <div className="grid gap-4 p-5">
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Destinatar<input className={`${input} mt-1.5`} type="email" value={recipient} onChange={(event) => setRecipient(event.target.value)} />{errors.recipient?.[0] ? <span className="text-[var(--danger)]">{errors.recipient[0]}</span> : null}</label>
+          <label className="text-xs font-semibold text-[var(--text-muted)]">CC (separate prin virgulă)<input className={`${input} mt-1.5`} value={cc} onChange={(event) => setCc(event.target.value)} /></label>
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Subiect<input className={`${input} mt-1.5`} value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Mesaj<textarea className="mt-1.5 min-h-28 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={message} onChange={(event) => setMessage(event.target.value)} /></label>
+          {send.isError && !Object.keys(errors).length ? <p role="alert" className="text-sm text-[var(--danger)]">Livrarea nu a putut fi pusă în coadă.</p> : null}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={send.isPending || !recipient.trim() || !subject.trim()} onPress={() => {
+          if (window.confirm(`Trimiți explicit factura către ${recipient.trim()}?`)) send.mutate();
+        }}>{send.isPending ? <Spinner size="sm" /> : <Mail size={15} />} Trimite</Button></footer>
+      </div>
+    </div>
+  );
+}
+
+const paymentMethodLabels: Record<PaymentMethod, string> = {
+  bank_transfer: "Transfer bancar",
+  card: "Card",
+  cash: "Numerar",
+  other: "Altă metodă",
+};
+
+function localDate(value?: string | null): string {
+  return value?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+}
+
+function PaymentModal({companyId, invoice, payment, onClose, onSaved}: {
+  companyId: string;
+  invoice: Invoice;
+  payment: InvoicePayment | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [amount, setAmount] = useState(String((payment?.amount_cents ?? invoice.balance_cents) / 100));
+  const [paidAt, setPaidAt] = useState(localDate(payment?.paid_at));
+  const [method, setMethod] = useState<PaymentMethod>(payment?.method ?? "bank_transfer");
+  const [reference, setReference] = useState(payment?.reference ?? "");
+  const [notes, setNotes] = useState(payment?.notes ?? "");
+  const save = useMutation({
+    mutationFn: () => api<InvoicePayment>(
+      `/companies/${companyId}/invoices/${invoice.id}/payments${payment ? `/${payment.id}` : ""}`,
+      {
+        method: payment ? "PUT" : "POST",
+        body: JSON.stringify({
+          amount_cents: Math.round(Number(amount) * 100),
+          currency: invoice.currency,
+          paid_at: paidAt,
+          method,
+          reference: reference.trim() || null,
+          notes: notes.trim() || null,
+        }),
+      },
+    ),
+    onSuccess: onSaved,
+  });
+  const error = save.error instanceof ApiError
+    ? save.error.problem.detail ?? Object.values(save.error.problem.errors ?? {})[0]?.[0] ?? save.error.problem.title
+    : null;
+  const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-label={payment ? "Editează încasarea" : "Încasare nouă"}>
+      <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
+        <header className="flex items-center justify-between border-b border-[var(--border)] p-5">
+          <div><h2 className="font-semibold">{payment ? "Editează încasarea" : "Înregistrează încasarea"}</h2><p className="mt-1 text-xs text-[var(--text-muted)]">Sold curent: {money(invoice.balance_cents, invoice.currency)}</p></div>
+          <Button isIconOnly variant="ghost" aria-label="Închide" onPress={onClose}><X size={17} /></Button>
+        </header>
+        <div className="grid gap-4 p-5 sm:grid-cols-2">
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Sumă
+            <input className={input} type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Data încasării
+            <input className={input} type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Metodă
+            <select className={input} value={method} onChange={(event) => setMethod(event.target.value as PaymentMethod)}>
+              {Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Referință
+            <input className={input} value={reference} onChange={(event) => setReference(event.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)] sm:col-span-2">Notițe
+            <textarea className="min-h-20 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={notes} onChange={(event) => setNotes(event.target.value)} />
+          </label>
+          {error ? <p role="alert" className="text-sm text-[var(--danger)] sm:col-span-2">{error}</p> : null}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4">
+          <Button variant="outline" onPress={onClose}>Anulează</Button>
+          <Button variant="primary" isDisabled={save.isPending || Number(amount) <= 0 || !paidAt} onPress={() => save.mutate()}>
+            {save.isPending ? <Spinner size="sm" /> : null} Salvează
+          </Button>
+        </footer>
+      </div>
     </div>
   );
 }

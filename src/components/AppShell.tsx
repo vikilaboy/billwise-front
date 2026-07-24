@@ -1,36 +1,36 @@
 import {createContext, useContext, useEffect, useState} from "react";
-import {Outlet, useLocation, useNavigate} from "react-router";
-import {useQuery} from "@tanstack/react-query";
-import {Avatar, Button, Dropdown} from "@heroui/react";
+import {Navigate, Outlet, useLocation, useNavigate} from "react-router";
+import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
+import {Avatar, Button, Dropdown, Spinner} from "@heroui/react";
 import {Sidebar} from "@heroui-pro/react/sidebar";
 import {
-  Bell,
-  Building2,
   Check,
+  Bell,
   ChevronsUpDown,
   CircleGauge,
   CreditCard,
-  FileClock,
   FileText,
   Hash,
   LogOut,
   Moon,
+  Package,
   Plus,
-  Search,
+  Repeat,
   Settings,
   Sun,
   Users,
 } from "lucide-react";
-import {api, session} from "../lib/api";
-import type {CompanyProfile, User} from "../lib/types";
+import {api, AUTH_EXPIRED_EVENT, session} from "../lib/api";
+import type {ActivityNotificationFeed, CompanyProfile, User} from "../lib/types";
 
 type NavItem = {to: string; label: string; icon: typeof FileText; group: string; badge?: number};
 
 const NAV: NavItem[] = [
   {to: "/dashboard", label: "Dashboard", icon: CircleGauge, group: "Principal"},
   {to: "/facturi", label: "Facturi", icon: FileText, group: "Principal"},
-  {to: "/recurente", label: "Facturi recurente", icon: FileClock, group: "Principal"},
+  {to: "/recurente", label: "Facturi recurente", icon: Repeat, group: "Principal"},
   {to: "/clienti", label: "Clienți", icon: Users, group: "Date firmă"},
+  {to: "/produse", label: "Produse și servicii", icon: Package, group: "Date firmă"},
   {to: "/conturi", label: "Conturi bancare", icon: CreditCard, group: "Date firmă"},
   {to: "/serii", label: "Serii de facturare", icon: Hash, group: "Date firmă"},
   {to: "/setari", label: "Setări", icon: Settings, group: "Date firmă"},
@@ -39,8 +39,9 @@ const NAV: NavItem[] = [
 const META: Record<string, [string, string]> = {
   "/dashboard": ["Dashboard", "Sumarul activității firmei tale"],
   "/facturi": ["Facturi", "Toate documentele emise"],
-  "/recurente": ["Facturi recurente", "Automatizări active"],
+  "/recurente": ["Facturi recurente", "Generare controlată de ciorne"],
   "/clienti": ["Clienți", "Firmele cu care lucrezi"],
+  "/produse": ["Produse și servicii", "Catalogul firmei selectate"],
   "/conturi": ["Conturi bancare", "Conturile afișate pe facturi"],
   "/serii": ["Serii de facturare", "Prefixe și numerotare"],
   "/setari": ["Setări", "Date firmă și preferințe"],
@@ -70,11 +71,25 @@ function pageMeta(pathname: string): [string, string] {
 export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const [dark, setDark] = useState(() => localStorage.getItem("billwise_theme") === "dark");
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(() => localStorage.getItem("billwise_active_company_id"));
 
   const me = useQuery({queryKey: ["me"], queryFn: () => api<User>("/me")});
   const companies = useQuery({queryKey: ["companies"], queryFn: () => api<CompanyProfile[]>("/companies")});
+  const notifications = useQuery({
+    queryKey: ["notifications"],
+    queryFn: () => api<ActivityNotificationFeed>("/notifications"),
+    refetchInterval: 30000,
+  });
+  const readNotification = useMutation({
+    mutationFn: (id: string) => api(`/notifications/${id}/read`, {method: "PATCH"}),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["notifications"]}),
+  });
+  const readAll = useMutation({
+    mutationFn: () => api("/notifications/read-all", {method: "POST"}),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["notifications"]}),
+  });
 
   const list = companies.data?.data ?? [];
   const company = list.find((c) => c.id === activeId) ?? list[0];
@@ -85,16 +100,78 @@ export function AppShell() {
     localStorage.setItem("billwise_theme", dark ? "dark" : "light");
   }, [dark]);
 
+  useEffect(() => {
+    const handleExpiredSession = () => {
+      localStorage.removeItem("billwise_active_company_id");
+      queryClient.clear();
+      navigate("/login", {replace: true});
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleExpiredSession);
+
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpiredSession);
+  }, [navigate, queryClient]);
+
+  useEffect(() => {
+    if (!company?.id) return;
+    localStorage.setItem("billwise_active_company_id", company.id);
+    if (activeId !== company.id) setActiveId(company.id);
+  }, [activeId, company?.id]);
+
+  const selectCompany = (id: string) => {
+    setActiveId(id);
+    localStorage.setItem("billwise_active_company_id", id);
+    void queryClient.invalidateQueries({
+      predicate: (query) => query.queryKey[0] !== "me" && query.queryKey[0] !== "companies",
+    });
+  };
+
   const logout = async () => {
     try {
       await api("/auth/logout", {method: "POST"});
     } finally {
       session.clear();
+      localStorage.removeItem("billwise_active_company_id");
+      queryClient.clear();
       navigate("/login", {replace: true});
     }
   };
 
   const groups = [...new Set(NAV.map((n) => n.group))];
+
+  if (companies.isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center gap-2.5 bg-[var(--bg-subtle)] text-sm text-[var(--text-muted)]">
+        <Spinner size="sm" /> Se verifică firmele contului…
+      </div>
+    );
+  }
+
+  if (companies.isError) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[var(--bg-subtle)] px-6 text-center">
+        <p className="text-sm font-medium text-[var(--danger)]">Firmele contului nu au putut fi încărcate.</p>
+        <Button variant="outline" onPress={() => companies.refetch()}>
+          Încearcă din nou
+        </Button>
+      </div>
+    );
+  }
+
+  if (list.length === 0) {
+    if (location.pathname !== "/onboarding/firma") {
+      return <Navigate to="/onboarding/firma" replace />;
+    }
+
+    return (
+      <CompanyContext.Provider value={{company: undefined}}>
+        <Outlet />
+      </CompanyContext.Provider>
+    );
+  }
+
+  if (location.pathname === "/onboarding/firma") {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   return (
     <CompanyContext.Provider value={{company}}>
@@ -125,7 +202,7 @@ export function AppShell() {
                 <Dropdown.Menu
                   selectionMode="single"
                   selectedKeys={company ? [company.id] : []}
-                  onAction={(key) => setActiveId(String(key))}
+                  onAction={(key) => selectCompany(String(key))}
                 >
                   {list.map((c) => (
                     <Dropdown.Item key={c.id} id={String(c.id)} textValue={c.legal_name}>
@@ -144,6 +221,10 @@ export function AppShell() {
                 </Dropdown.Menu>
               </Dropdown.Popover>
             </Dropdown>
+
+            <Button variant="outline" fullWidth onPress={() => navigate("/firme/noi")}>
+              <Plus size={16} /> Adaugă firmă
+            </Button>
 
             <Button variant="primary" fullWidth onPress={() => navigate("/facturi/noi")}>
               <Plus size={17} /> Emite factură
@@ -201,48 +282,47 @@ export function AppShell() {
 
             <div className="flex-1" />
 
-            <label className="hidden h-9 min-w-0 max-w-[320px] flex-1 items-center gap-2 rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-subtle)] px-3 lg:flex">
-              <Search size={16} className="text-[var(--text-faint)]" />
-              <input
-                aria-label="Caută"
-                placeholder="Caută facturi, clienți…"
-                className="w-full border-0 bg-transparent text-[13.5px] outline-none placeholder:text-[var(--text-faint)]"
-              />
-            </label>
-
-            <div
-              className="hidden h-9 items-center gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--bg-subtle)] px-3 sm:flex"
-              title="Curs de referință BNR"
-            >
-              <span className="text-[11px] font-bold text-[var(--text-faint)]">BNR</span>
-              <span className="text-[13px] font-semibold tabular-nums">1 € = 4,9772 lei</span>
-            </div>
-            <div
-              className="hidden h-9 items-center gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--success-soft)] px-3 sm:flex"
-              title="Conectat la SPV / e-Factura"
-            >
-              <span className="h-[7px] w-[7px] rounded-full bg-[var(--success)]" />
-              <span className="text-[12.5px] font-semibold text-[var(--success)]">SPV conectat</span>
-            </div>
-
+            <Dropdown>
+              <Dropdown.Trigger className="relative grid h-9 w-9 place-items-center rounded-lg border border-[var(--border)] bg-[var(--surface)]" aria-label="Notificări">
+                <Bell size={17} />
+                {(notifications.data?.data.unread_count ?? 0) > 0 ? (
+                  <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[var(--danger)] px-1 text-center text-[10px] font-bold text-white">
+                    {Math.min(99, notifications.data!.data.unread_count)}
+                  </span>
+                ) : null}
+              </Dropdown.Trigger>
+              <Dropdown.Popover className="w-[min(360px,calc(100vw-24px))]">
+                <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
+                  <b className="text-sm">Activitate</b>
+                  {(notifications.data?.data.unread_count ?? 0) > 0 ? <Button size="sm" variant="ghost" onPress={() => readAll.mutate()}>Marchează toate citite</Button> : null}
+                </div>
+                <Dropdown.Menu aria-label="Notificări" onAction={(key) => {
+                  const item = notifications.data?.data.items.find((notification) => notification.id === String(key));
+                  if (!item) return;
+                  if (!item.read_at) readNotification.mutate(item.id);
+                  if (item.url) navigate(item.url);
+                }}>
+                  {(notifications.data?.data.items ?? []).length === 0 ? (
+                    <Dropdown.Item id="empty" isDisabled textValue="Nicio notificare">Nu există notificări.</Dropdown.Item>
+                  ) : (notifications.data?.data.items ?? []).map((notification) => (
+                    <Dropdown.Item key={notification.id} id={notification.id} textValue={notification.title}>
+                      <div className={`py-1 ${notification.read_at ? "opacity-65" : ""}`}>
+                        <div className="text-xs font-semibold">{notification.title}</div>
+                        <div className="mt-0.5 whitespace-normal text-[11px] text-[var(--text-muted)]">{notification.message}</div>
+                      </div>
+                    </Dropdown.Item>
+                  ))}
+                </Dropdown.Menu>
+              </Dropdown.Popover>
+            </Dropdown>
             <Button isIconOnly variant="outline" size="sm" aria-label="Comută tema" onPress={() => setDark((v) => !v)}>
               {dark ? <Sun size={18} /> : <Moon size={18} />}
-            </Button>
-            <Button isIconOnly variant="outline" size="sm" aria-label="Notificări" className="relative">
-              <Bell size={18} />
-              <span className="absolute right-2 top-2 h-[7px] w-[7px] rounded-full border border-[var(--bg)] bg-[var(--danger)]" />
             </Button>
           </header>
 
           <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-[30px]">
             <div className="w-full">
-              {companies.isLoading ? (
-                <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-                  <Building2 size={16} /> Se încarcă firma…
-                </div>
-              ) : (
-                <Outlet />
-              )}
+              <Outlet />
             </div>
           </main>
         </Sidebar.Main>

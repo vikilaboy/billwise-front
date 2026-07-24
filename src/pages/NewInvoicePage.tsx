@@ -1,11 +1,11 @@
-import {useMemo, useState} from "react";
-import {useNavigate} from "react-router";
+import {useEffect, useMemo, useState} from "react";
+import {useNavigate, useParams} from "react-router";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
-import {Button, Input, Spinner, Switch, TextArea} from "@heroui/react";
+import {Button, Input, Spinner, TextArea} from "@heroui/react";
 import {ChevronDown, Loader2, Plus, Send, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {ApiError, api, listQuery} from "../lib/api";
-import type {Customer, Invoice} from "../lib/types";
+import type {Customer, Invoice, Product, VatCategory} from "../lib/types";
 import {money} from "../lib/format";
 
 // The API create contract (StoreInvoiceRequest) accepts NO invoice_series_id — the
@@ -25,9 +25,14 @@ type InvoiceSeries = {
 type LineRow = {
   key: string;
   description: string;
+  unit: string;
+  unit_code: string;
   quantity: number;
   unit_price: number; // major units, e.g. 2500.00
   vat_rate: number; // percent: 19 | 9 | 5 | 0
+  vat_category: VatCategory;
+  vat_exemption_code: string | null;
+  vat_exemption_reason: string | null;
 };
 
 // Fixed unit for the whole prototype; the create request requires a UN/ECE unit_code.
@@ -59,7 +64,11 @@ function isoPlusDays(days: number): string {
 }
 
 function newRow(): LineRow {
-  return {key: crypto.randomUUID(), description: "", quantity: 1, unit_price: 0, vat_rate: 19};
+  return {
+    key: crypto.randomUUID(), description: "", unit: UNIT_LABEL, unit_code: UNIT_CODE,
+    quantity: 1, unit_price: 0, vat_rate: 19,
+    vat_category: "S", vat_exemption_code: null, vat_exemption_reason: null,
+  };
 }
 
 // Integer-cent math so the live summary matches the server snapshot logic.
@@ -119,6 +128,7 @@ function FieldLabel({children}: {children: React.ReactNode}) {
 
 export function NewInvoicePage() {
   const {company} = useCompany();
+  const {id} = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -134,17 +144,54 @@ export function NewInvoicePage() {
     queryFn: () => api<InvoiceSeries[]>(`/companies/${company!.id}/invoice-series`),
     enabled: Boolean(company?.id),
   });
+  const products = useQuery({
+    queryKey: ["products", company?.id, "invoice-autocomplete"],
+    queryFn: () => api<Product[]>(`/companies/${company!.id}/products${listQuery({perPage: 100, sort: "name", filter: {is_active: {eq: 1}}})}`),
+    enabled: Boolean(company?.id),
+  });
+  const invoiceQuery = useQuery({
+    queryKey: ["invoice", company?.id, id, "edit"],
+    queryFn: () => api<Invoice>(`/companies/${company!.id}/invoices/${id}`),
+    enabled: Boolean(company?.id && id),
+  });
 
   const [customerId, setCustomerId] = useState("");
   const [seriesId, setSeriesId] = useState("");
   const [issueDate, setIssueDate] = useState(todayIso);
   const [dueDate, setDueDate] = useState(() => isoPlusDays(15));
   const [currency, setCurrency] = useState("RON");
+  const [locale, setLocale] = useState<"ro" | "en">("ro");
   const [exchangeRate, setExchangeRate] = useState("");
   const [notes, setNotes] = useState("");
   const [rows, setRows] = useState<LineRow[]>(() => [newRow()]);
-  const [sendEfactura, setSendEfactura] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+
+  useEffect(() => {
+    const invoice = invoiceQuery.data?.data;
+    if (!invoice) return;
+    if (invoice.status !== "draft") {
+      navigate(`/facturi/${invoice.id}`, {replace: true});
+      return;
+    }
+    setCustomerId(invoice.customer?.id ?? "");
+    setIssueDate(invoice.issue_date ?? todayIso());
+    setDueDate(invoice.due_date ?? "");
+    setCurrency(invoice.currency);
+    setLocale(invoice.locale);
+    setNotes(invoice.notes ?? "");
+    setRows(invoice.lines.map((line) => ({
+      key: line.id,
+      description: line.description,
+      unit: line.unit ?? UNIT_LABEL,
+      unit_code: line.unit_code ?? UNIT_CODE,
+      quantity: Number(line.quantity),
+      unit_price: line.unit_price_cents / 100,
+      vat_rate: Number(line.vat_rate),
+      vat_category: line.vat_category,
+      vat_exemption_code: line.vat_exemption_code,
+      vat_exemption_reason: line.vat_exemption_reason,
+    })));
+  }, [invoiceQuery.data, navigate]);
 
   const customerList = customers.data?.data ?? [];
   const seriesList = series.data?.data ?? [];
@@ -182,6 +229,24 @@ export function NewInvoicePage() {
     setRows((prev) => [...prev, newRow()]);
   }
 
+  function addProduct(productId: string) {
+    const product = products.data?.data.find((item) => item.id === productId);
+    if (!product) return;
+    const row: LineRow = {
+      key: crypto.randomUUID(),
+      description: product.name,
+      unit: product.unit,
+      unit_code: product.unit_code,
+      quantity: 1,
+      unit_price: product.unit_price_cents / 100,
+      vat_rate: Number(product.vat_rate),
+      vat_category: product.vat_category,
+      vat_exemption_code: product.vat_exemption_code,
+      vat_exemption_reason: product.vat_exemption_reason,
+    };
+    setRows((current) => current.length === 1 && !current[0].description ? [row] : [...current, row]);
+  }
+
   function removeRow(key: string) {
     setRows((prev) => (prev.length === 1 ? prev : prev.filter((r) => r.key !== key)));
   }
@@ -193,23 +258,26 @@ export function NewInvoicePage() {
       issue_date: issueDate,
       due_date: dueDate || null,
       currency,
+      locale,
       notes: notes.trim() ? notes.trim() : null,
       lines: rows.map((r) => ({
         description: r.description,
         quantity: r.quantity,
-        unit: UNIT_LABEL,
-        unit_code: UNIT_CODE,
+        unit: r.unit,
+        unit_code: r.unit_code,
         unit_price_cents: Math.round(r.unit_price * 100),
         vat_rate: r.vat_rate,
-        vat_category: vatCategoryFor(r.vat_rate),
+        vat_category: r.vat_category,
+        vat_exemption_code: r.vat_exemption_code,
+        vat_exemption_reason: r.vat_exemption_reason,
       })),
     };
   }
 
   const mutation = useMutation({
     mutationFn: async (opts: {issue: boolean}) => {
-      const created = await api<Invoice>(`/companies/${company!.id}/invoices`, {
-        method: "POST",
+      const created = await api<Invoice>(`/companies/${company!.id}/invoices${id ? `/${id}` : ""}`, {
+        method: id ? "PUT" : "POST",
         body: JSON.stringify(buildPayload()),
       });
       let invoice = created.data;
@@ -266,14 +334,17 @@ export function NewInvoicePage() {
         <div className="flex flex-col gap-5">
           {/* 1. Invoice details */}
           <section className={cardClass}>
-            <h2 className="mb-4 text-[15px] font-bold tracking-tight">Detalii factură</h2>
+            <h2 className="mb-4 text-[15px] font-bold tracking-tight">{id ? "Editează ciorna" : "Detalii factură"}</h2>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <FieldLabel>Client</FieldLabel>
                 <SelectBox
                   ariaLabel="Client"
                   value={customerId}
-                  onChange={setCustomerId}
+                  onChange={(value) => {
+                    setCustomerId(value);
+                    setLocale(customerList.find((customer) => customer.id === value)?.locale ?? "ro");
+                  }}
                   disabled={customers.isLoading}
                 >
                   <option value="">
@@ -351,6 +422,14 @@ export function NewInvoicePage() {
                 </SelectBox>
               </div>
 
+              <div>
+                <FieldLabel>Limba documentului</FieldLabel>
+                <SelectBox ariaLabel="Limba documentului" value={locale} onChange={(value) => setLocale(value as "ro" | "en")}>
+                  <option value="ro">Română</option>
+                  <option value="en">Română + Engleză</option>
+                </SelectBox>
+              </div>
+
               {isForeign && (
                 <div>
                   <FieldLabel>Curs BNR (1 {currency} = ? RON)</FieldLabel>
@@ -373,6 +452,13 @@ export function NewInvoicePage() {
           {/* 2. Line items */}
           <section className={cardClass}>
             <h2 className="mb-4 text-[15px] font-bold tracking-tight">Produse / servicii</h2>
+            <div className="mb-4">
+              <FieldLabel>Adaugă din catalog</FieldLabel>
+              <SelectBox ariaLabel="Adaugă din catalog" value="" onChange={addProduct} disabled={products.isLoading}>
+                <option value="">{products.isLoading ? "Se încarcă…" : "Selectează un produs sau serviciu"}</option>
+                {(products.data?.data ?? []).map((product) => <option key={product.id} value={product.id}>{product.name} · {money(product.unit_price_cents, product.currency)}</option>)}
+              </SelectBox>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] border-collapse text-[13px]">
                 <thead>
@@ -448,7 +534,12 @@ export function NewInvoicePage() {
                           ariaLabel="Cotă TVA"
                           className="w-[86px]"
                           value={String(row.vat_rate)}
-                          onChange={(v) => updateRow(row.key, {vat_rate: Number(v)})}
+                          onChange={(v) => updateRow(row.key, {
+                            vat_rate: Number(v),
+                            vat_category: vatCategoryFor(Number(v)),
+                            vat_exemption_code: null,
+                            vat_exemption_reason: null,
+                          })}
                         >
                           {VAT_RATES.map((r) => (
                             <option key={r} value={r}>
@@ -527,22 +618,6 @@ export function NewInvoicePage() {
                 </div>
               )}
             </dl>
-
-            <label className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-[var(--bg-muted)] p-3">
-              <span className="min-w-0">
-                <span className="flex items-center gap-1.5 text-[13px] font-semibold">
-                  <Send size={14} className="text-[var(--accent)]" /> Trimite în e-Factura
-                </span>
-                <span className="mt-0.5 block text-[11.5px] text-[var(--text-muted)]">
-                  Depune automat în SPV la emitere
-                </span>
-              </span>
-              <Switch
-                aria-label="Trimite în e-Factura"
-                isSelected={sendEfactura}
-                onChange={setSendEfactura}
-              />
-            </label>
 
             <div className="mt-4 flex flex-col gap-2.5">
               <Button

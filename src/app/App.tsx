@@ -7,6 +7,10 @@ import {LoginPage} from "../pages/LoginPage";
 import {SignupPage} from "../pages/SignupPage";
 import {ForgotPasswordPage} from "../pages/ForgotPasswordPage";
 import {ResetPasswordPage} from "../pages/ResetPasswordPage";
+import {VerifyEmailPendingPage} from "../pages/VerifyEmailPendingPage";
+import {AccountActivationPage} from "../pages/AccountActivationPage";
+import {CompanyOnboardingPage} from "../pages/CompanyOnboardingPage";
+import {AppErrorBoundary} from "../components/AppErrorBoundary";
 
 // Route-level code splitting: each page (and its heavy deps — charts, timeline,
 // data-grid) loads on navigation, keeping the initial bundle small.
@@ -21,6 +25,7 @@ const CustomersPage = lazyNamed(() => import("../pages/CustomersPage"), "Custome
 const BankAccountsPage = lazyNamed(() => import("../pages/BankAccountsPage"), "BankAccountsPage");
 const InvoiceSeriesPage = lazyNamed(() => import("../pages/InvoiceSeriesPage"), "InvoiceSeriesPage");
 const SettingsPage = lazyNamed(() => import("../pages/SettingsPage"), "SettingsPage");
+const ProductsPage = lazyNamed(() => import("../pages/ProductsPage"), "ProductsPage");
 
 const Protected = () => (session.token() ? <AppShell /> : <Navigate to="/login" replace />);
 
@@ -32,26 +37,34 @@ const PageFallback = () => (
 
 export function App() {
   return (
-    <Suspense fallback={<PageFallback />}>
-      <Routes>
+    <AppErrorBoundary>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/inregistrare" element={<SignupPage />} />
         <Route path="/recuperare-parola" element={<ForgotPasswordPage />} />
         <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+        <Route path="/verifica-email" element={<VerifyEmailPendingPage />} />
+        <Route path="/activare-cont" element={<AccountActivationPage />} />
         <Route element={<Protected />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route path="/onboarding/firma" element={<CompanyOnboardingPage />} />
+          <Route path="/firme/noi" element={<CompanyOnboardingPage mode="additional" />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/facturi" element={<InvoicesPage />} />
           <Route path="/facturi/noi" element={<NewInvoicePage />} />
+          <Route path="/facturi/:id/editeaza" element={<NewInvoicePage />} />
           <Route path="/facturi/:id" element={<InvoiceDetailPage />} />
           <Route path="/recurente" element={<RecurringPage />} />
           <Route path="/clienti" element={<CustomersPage />} />
+          <Route path="/produse" element={<ProductsPage />} />
           <Route path="/conturi" element={<BankAccountsPage />} />
           <Route path="/serii" element={<InvoiceSeriesPage />} />
           <Route path="/setari" element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </Suspense>
+        </Routes>
+      </Suspense>
+    </AppErrorBoundary>
   );
 }
