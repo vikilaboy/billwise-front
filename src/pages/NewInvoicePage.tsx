@@ -5,7 +5,7 @@ import {Button, Input, Spinner, TextArea} from "@heroui/react";
 import {ChevronDown, Loader2, Plus, Send, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {ApiError, api, listQuery} from "../lib/api";
-import type {Customer, Invoice} from "../lib/types";
+import type {Customer, Invoice, Product, VatCategory} from "../lib/types";
 import {money} from "../lib/format";
 
 // The API create contract (StoreInvoiceRequest) accepts NO invoice_series_id — the
@@ -25,9 +25,14 @@ type InvoiceSeries = {
 type LineRow = {
   key: string;
   description: string;
+  unit: string;
+  unit_code: string;
   quantity: number;
   unit_price: number; // major units, e.g. 2500.00
   vat_rate: number; // percent: 19 | 9 | 5 | 0
+  vat_category: VatCategory;
+  vat_exemption_code: string | null;
+  vat_exemption_reason: string | null;
 };
 
 // Fixed unit for the whole prototype; the create request requires a UN/ECE unit_code.
@@ -59,7 +64,11 @@ function isoPlusDays(days: number): string {
 }
 
 function newRow(): LineRow {
-  return {key: crypto.randomUUID(), description: "", quantity: 1, unit_price: 0, vat_rate: 19};
+  return {
+    key: crypto.randomUUID(), description: "", unit: UNIT_LABEL, unit_code: UNIT_CODE,
+    quantity: 1, unit_price: 0, vat_rate: 19,
+    vat_category: "S", vat_exemption_code: null, vat_exemption_reason: null,
+  };
 }
 
 // Integer-cent math so the live summary matches the server snapshot logic.
@@ -134,6 +143,11 @@ export function NewInvoicePage() {
     queryFn: () => api<InvoiceSeries[]>(`/companies/${company!.id}/invoice-series`),
     enabled: Boolean(company?.id),
   });
+  const products = useQuery({
+    queryKey: ["products", company?.id, "invoice-autocomplete"],
+    queryFn: () => api<Product[]>(`/companies/${company!.id}/products${listQuery({perPage: 100, sort: "name", filter: {is_active: {eq: 1}}})}`),
+    enabled: Boolean(company?.id),
+  });
 
   const [customerId, setCustomerId] = useState("");
   const [seriesId, setSeriesId] = useState("");
@@ -182,6 +196,24 @@ export function NewInvoicePage() {
     setRows((prev) => [...prev, newRow()]);
   }
 
+  function addProduct(productId: string) {
+    const product = products.data?.data.find((item) => item.id === productId);
+    if (!product) return;
+    const row: LineRow = {
+      key: crypto.randomUUID(),
+      description: product.name,
+      unit: product.unit,
+      unit_code: product.unit_code,
+      quantity: 1,
+      unit_price: product.unit_price_cents / 100,
+      vat_rate: Number(product.vat_rate),
+      vat_category: product.vat_category,
+      vat_exemption_code: product.vat_exemption_code,
+      vat_exemption_reason: product.vat_exemption_reason,
+    };
+    setRows((current) => current.length === 1 && !current[0].description ? [row] : [...current, row]);
+  }
+
   function removeRow(key: string) {
     setRows((prev) => (prev.length === 1 ? prev : prev.filter((r) => r.key !== key)));
   }
@@ -198,11 +230,13 @@ export function NewInvoicePage() {
       lines: rows.map((r) => ({
         description: r.description,
         quantity: r.quantity,
-        unit: UNIT_LABEL,
-        unit_code: UNIT_CODE,
+        unit: r.unit,
+        unit_code: r.unit_code,
         unit_price_cents: Math.round(r.unit_price * 100),
         vat_rate: r.vat_rate,
-        vat_category: vatCategoryFor(r.vat_rate),
+        vat_category: r.vat_category,
+        vat_exemption_code: r.vat_exemption_code,
+        vat_exemption_reason: r.vat_exemption_reason,
       })),
     };
   }
@@ -385,6 +419,13 @@ export function NewInvoicePage() {
           {/* 2. Line items */}
           <section className={cardClass}>
             <h2 className="mb-4 text-[15px] font-bold tracking-tight">Produse / servicii</h2>
+            <div className="mb-4">
+              <FieldLabel>Adaugă din catalog</FieldLabel>
+              <SelectBox ariaLabel="Adaugă din catalog" value="" onChange={addProduct} disabled={products.isLoading}>
+                <option value="">{products.isLoading ? "Se încarcă…" : "Selectează un produs sau serviciu"}</option>
+                {(products.data?.data ?? []).map((product) => <option key={product.id} value={product.id}>{product.name} · {money(product.unit_price_cents, product.currency)}</option>)}
+              </SelectBox>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] border-collapse text-[13px]">
                 <thead>
@@ -460,7 +501,12 @@ export function NewInvoicePage() {
                           ariaLabel="Cotă TVA"
                           className="w-[86px]"
                           value={String(row.vat_rate)}
-                          onChange={(v) => updateRow(row.key, {vat_rate: Number(v)})}
+                          onChange={(v) => updateRow(row.key, {
+                            vat_rate: Number(v),
+                            vat_category: vatCategoryFor(Number(v)),
+                            vat_exemption_code: null,
+                            vat_exemption_reason: null,
+                          })}
                         >
                           {VAT_RATES.map((r) => (
                             <option key={r} value={r}>

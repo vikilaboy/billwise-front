@@ -4,10 +4,10 @@ import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Card, Chip, Spinner} from "@heroui/react";
 import {Timeline} from "@heroui-pro/react/timeline";
 import type {TimelineStatus} from "@heroui-pro/react/timeline";
-import {Banknote, Check, ChevronLeft, Download, FileCode2, Send, X} from "lucide-react";
+import {Banknote, Check, ChevronLeft, Download, FileCode2, Pencil, Plus, Send, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {api, ApiError, downloadApiFile} from "../lib/api";
-import type {Address, EfacturaSubmission, Invoice} from "../lib/types";
+import type {Address, EfacturaSubmission, Invoice, InvoicePayment, PaymentMethod} from "../lib/types";
 import {
   cents,
   date,
@@ -112,6 +112,7 @@ export function InvoiceDetailPage() {
   const submittingRef = useRef(false);
   const [downloading, setDownloading] = useState<"pdf" | "xml" | "confirmation" | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [editingPayment, setEditingPayment] = useState<InvoicePayment | null | undefined>(undefined);
 
   const invoiceQuery = useQuery({
     queryKey: ["invoice", company?.id, id],
@@ -127,6 +128,41 @@ export function InvoiceDetailPage() {
     refetchInterval: (query) => {
       const latestSubmission = query.state.data?.data?.[0];
       return latestSubmission && ["queued", "sent", "processing"].includes(latestSubmission.status) ? 5000 : false;
+    },
+  });
+  const paymentsQuery = useQuery({
+    queryKey: ["invoice", company?.id, id, "payments"],
+    queryFn: () => api<InvoicePayment[]>(`/companies/${company!.id}/invoices/${id}/payments`),
+    enabled: Boolean(company?.id && id),
+  });
+  const deletePayment = useMutation({
+    mutationFn: (paymentId: string) =>
+      api<void>(`/companies/${company!.id}/invoices/${id}/payments/${paymentId}`, {method: "DELETE"}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id]});
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "payments"]});
+      void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+      void queryClient.invalidateQueries({queryKey: ["dashboard", company?.id]});
+    },
+  });
+  const settleInvoice = useMutation({
+    mutationFn: () =>
+      api<InvoicePayment>(`/companies/${company!.id}/invoices/${id}/payments`, {
+        method: "POST",
+        body: JSON.stringify({
+          amount_cents: invoiceQuery.data!.data.balance_cents,
+          currency: invoiceQuery.data!.data.currency,
+          paid_at: new Date().toISOString().slice(0, 10),
+          method: "bank_transfer",
+          reference: null,
+          notes: "Încasare integrală",
+        }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id]});
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "payments"]});
+      void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+      void queryClient.invalidateQueries({queryKey: ["dashboard", company?.id]});
     },
   });
 
@@ -174,6 +210,7 @@ export function InvoiceDetailPage() {
   const submissions = submissionsQuery.data?.data ?? [];
   const latest = submissions[0];
   const steps = buildSteps(invoice, latest);
+  const payments = paymentsQuery.data?.data ?? [];
   const isDraft = invoice.status === "draft";
   const formattedNumber = invoice.formatted_number;
   const hasBlockingSubmission = Boolean(latest && ["queued", "sent", "processing", "accepted"].includes(latest.status));
@@ -385,6 +422,61 @@ export function InvoiceDetailPage() {
               <div className="mt-1 text-[26px] font-extrabold tracking-tight tabular-nums">
                 {cents(invoice.total_cents)} {currency}
               </div>
+              {!isDraft ? (
+                <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-[var(--bg-muted)] p-3 text-sm">
+                  <div>
+                    <div className="text-xs text-[var(--text-muted)]">Încasat</div>
+                    <div className="mt-1 font-semibold tabular-nums">{money(invoice.paid_cents, currency)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--text-muted)]">Sold</div>
+                    <div className="mt-1 font-semibold tabular-nums">{money(invoice.balance_cents, currency)}</div>
+                  </div>
+                </div>
+              ) : null}
+
+              {!isDraft ? (
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[12px] font-semibold">Încasări</div>
+                    <div className="flex gap-1">
+                      {invoice.balance_cents > 0 ? (
+                        <>
+                          <Button size="sm" variant="ghost" isDisabled={settleInvoice.isPending} onPress={() => {
+                            if (window.confirm(`Înregistrezi soldul integral de ${money(invoice.balance_cents, currency)} ca transfer bancar, cu data de azi?`)) settleInvoice.mutate();
+                          }}>
+                            <Check size={14} /> Încasează integral
+                          </Button>
+                          <Button size="sm" variant="outline" onPress={() => setEditingPayment(null)}>
+                            <Plus size={14} /> Adaugă
+                          </Button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                  {settleInvoice.isError ? <p role="alert" className="mt-2 text-xs text-[var(--danger)]">Încasarea integrală nu a putut fi salvată.</p> : null}
+                  {paymentsQuery.isLoading ? (
+                    <div className="mt-3 flex items-center gap-2 text-xs text-[var(--text-muted)]"><Spinner size="sm" /> Se încarcă…</div>
+                  ) : payments.length === 0 ? (
+                    <p className="mt-3 text-xs text-[var(--text-muted)]">Nu există încasări înregistrate.</p>
+                  ) : (
+                    <div className="mt-2 flex flex-col">
+                      {payments.map((payment) => (
+                        <div key={payment.id} className="flex items-center gap-2 border-b border-[var(--border)] py-2.5 text-xs last:border-0">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold">{money(payment.amount_cents, payment.currency)}</div>
+                            <div className="truncate text-[var(--text-muted)]">{date(payment.paid_at)} · {payment.reference || paymentMethodLabels[payment.method]}</div>
+                          </div>
+                          <Button isIconOnly size="sm" variant="ghost" aria-label="Editează încasarea" onPress={() => setEditingPayment(payment)}><Pencil size={14} /></Button>
+                          <Button isIconOnly size="sm" variant="ghost" aria-label="Șterge încasarea" onPress={() => {
+                            if (window.confirm("Ștergi această încasare? Soldul facturii va fi recalculat.")) deletePayment.mutate(payment.id);
+                          }}><Trash2 size={14} className="text-[var(--danger)]" /></Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
 
               <div className="mt-5 border-t border-[var(--border)] pt-4">
                 <div className="text-[12px] font-semibold text-[var(--text)]">Stare e-Factura</div>
@@ -473,6 +565,22 @@ export function InvoiceDetailPage() {
         </div>
       </div>
 
+      {editingPayment !== undefined && company?.id && id ? (
+        <PaymentModal
+          companyId={company.id}
+          invoice={invoice}
+          payment={editingPayment}
+          onClose={() => setEditingPayment(undefined)}
+          onSaved={() => {
+            void queryClient.invalidateQueries({queryKey: ["invoice", company.id, id]});
+            void queryClient.invalidateQueries({queryKey: ["invoice", company.id, id, "payments"]});
+            void queryClient.invalidateQueries({queryKey: ["invoices", company.id]});
+            void queryClient.invalidateQueries({queryKey: ["dashboard", company.id]});
+            setEditingPayment(undefined);
+          }}
+        />
+      ) : null}
+
       {/* Scoped layout: responsive 2-col grid + sticky rail. */}
       <style>{`
         .invoice-detail-grid {
@@ -490,6 +598,89 @@ export function InvoiceDetailPage() {
           .invoice-detail-rail { position: static; }
         }
       `}</style>
+    </div>
+  );
+}
+
+const paymentMethodLabels: Record<PaymentMethod, string> = {
+  bank_transfer: "Transfer bancar",
+  card: "Card",
+  cash: "Numerar",
+  other: "Altă metodă",
+};
+
+function localDate(value?: string | null): string {
+  return value?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+}
+
+function PaymentModal({companyId, invoice, payment, onClose, onSaved}: {
+  companyId: string;
+  invoice: Invoice;
+  payment: InvoicePayment | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [amount, setAmount] = useState(String((payment?.amount_cents ?? invoice.balance_cents) / 100));
+  const [paidAt, setPaidAt] = useState(localDate(payment?.paid_at));
+  const [method, setMethod] = useState<PaymentMethod>(payment?.method ?? "bank_transfer");
+  const [reference, setReference] = useState(payment?.reference ?? "");
+  const [notes, setNotes] = useState(payment?.notes ?? "");
+  const save = useMutation({
+    mutationFn: () => api<InvoicePayment>(
+      `/companies/${companyId}/invoices/${invoice.id}/payments${payment ? `/${payment.id}` : ""}`,
+      {
+        method: payment ? "PUT" : "POST",
+        body: JSON.stringify({
+          amount_cents: Math.round(Number(amount) * 100),
+          currency: invoice.currency,
+          paid_at: paidAt,
+          method,
+          reference: reference.trim() || null,
+          notes: notes.trim() || null,
+        }),
+      },
+    ),
+    onSuccess: onSaved,
+  });
+  const error = save.error instanceof ApiError
+    ? save.error.problem.detail ?? Object.values(save.error.problem.errors ?? {})[0]?.[0] ?? save.error.problem.title
+    : null;
+  const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-label={payment ? "Editează încasarea" : "Încasare nouă"}>
+      <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
+        <header className="flex items-center justify-between border-b border-[var(--border)] p-5">
+          <div><h2 className="font-semibold">{payment ? "Editează încasarea" : "Înregistrează încasarea"}</h2><p className="mt-1 text-xs text-[var(--text-muted)]">Sold curent: {money(invoice.balance_cents, invoice.currency)}</p></div>
+          <Button isIconOnly variant="ghost" aria-label="Închide" onPress={onClose}><X size={17} /></Button>
+        </header>
+        <div className="grid gap-4 p-5 sm:grid-cols-2">
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Sumă
+            <input className={input} type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Data încasării
+            <input className={input} type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Metodă
+            <select className={input} value={method} onChange={(event) => setMethod(event.target.value as PaymentMethod)}>
+              {Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Referință
+            <input className={input} value={reference} onChange={(event) => setReference(event.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)] sm:col-span-2">Notițe
+            <textarea className="min-h-20 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={notes} onChange={(event) => setNotes(event.target.value)} />
+          </label>
+          {error ? <p role="alert" className="text-sm text-[var(--danger)] sm:col-span-2">{error}</p> : null}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4">
+          <Button variant="outline" onPress={onClose}>Anulează</Button>
+          <Button variant="primary" isDisabled={save.isPending || Number(amount) <= 0 || !paidAt} onPress={() => save.mutate()}>
+            {save.isPending ? <Spinner size="sm" /> : null} Salvează
+          </Button>
+        </footer>
+      </div>
     </div>
   );
 }

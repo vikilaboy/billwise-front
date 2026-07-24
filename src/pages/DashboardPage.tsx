@@ -7,7 +7,7 @@ import {BarChart} from "@heroui-pro/react/bar-chart";
 import {AlertTriangle, ArrowRight, CheckCircle2, Clock, FileText, TrendingUp} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {api, listQuery} from "../lib/api";
-import type {Invoice} from "../lib/types";
+import type {DashboardSummary, Invoice} from "../lib/types";
 import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
 
 // ---------------------------------------------------------------------------
@@ -103,9 +103,14 @@ export function DashboardPage() {
   const {company} = useCompany();
 
   const invoicesQuery = useQuery({
-    queryKey: ["invoices", company?.id, "dashboard"],
+    queryKey: ["invoices", company?.id, "dashboard-charts"],
     queryFn: () =>
       api<Invoice[]>(`/companies/${company!.id}/invoices${listQuery({perPage: 100, sort: "-issue_date"})}`),
+    enabled: Boolean(company?.id),
+  });
+  const dashboardQuery = useQuery({
+    queryKey: ["dashboard", company?.id],
+    queryFn: () => api<DashboardSummary>(`/companies/${company!.id}/dashboard`),
     enabled: Boolean(company?.id),
   });
 
@@ -172,7 +177,7 @@ export function DashboardPage() {
     };
   }, [invoices]);
 
-  if (invoicesQuery.isLoading) {
+  if (invoicesQuery.isLoading || dashboardQuery.isLoading) {
     return (
       <div className="flex items-center justify-center gap-3 py-24 text-sm text-[var(--text-muted)]">
         <Spinner size="sm" /> Se încarcă datele…
@@ -180,7 +185,7 @@ export function DashboardPage() {
     );
   }
 
-  if (invoicesQuery.isError) {
+  if (invoicesQuery.isError || dashboardQuery.isError) {
     return (
       <div className="rounded-2xl border border-[var(--danger)] bg-[var(--danger-soft)] px-5 py-4 text-sm font-medium text-[var(--danger)]">
         Datele nu au putut fi încărcate.
@@ -194,6 +199,8 @@ export function DashboardPage() {
     letterSpacing: "-0.02em",
     fontVariantNumeric: "tabular-nums",
   };
+  const summary = dashboardQuery.data?.data;
+  const recent = summary?.recent_invoices ?? model.recent;
 
   return (
     <div className="flex flex-col gap-4">
@@ -255,8 +262,8 @@ export function DashboardPage() {
             <KPI.Title className="text-[13px] text-[var(--text-muted)]">Total facturat</KPI.Title>
           </KPI.Header>
           <KPI.Content className="mt-3 flex flex-col gap-1">
-            <span style={kpiValueStyle}>{money(model.totalBilled)}</span>
-            <span className="text-xs text-[var(--text-muted)]">de la începutul anului</span>
+            <span style={kpiValueStyle}>{money(summary?.total_invoiced_ron_cents ?? model.totalBilled)}</span>
+            <span className="text-xs text-[var(--text-muted)]">total emis</span>
           </KPI.Content>
           <KPI.Chart data={model.cumulativeSpark} color="var(--accent)" height={40} />
         </KPI>
@@ -269,8 +276,8 @@ export function DashboardPage() {
             <KPI.Title className="text-[13px] text-[var(--text-muted)]">De încasat</KPI.Title>
           </KPI.Header>
           <KPI.Content className="mt-3 flex flex-col gap-1">
-            <span style={kpiValueStyle}>{money(model.toCollect)}</span>
-            <span className="text-xs text-[var(--text-muted)]">{model.outstandingCount} deschise</span>
+            <span style={kpiValueStyle}>{money(summary?.balance_ron_cents ?? model.toCollect)}</span>
+            <span className="text-xs text-[var(--text-muted)]">sold deschis</span>
           </KPI.Content>
           <KPI.Chart data={model.spark} color="var(--warning)" height={40} />
         </KPI>
@@ -284,14 +291,14 @@ export function DashboardPage() {
           </KPI.Header>
           <KPI.Content className="mt-3 flex flex-col gap-1">
             <div className="flex items-center gap-2">
-              <span style={kpiValueStyle}>{money(model.overdueAmount)}</span>
+              <span style={kpiValueStyle}>{summary?.overdue_count ?? 0}</span>
               {model.overduePct != null && (
                 <KPI.Trend trend="down" size="sm">
                   {`${model.overduePct}%`}
                 </KPI.Trend>
               )}
             </div>
-            <span className="text-xs text-[var(--text-muted)]">peste termen</span>
+            <span className="text-xs text-[var(--text-muted)]">facturi peste termen</span>
           </KPI.Content>
           <KPI.Chart data={model.overdueSpark} color="var(--danger)" height={40} />
         </KPI>
@@ -368,7 +375,7 @@ export function DashboardPage() {
           </button>
         </Card.Header>
         <Card.Content className="p-0">
-          {model.recent.length === 0 ? (
+          {recent.length === 0 ? (
             <div className="px-5 py-12 text-center text-sm text-[var(--text-muted)]">
               Nu există facturi încă. Emite prima ta factură pentru a începe.
             </div>
@@ -385,7 +392,7 @@ export function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {model.recent.map((inv) => {
+                  {recent.map((inv) => {
                     const ds = displayStatus(inv);
                     return (
                       <tr

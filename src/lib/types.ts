@@ -94,6 +94,16 @@ export type Customer = {
   notes: string | null;
   locale: "ro" | "en";
   address: Address | null;
+  bank_accounts?: BankAccount[];
+  recent_invoices?: Array<{
+    id: string;
+    formatted_number: string;
+    status: InvoiceStatus;
+    issue_date: string | null;
+    due_date: string | null;
+    currency: string;
+    total_cents: number;
+  }>;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -112,6 +122,25 @@ export type BankAccount = {
   is_active: boolean;
   is_primary: boolean;
   position: number;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type Product = {
+  id: string;
+  company_profile_id: string;
+  type: "product" | "service";
+  name: string;
+  description: string | null;
+  unit: string;
+  unit_code: string;
+  unit_price_cents: number;
+  currency: string;
+  vat_rate: string;
+  vat_category: VatCategory;
+  vat_exemption_code: string | null;
+  vat_exemption_reason: string | null;
+  is_active: boolean;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -171,6 +200,10 @@ export type Invoice = {
   subtotal_cents_ron: number | null;
   vat_cents_ron: number | null;
   total_cents_ron: number | null;
+  paid_cents: number;
+  balance_cents: number;
+  payment_status: "unpaid" | "partial" | "paid" | "overdue";
+  last_paid_at: string | null;
   lines: InvoiceLine[]; // [] in list, populated in show
   vat_breakdown: VatBreakdownGroup[]; // [] in list, populated in show
   latest_efactura_submission: EfacturaSubmission | null;
@@ -180,6 +213,30 @@ export type Invoice = {
   };
   created_at: string | null;
   updated_at: string | null;
+};
+
+export type PaymentMethod = "bank_transfer" | "card" | "cash" | "other";
+
+export type InvoicePayment = {
+  id: string;
+  invoice_id: string;
+  amount_cents: number;
+  currency: string;
+  paid_at: string;
+  method: PaymentMethod;
+  reference: string | null;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type DashboardSummary = {
+  total_invoiced_ron_cents: number;
+  total_paid_ron_cents: number;
+  balance_ron_cents: number;
+  overdue_count: number;
+  draft_count: number;
+  recent_invoices: Invoice[];
 };
 
 export type SpvSubmissionStatus =
@@ -209,4 +266,19 @@ export type SpvConnection = {
 
 export type SpvAuthorize = {
   authorize_url: string;
+};
+
+export type Currency = {
+  id: string;
+  code: string;
+  name: string;
+  symbol: string;
+  auto_update: boolean;
+  is_local: boolean;
+  is_active: boolean;
+  latest_rate: {
+    day: string | null;
+    rate: string;
+    source: string;
+  } | null;
 };

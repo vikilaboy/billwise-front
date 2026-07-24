@@ -13,12 +13,15 @@ import type {Invoice} from "../lib/types";
 import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
-type FilterKey = "toate" | "ciorne" | "emise" | "restante" | "anulate";
+type FilterKey = "toate" | "ciorne" | "emise" | "neachitate" | "partiale" | "achitate" | "restante" | "anulate";
 
 const FILTERS: {key: FilterKey; label: string}[] = [
   {key: "toate", label: "Toate"},
   {key: "ciorne", label: "Ciorne"},
   {key: "emise", label: "Emise"},
+  {key: "neachitate", label: "Neachitate"},
+  {key: "partiale", label: "Parțiale"},
+  {key: "achitate", label: "Achitate"},
   {key: "restante", label: "Restante"},
   {key: "anulate", label: "Anulate"},
 ];
@@ -32,11 +35,17 @@ const FILTER_CONFIG = {
   values: FILTERS.map((item) => item.key),
 };
 
-const displayFilter: Record<Exclude<FilterKey, "toate">, string> = {
+const displayFilter: Partial<Record<FilterKey, string>> = {
   ciorne: "draft",
   emise: "issued",
-  restante: "overdue",
   anulate: "cancelled",
+};
+
+const paymentFilter: Partial<Record<FilterKey, Invoice["payment_status"]>> = {
+  neachitate: "unpaid",
+  partiale: "partial",
+  achitate: "paid",
+  restante: "overdue",
 };
 
 export function InvoicesPage() {
@@ -58,7 +67,8 @@ export function InvoicesPage() {
           perPage: PER_PAGE,
           sort: grid.apiSort,
           filter: {
-            ...(filter === "toate" ? {} : {display_status: displayFilter[filter]}),
+            ...(filter in displayFilter ? {display_status: displayFilter[filter as keyof typeof displayFilter]} : {}),
+            ...(paymentFilter[filter] ? {payment_status: paymentFilter[filter]} : {}),
             ...(grid.debouncedSearch ? {formatted_number: {contains: grid.debouncedSearch}} : {}),
           },
         })}`,
@@ -116,14 +126,24 @@ export function InvoicesPage() {
         cell: (invoice) => money(invoice.total_cents, invoice.currency),
       },
       {
+        id: "balance",
+        header: "Sold",
+        align: "end",
+        minWidth: 150,
+        cellClassName: "font-semibold tabular-nums",
+        cell: (invoice) => money(invoice.balance_cents, invoice.currency),
+      },
+      {
         id: "status",
         header: "Status",
         minWidth: 130,
         cell: (invoice) => {
           const status = displayStatus(invoice);
+          const paymentLabels = {unpaid: "Neachitată", partial: "Parțială", paid: "Achitată", overdue: "Restantă"};
+          const label = invoice.status === "issued" ? paymentLabels[invoice.payment_status] : displayStatusLabels[status];
           return (
-            <Chip size="sm" color={statusTone[status]} variant="soft">
-              <Chip.Label>{displayStatusLabels[status]}</Chip.Label>
+            <Chip size="sm" color={invoice.payment_status === "paid" ? "success" : statusTone[status]} variant="soft">
+              <Chip.Label>{label}</Chip.Label>
             </Chip>
           );
         },

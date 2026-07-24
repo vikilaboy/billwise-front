@@ -1,11 +1,11 @@
 import {useEffect, useMemo, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner, Switch} from "@heroui/react";
-import {useSearchParams} from "react-router";
-import {Building2, Check, Globe, Landmark, Link2, Link2Off, MapPin, RefreshCw} from "lucide-react";
+import {useNavigate, useSearchParams} from "react-router";
+import {Building2, Check, Globe, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {api, ApiError} from "../lib/api";
-import type {Address, CompanyProfile, SpvAuthorize, SpvConnection} from "../lib/types";
+import type {Address, CompanyProfile, Currency, SpvAuthorize, SpvConnection} from "../lib/types";
 
 // Editable shape mirrors PUT /companies/{companyProfile} (UpdateCompanyProfileRequest).
 // The nested `address` requires RO nomenclature (state_id/locality_id) which this
@@ -110,6 +110,7 @@ function Field({
 export function SettingsPage() {
   const {company} = useCompany();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [spvFeedback] = useState(() => searchParams.get("spv"));
 
@@ -125,6 +126,25 @@ export function SettingsPage() {
     queryFn: () => api<SpvConnection>(`/efactura/spv/connection?company_profile_id=${company!.id}`),
     enabled: Boolean(company?.id),
   });
+  const currenciesQuery = useQuery({
+    queryKey: ["currencies"],
+    queryFn: () => api<Currency[]>("/settings/currencies?_per_page=100&_sort=code"),
+  });
+  const currencyMutation = useMutation({
+    mutationFn: (currency: Currency) =>
+      api<Currency>(`/settings/currencies/${currency.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          code: currency.code,
+          name: currency.name,
+          symbol: currency.symbol,
+          auto_update: currency.auto_update,
+          is_local: currency.is_local,
+          is_active: currency.is_active,
+        }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["currencies"]}),
+  });
 
   const connectMutation = useMutation({
     mutationFn: () => api<SpvAuthorize>(`/efactura/spv/authorize?company_profile_id=${company!.id}`),
@@ -137,6 +157,14 @@ export function SettingsPage() {
         method: "DELETE",
       }),
     onSuccess: () => queryClient.invalidateQueries({queryKey: ["spv-connection", company?.id]}),
+  });
+  const archiveMutation = useMutation({
+    mutationFn: () => api<void>(`/companies/${company!.id}`, {method: "DELETE"}),
+    onSuccess: async () => {
+      localStorage.removeItem("billwise_active_company_id");
+      await queryClient.invalidateQueries({queryKey: ["companies"]});
+      navigate("/dashboard", {replace: true});
+    },
   });
 
   useEffect(() => {
@@ -386,6 +414,31 @@ export function SettingsPage() {
             </span>
           ) : null}
         </div>
+        <div className="mt-5 border-t border-[var(--border)] pt-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[13.5px] font-semibold">Arhivează firma</div>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">Firma dispare din selector, însă istoricul fiscal rămâne păstrat. Ultima firmă a contului nu poate fi arhivată.</p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              isDisabled={archiveMutation.isPending}
+              onPress={() => {
+                if (window.confirm(`Arhivezi firma „${profile.legal_name}”? Datele istorice nu vor fi șterse.`)) archiveMutation.mutate();
+              }}
+            >
+              <Trash2 size={14} /> Arhivează
+            </Button>
+          </div>
+          {archiveMutation.isError ? (
+            <p role="alert" className="mt-3 text-xs font-medium text-[var(--danger)]">
+              {archiveMutation.error instanceof ApiError
+                ? archiveMutation.error.problem.detail ?? archiveMutation.error.problem.title
+                : "Firma nu a putut fi arhivată."}
+            </p>
+          ) : null}
+        </div>
       </section>
 
       {/* Card 2 — preferences */}
@@ -502,6 +555,51 @@ export function SettingsPage() {
             Operația SPV nu a putut fi finalizată.
           </p>
         ) : null}
+      </section>
+
+      <section className={cardClass}>
+        <header className="mb-4">
+          <h2 className="text-[15px] font-bold tracking-tight">Monede</h2>
+          <p className="text-[12.5px] text-[var(--text-muted)]">Configurare la nivelul întregului cont</p>
+        </header>
+        {currenciesQuery.isLoading ? <Spinner size="sm" /> : currenciesQuery.isError ? (
+          <p className="text-sm text-[var(--danger)]">Monedele nu au putut fi încărcate.</p>
+        ) : (
+          <div className="divide-y divide-[var(--border)]">
+            {(currenciesQuery.data?.data ?? []).map((currency) => (
+              <div key={currency.id} className="py-3 first:pt-0">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[13.5px] font-semibold">{currency.code} · {currency.name}</div>
+                    <div className="text-[11.5px] text-[var(--text-muted)]">
+                      {currency.is_local ? "Monedă locală" : currency.latest_rate ? `Ultimul curs: ${currency.latest_rate.rate} · ${currency.latest_rate.day}` : "Fără curs disponibil"}
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={currency.is_active}
+                      disabled={currencyMutation.isPending || currency.is_local}
+                      onChange={(event) => currencyMutation.mutate({...currency, is_active: event.target.checked})}
+                    />
+                    Activă
+                  </label>
+                </div>
+                {!currency.is_local ? (
+                  <label className="mt-2 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                    <input
+                      type="checkbox"
+                      checked={currency.auto_update}
+                      disabled={currencyMutation.isPending}
+                      onChange={(event) => currencyMutation.mutate({...currency, auto_update: event.target.checked})}
+                    />
+                    Actualizare automată BNR
+                  </label>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
       </section>
       </div>
     </div>

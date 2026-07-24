@@ -1,6 +1,6 @@
 import {createContext, useContext, useEffect, useState} from "react";
 import {Navigate, Outlet, useLocation, useNavigate} from "react-router";
-import {useQuery} from "@tanstack/react-query";
+import {useQuery, useQueryClient} from "@tanstack/react-query";
 import {Avatar, Button, Dropdown, Spinner} from "@heroui/react";
 import {Sidebar} from "@heroui-pro/react/sidebar";
 import {
@@ -12,6 +12,7 @@ import {
   Hash,
   LogOut,
   Moon,
+  Package,
   Plus,
   Settings,
   Sun,
@@ -26,6 +27,7 @@ const NAV: NavItem[] = [
   {to: "/dashboard", label: "Dashboard", icon: CircleGauge, group: "Principal"},
   {to: "/facturi", label: "Facturi", icon: FileText, group: "Principal"},
   {to: "/clienti", label: "Clienți", icon: Users, group: "Date firmă"},
+  {to: "/produse", label: "Produse și servicii", icon: Package, group: "Date firmă"},
   {to: "/conturi", label: "Conturi bancare", icon: CreditCard, group: "Date firmă"},
   {to: "/serii", label: "Serii de facturare", icon: Hash, group: "Date firmă"},
   {to: "/setari", label: "Setări", icon: Settings, group: "Date firmă"},
@@ -35,6 +37,7 @@ const META: Record<string, [string, string]> = {
   "/dashboard": ["Dashboard", "Sumarul activității firmei tale"],
   "/facturi": ["Facturi", "Toate documentele emise"],
   "/clienti": ["Clienți", "Firmele cu care lucrezi"],
+  "/produse": ["Produse și servicii", "Catalogul firmei selectate"],
   "/conturi": ["Conturi bancare", "Conturile afișate pe facturi"],
   "/serii": ["Serii de facturare", "Prefixe și numerotare"],
   "/setari": ["Setări", "Date firmă și preferințe"],
@@ -64,8 +67,9 @@ function pageMeta(pathname: string): [string, string] {
 export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const [dark, setDark] = useState(() => localStorage.getItem("billwise_theme") === "dark");
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(() => localStorage.getItem("billwise_active_company_id"));
 
   const me = useQuery({queryKey: ["me"], queryFn: () => api<User>("/me")});
   const companies = useQuery({queryKey: ["companies"], queryFn: () => api<CompanyProfile[]>("/companies")});
@@ -78,6 +82,20 @@ export function AppShell() {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("billwise_theme", dark ? "dark" : "light");
   }, [dark]);
+
+  useEffect(() => {
+    if (!company?.id) return;
+    localStorage.setItem("billwise_active_company_id", company.id);
+    if (activeId !== company.id) setActiveId(company.id);
+  }, [activeId, company?.id]);
+
+  const selectCompany = (id: string) => {
+    setActiveId(id);
+    localStorage.setItem("billwise_active_company_id", id);
+    void queryClient.invalidateQueries({
+      predicate: (query) => query.queryKey[0] !== "me" && query.queryKey[0] !== "companies",
+    });
+  };
 
   const logout = async () => {
     try {
@@ -154,7 +172,7 @@ export function AppShell() {
                 <Dropdown.Menu
                   selectionMode="single"
                   selectedKeys={company ? [company.id] : []}
-                  onAction={(key) => setActiveId(String(key))}
+                  onAction={(key) => selectCompany(String(key))}
                 >
                   {list.map((c) => (
                     <Dropdown.Item key={c.id} id={String(c.id)} textValue={c.legal_name}>
@@ -173,6 +191,10 @@ export function AppShell() {
                 </Dropdown.Menu>
               </Dropdown.Popover>
             </Dropdown>
+
+            <Button variant="outline" fullWidth onPress={() => navigate("/firme/noi")}>
+              <Plus size={16} /> Adaugă firmă
+            </Button>
 
             <Button variant="primary" fullWidth onPress={() => navigate("/facturi/noi")}>
               <Plus size={17} /> Emite factură

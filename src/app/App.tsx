@@ -24,6 +24,7 @@ const CustomersPage = lazyNamed(() => import("../pages/CustomersPage"), "Custome
 const BankAccountsPage = lazyNamed(() => import("../pages/BankAccountsPage"), "BankAccountsPage");
 const InvoiceSeriesPage = lazyNamed(() => import("../pages/InvoiceSeriesPage"), "InvoiceSeriesPage");
 const SettingsPage = lazyNamed(() => import("../pages/SettingsPage"), "SettingsPage");
+const ProductsPage = lazyNamed(() => import("../pages/ProductsPage"), "ProductsPage");
 
 const Protected = () => (session.token() ? <AppShell /> : <Navigate to="/login" replace />);
 
@@ -46,12 +47,14 @@ export function App() {
         <Route element={<Protected />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/onboarding/firma" element={<CompanyOnboardingPage />} />
+          <Route path="/firme/noi" element={<CompanyOnboardingPage mode="additional" />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/facturi" element={<InvoicesPage />} />
           <Route path="/facturi/noi" element={<NewInvoicePage />} />
           <Route path="/facturi/:id" element={<InvoiceDetailPage />} />
           <Route path="/recurente" element={<RecurringPage />} />
           <Route path="/clienti" element={<CustomersPage />} />
+          <Route path="/produse" element={<ProductsPage />} />
           <Route path="/conturi" element={<BankAccountsPage />} />
           <Route path="/serii" element={<InvoiceSeriesPage />} />
           <Route path="/setari" element={<SettingsPage />} />

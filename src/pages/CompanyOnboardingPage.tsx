@@ -39,7 +39,7 @@ const emptyForm: CompanyForm = {
   confirmed: false,
 };
 
-export function CompanyOnboardingPage() {
+export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "additional"}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [cui, setCui] = useState("");
@@ -134,7 +134,7 @@ export function CompanyOnboardingPage() {
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({queryKey: ["companies"]});
-      navigate("/dashboard?onboarding=complete", {replace: true});
+      navigate(mode === "first" ? "/dashboard?onboarding=complete" : "/setari?company=created", {replace: true});
     },
   });
 
@@ -182,7 +182,9 @@ export function CompanyOnboardingPage() {
           </span>
           <div>
             <div className="font-bold">BillWise</div>
-            <div className="text-xs text-[var(--text-muted)]">Configurarea primei firme</div>
+            <div className="text-xs text-[var(--text-muted)]">
+              {mode === "first" ? "Configurarea primei firme" : "Adăugarea unei firme"}
+            </div>
           </div>
         </div>
 
