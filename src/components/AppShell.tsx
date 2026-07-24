@@ -4,19 +4,16 @@ import {useQuery} from "@tanstack/react-query";
 import {Avatar, Button, Dropdown} from "@heroui/react";
 import {Sidebar} from "@heroui-pro/react/sidebar";
 import {
-  Bell,
   Building2,
   Check,
   ChevronsUpDown,
   CircleGauge,
   CreditCard,
-  FileClock,
   FileText,
   Hash,
   LogOut,
   Moon,
   Plus,
-  Search,
   Settings,
   Sun,
   Users,
@@ -29,7 +26,6 @@ type NavItem = {to: string; label: string; icon: typeof FileText; group: string;
 const NAV: NavItem[] = [
   {to: "/dashboard", label: "Dashboard", icon: CircleGauge, group: "Principal"},
   {to: "/facturi", label: "Facturi", icon: FileText, group: "Principal"},
-  {to: "/recurente", label: "Facturi recurente", icon: FileClock, group: "Principal"},
   {to: "/clienti", label: "Clienți", icon: Users, group: "Date firmă"},
   {to: "/conturi", label: "Conturi bancare", icon: CreditCard, group: "Date firmă"},
   {to: "/serii", label: "Serii de facturare", icon: Hash, group: "Date firmă"},
@@ -39,7 +35,6 @@ const NAV: NavItem[] = [
 const META: Record<string, [string, string]> = {
   "/dashboard": ["Dashboard", "Sumarul activității firmei tale"],
   "/facturi": ["Facturi", "Toate documentele emise"],
-  "/recurente": ["Facturi recurente", "Automatizări active"],
   "/clienti": ["Clienți", "Firmele cu care lucrezi"],
   "/conturi": ["Conturi bancare", "Conturile afișate pe facturi"],
   "/serii": ["Serii de facturare", "Prefixe și numerotare"],
@@ -201,36 +196,8 @@ export function AppShell() {
 
             <div className="flex-1" />
 
-            <label className="hidden h-9 min-w-0 max-w-[320px] flex-1 items-center gap-2 rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-subtle)] px-3 lg:flex">
-              <Search size={16} className="text-[var(--text-faint)]" />
-              <input
-                aria-label="Caută"
-                placeholder="Caută facturi, clienți…"
-                className="w-full border-0 bg-transparent text-[13.5px] outline-none placeholder:text-[var(--text-faint)]"
-              />
-            </label>
-
-            <div
-              className="hidden h-9 items-center gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--bg-subtle)] px-3 sm:flex"
-              title="Curs de referință BNR"
-            >
-              <span className="text-[11px] font-bold text-[var(--text-faint)]">BNR</span>
-              <span className="text-[13px] font-semibold tabular-nums">1 € = 4,9772 lei</span>
-            </div>
-            <div
-              className="hidden h-9 items-center gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--success-soft)] px-3 sm:flex"
-              title="Conectat la SPV / e-Factura"
-            >
-              <span className="h-[7px] w-[7px] rounded-full bg-[var(--success)]" />
-              <span className="text-[12.5px] font-semibold text-[var(--success)]">SPV conectat</span>
-            </div>
-
             <Button isIconOnly variant="outline" size="sm" aria-label="Comută tema" onPress={() => setDark((v) => !v)}>
               {dark ? <Sun size={18} /> : <Moon size={18} />}
-            </Button>
-            <Button isIconOnly variant="outline" size="sm" aria-label="Notificări" className="relative">
-              <Bell size={18} />
-              <span className="absolute right-2 top-2 h-[7px] w-[7px] rounded-full border border-[var(--bg)] bg-[var(--danger)]" />
             </Button>
           </header>
 

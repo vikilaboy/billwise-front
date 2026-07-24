@@ -1,25 +1,10 @@
-import {useEffect, useMemo, useState} from "react";
+import {useMemo} from "react";
 import {useNavigate} from "react-router";
 import {useQuery} from "@tanstack/react-query";
 import {Button, Chip, Spinner} from "@heroui/react";
-import {
-  DataGrid,
-  type DataGridColumn,
-  type DataGridSelection,
-  type DataGridSortDescriptor,
-} from "@heroui-pro/react/data-grid";
+import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
-import {
-  Check,
-  Download,
-  FileText,
-  MoreHorizontal,
-  Plus,
-  RotateCcw,
-  Search,
-  Trash2,
-  X,
-} from "lucide-react";
+import {FileText, Plus, RotateCcw, Search} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
@@ -57,7 +42,6 @@ const displayFilter: Record<Exclude<FilterKey, "toate">, string> = {
 export function InvoicesPage() {
   const {company} = useCompany();
   const navigate = useNavigate();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const grid = useServerDataGridState<FilterKey>({
     defaultSort: DEFAULT_SORT,
     sortColumns: SORT_COLUMNS,
@@ -84,16 +68,6 @@ export function InvoicesPage() {
   });
 
   const rows = useMemo(() => invoices.data?.data ?? [], [invoices.data]);
-
-  // Keep selection consistent if the underlying data changes.
-  useEffect(() => {
-    setSelected((prev) => {
-      if (prev.size === 0) return prev;
-      const ids = new Set(rows.map((i) => i.id));
-      const next = new Set([...prev].filter((id) => ids.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [rows]);
 
   const columns = useMemo<DataGridColumn<Invoice>[]>(
     () => [
@@ -154,48 +128,9 @@ export function InvoicesPage() {
           );
         },
       },
-      {
-        id: "efactura",
-        header: "e-Factura",
-        minWidth: 140,
-        cell: () => (
-          <Chip size="sm" color="default" variant="soft">
-            <Chip.Label>Nedepusă</Chip.Label>
-          </Chip>
-        ),
-      },
-      {
-        id: "actions",
-        header: "",
-        width: 64,
-        minWidth: 64,
-        pinned: "end",
-        cell: (invoice) => (
-          <Button
-            isIconOnly
-            variant="ghost"
-            size="sm"
-            aria-label={`Acțiuni pentru ${invoice.formatted_number}`}
-            onClick={(event) => event.stopPropagation()}
-            onPress={() => console.log("actions", invoice.id)}
-          >
-            <MoreHorizontal size={17} />
-          </Button>
-        ),
-      },
     ],
     [],
   );
-
-  function changeSelection(keys: DataGridSelection) {
-    setSelected(keys === "all" ? new Set(rows.map((invoice) => invoice.id)) : new Set([...keys].map(String)));
-  }
-
-  function clearSelection() {
-    setSelected(new Set());
-  }
-
-  const selectedCount = selected.size;
 
   return (
     <div className="flex flex-col gap-5">
@@ -274,14 +209,10 @@ export function InvoicesPage() {
           <DataGrid
             aria-label="Facturi"
             className="w-full"
-            contentClassName="min-w-[1120px]"
+            contentClassName="min-w-[900px]"
             columns={columns}
             data={rows}
             getRowId={(invoice) => invoice.id}
-            selectionMode="multiple"
-            showSelectionCheckboxes
-            selectedKeys={selected}
-            onSelectionChange={changeSelection}
             sortDescriptor={grid.sort}
             onSortChange={grid.setSort}
             onRowAction={(key) => navigate(`/facturi/${String(key)}`)}
@@ -289,48 +220,6 @@ export function InvoicesPage() {
         )}
         <DataTablePagination pagination={invoices.data?.meta?.pagination} onPageChange={grid.setPage} />
       </div>
-
-      {/* Floating selection action bar */}
-      {selectedCount > 0 && (
-        <div
-          className="fixed bottom-6 left-1/2 z-[45] flex -translate-x-1/2 items-center gap-2 rounded-2xl bg-[var(--text)] px-3 py-2.5 text-[var(--bg)] shadow-[0_16px_40px_rgba(0,0,0,0.28)]"
-          role="toolbar"
-          aria-label="Acțiuni pentru facturile selectate"
-        >
-          <span className="px-2 text-[13px] font-semibold tabular-nums">{selectedCount} selectate</span>
-          <span className="mx-1 h-5 w-px bg-white/20" />
-          <button
-            type="button"
-            onClick={() => console.log("mark paid", [...selected])}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-white/10"
-          >
-            <Check size={15} /> Marchează plătit
-          </button>
-          <button
-            type="button"
-            onClick={() => console.log("export", [...selected])}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-white/10"
-          >
-            <Download size={15} /> Exportă
-          </button>
-          <button
-            type="button"
-            onClick={() => console.log("delete", [...selected])}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium text-[var(--danger)] transition-colors hover:bg-white/10"
-          >
-            <Trash2 size={15} /> Șterge
-          </button>
-          <span className="mx-1 h-5 w-px bg-white/20" />
-          <button
-            type="button"
-            aria-label="Anulează selecția"
-            onClick={clearSelection}
-            className="inline-flex items-center justify-center rounded-lg p-1.5 transition-colors hover:bg-white/10"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      )}
     </div>
   );
 }

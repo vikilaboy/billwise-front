@@ -21,7 +21,6 @@ type FormState = {
   street: string;
 };
 
-const AUTO_EFACTURA_KEY = "billwise_auto_efactura";
 const THEME_KEY = "billwise_theme";
 
 function emptyForm(): FormState {
@@ -122,9 +121,8 @@ export function SettingsPage() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [justSaved, setJustSaved] = useState(false);
 
-  // Preferences (local-only, no API).
+  // Theme is a device-local display preference.
   const [darkTheme, setDarkTheme] = useState(() => localStorage.getItem(THEME_KEY) === "dark");
-  const [autoEfactura, setAutoEfactura] = useState(() => localStorage.getItem(AUTO_EFACTURA_KEY) === "true");
 
   // Hydrate the form once the profile loads (or the active company changes).
   useEffect(() => {
@@ -170,11 +168,6 @@ export function SettingsPage() {
     setDarkTheme(checked);
     document.documentElement.classList.toggle("dark", checked);
     localStorage.setItem(THEME_KEY, checked ? "dark" : "light");
-  }
-
-  function handleAutoEfacturaChange(checked: boolean) {
-    setAutoEfactura(checked);
-    localStorage.setItem(AUTO_EFACTURA_KEY, checked ? "true" : "false");
   }
 
   function handleSave() {
@@ -397,17 +390,6 @@ export function SettingsPage() {
             </span>
           </div>
 
-          <div className="flex items-center justify-between gap-4 py-3.5 last:pb-0">
-            <div>
-              <div className="text-[13.5px] font-semibold">Depunere automată e-Factura</div>
-              <div className="text-[12px] text-[var(--text-muted)]">Trimite în SPV la emitere</div>
-            </div>
-            <Toggle
-              isSelected={autoEfactura}
-              onChange={handleAutoEfacturaChange}
-              label="Depunere automată e-Factura"
-            />
-          </div>
         </div>
       </section>
     </div>

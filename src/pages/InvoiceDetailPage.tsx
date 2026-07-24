@@ -4,7 +4,7 @@ import {useQuery} from "@tanstack/react-query";
 import {Button, Card, Chip, Spinner} from "@heroui/react";
 import {Timeline} from "@heroui-pro/react/timeline";
 import type {TimelineStatus} from "@heroui-pro/react/timeline";
-import {Banknote, Check, ChevronLeft, Copy, Download, Mail, RotateCcw, X} from "lucide-react";
+import {Banknote, Check, ChevronLeft, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {api} from "../lib/api";
 import type {Address, EfacturaSubmission, Invoice} from "../lib/types";
@@ -167,12 +167,6 @@ export function InvoiceDetailPage() {
           <Chip.Label>{displayStatusLabels[ds]}</Chip.Label>
         </Chip>
         <div className="flex-1" />
-        <Button variant="outline">
-          <Mail size={16} /> Trimite pe email
-        </Button>
-        <Button variant="primary">
-          <Download size={16} /> Descarcă PDF
-        </Button>
       </div>
 
       {/* 2-column grid */}
@@ -365,21 +359,6 @@ export function InvoiceDetailPage() {
             </Card.Content>
           </Card>
 
-          {/* Actions card */}
-          <Card className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
-            <Card.Content className="flex flex-col gap-2 p-0">
-              <div className="mb-1 text-[12px] font-semibold text-[var(--text)]">Acțiuni</div>
-              <Button variant="secondary" fullWidth>
-                <Check size={16} /> Marchează încasată
-              </Button>
-              <Button variant="secondary" fullWidth>
-                <Copy size={16} /> Duplică factura
-              </Button>
-              <Button variant="danger-soft" fullWidth>
-                <RotateCcw size={16} /> Stornează
-              </Button>
-            </Card.Content>
-          </Card>
         </div>
       </div>
 
