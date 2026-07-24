@@ -5,8 +5,8 @@ import {Button, Input, Spinner, TextArea} from "@heroui/react";
 import {ChevronDown, Loader2, Plus, Send, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {ApiError, api, listQuery} from "../lib/api";
-import type {Customer, Invoice, Product, VatCategory} from "../lib/types";
-import {money} from "../lib/format";
+import type {Currency, Customer, Invoice, Product, VatCategory, VatProfile} from "../lib/types";
+import {exchangeRate, money} from "../lib/format";
 
 // The API create contract (StoreInvoiceRequest) accepts NO invoice_series_id — the
 // series is resolved server-side from the company's default series. We still show a
@@ -22,6 +22,13 @@ type InvoiceSeries = {
   is_active: boolean;
 };
 
+type ResolvedExchangeRate = {
+  currency_code: string;
+  rate: string;
+  day: string;
+  source: string;
+};
+
 type LineRow = {
   key: string;
   description: string;
@@ -30,6 +37,7 @@ type LineRow = {
   quantity: number;
   unit_price: number; // major units, e.g. 2500.00
   vat_rate: number; // percent: 19 | 9 | 5 | 0
+  vat_profile_id: string | null;
   vat_category: VatCategory;
   vat_exemption_code: string | null;
   vat_exemption_reason: string | null;
@@ -38,20 +46,6 @@ type LineRow = {
 // Fixed unit for the whole prototype; the create request requires a UN/ECE unit_code.
 const UNIT_LABEL = "buc";
 const UNIT_CODE = "C62"; // "One (piece)"
-
-const VAT_RATES = [19, 9, 5, 0];
-
-const CURRENCIES = [
-  {code: "RON", label: "RON — Leu românesc"},
-  {code: "EUR", label: "EUR — Euro"},
-  {code: "USD", label: "USD — Dolar american"},
-];
-
-// vat_rate → EN 16931 VAT category (UNCL5305). 0% is zero-rated (Z), which — unlike
-// the exemption categories — carries no VATEX code / reason (BR-Z).
-function vatCategoryFor(rate: number): "S" | "Z" {
-  return rate > 0 ? "S" : "Z";
-}
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -66,7 +60,7 @@ function isoPlusDays(days: number): string {
 function newRow(): LineRow {
   return {
     key: crypto.randomUUID(), description: "", unit: UNIT_LABEL, unit_code: UNIT_CODE,
-    quantity: 1, unit_price: 0, vat_rate: 19,
+    quantity: 1, unit_price: 0, vat_rate: 19, vat_profile_id: null,
     vat_category: "S", vat_exemption_code: null, vat_exemption_reason: null,
   };
 }
@@ -149,6 +143,15 @@ export function NewInvoicePage() {
     queryFn: () => api<Product[]>(`/companies/${company!.id}/products${listQuery({perPage: 100, sort: "name", filter: {is_active: {eq: 1}}})}`),
     enabled: Boolean(company?.id),
   });
+  const currencies = useQuery({
+    queryKey: ["currencies", "active"],
+    queryFn: () => api<Currency[]>("/settings/currencies?_per_page=100&_sort=code"),
+  });
+  const vatProfiles = useQuery({
+    queryKey: ["vat-profiles", company?.id],
+    queryFn: () => api<VatProfile[]>(`/companies/${company!.id}/vat-profiles?_per_page=100`),
+    enabled: Boolean(company?.id),
+  });
   const invoiceQuery = useQuery({
     queryKey: ["invoice", company?.id, id, "edit"],
     queryFn: () => api<Invoice>(`/companies/${company!.id}/invoices/${id}`),
@@ -161,10 +164,22 @@ export function NewInvoicePage() {
   const [dueDate, setDueDate] = useState(() => isoPlusDays(15));
   const [currency, setCurrency] = useState("RON");
   const [locale, setLocale] = useState<"ro" | "en">("ro");
-  const [exchangeRate, setExchangeRate] = useState("");
   const [notes, setNotes] = useState("");
   const [rows, setRows] = useState<LineRow[]>(() => [newRow()]);
   const [error, setError] = useState<ApiError | null>(null);
+
+  useEffect(() => {
+    const profile = (vatProfiles.data?.data ?? []).find((item) => item.is_active && item.is_default);
+    if (!profile) return;
+    setRows((current) => current.map((row) => row.vat_profile_id ? row : {
+      ...row,
+      vat_profile_id: profile.id,
+      vat_rate: Number(profile.rate),
+      vat_category: profile.vat_category,
+      vat_exemption_code: profile.vat_exemption_code,
+      vat_exemption_reason: profile.vat_exemption_reason,
+    }));
+  }, [vatProfiles.data]);
 
   useEffect(() => {
     const invoice = invoiceQuery.data?.data;
@@ -187,6 +202,7 @@ export function NewInvoicePage() {
       quantity: Number(line.quantity),
       unit_price: line.unit_price_cents / 100,
       vat_rate: Number(line.vat_rate),
+      vat_profile_id: line.vat_profile_id,
       vat_category: line.vat_category,
       vat_exemption_code: line.vat_exemption_code,
       vat_exemption_reason: line.vat_exemption_reason,
@@ -207,16 +223,20 @@ export function NewInvoicePage() {
     : "—";
 
   const isForeign = currency !== "RON";
-  const rate = Number(exchangeRate.replace(",", "."));
+  const exchangeRatePreview = useQuery({
+    queryKey: ["exchange-rate-preview", currency, issueDate],
+    queryFn: () => api<ResolvedExchangeRate>(
+      `/exchange-rates/resolve?currency=${encodeURIComponent(currency)}&date=${encodeURIComponent(issueDate)}`,
+    ),
+    enabled: isForeign && Boolean(issueDate),
+    retry: false,
+  });
 
   const totals = useMemo(() => {
     const subtotal = rows.reduce((sum, r) => sum + lineNetCents(r), 0);
     const vat = rows.reduce((sum, r) => sum + lineVatCents(r), 0);
     return {subtotal, vat, total: subtotal + vat};
   }, [rows]);
-
-  const ronTotal =
-    isForeign && Number.isFinite(rate) && rate > 0 ? Math.round(totals.total * rate) : null;
 
   // Field-level errors from the API problem+json (keys like "lines.0.description").
   const fieldErrors = error?.problem.errors ?? {};
@@ -240,6 +260,7 @@ export function NewInvoicePage() {
       quantity: 1,
       unit_price: product.unit_price_cents / 100,
       vat_rate: Number(product.vat_rate),
+      vat_profile_id: product.vat_profile_id,
       vat_category: product.vat_category,
       vat_exemption_code: product.vat_exemption_code,
       vat_exemption_reason: product.vat_exemption_reason,
@@ -267,6 +288,7 @@ export function NewInvoicePage() {
         unit_code: r.unit_code,
         unit_price_cents: Math.round(r.unit_price * 100),
         vat_rate: r.vat_rate,
+        vat_profile_id: r.vat_profile_id,
         vat_category: r.vat_category,
         vat_exemption_code: r.vat_exemption_code,
         vat_exemption_reason: r.vat_exemption_reason,
@@ -414,9 +436,9 @@ export function NewInvoicePage() {
               <div>
                 <FieldLabel>Monedă</FieldLabel>
                 <SelectBox ariaLabel="Monedă" value={currency} onChange={setCurrency}>
-                  {CURRENCIES.map((c) => (
+                  {(currencies.data?.data ?? []).filter((c) => c.is_active).map((c) => (
                     <option key={c.code} value={c.code}>
-                      {c.label}
+                      {c.code} — {c.name}
                     </option>
                   ))}
                 </SelectBox>
@@ -430,22 +452,14 @@ export function NewInvoicePage() {
                 </SelectBox>
               </div>
 
-              {isForeign && (
-                <div>
-                  <FieldLabel>Curs BNR (1 {currency} = ? RON)</FieldLabel>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.0001"
-                    min="0"
-                    aria-label="Curs BNR"
-                    placeholder="4.9772"
-                    value={exchangeRate}
-                    onChange={(e) => setExchangeRate(e.target.value)}
-                    className={inputBase + " tabular-nums"}
-                  />
-                </div>
-              )}
+              {isForeign && <div className="self-end text-xs text-[var(--text-muted)]">
+                {exchangeRatePreview.isPending
+                  ? "Se verifică cursul care ar fi folosit…"
+                  : exchangeRatePreview.data
+                    ? <>Preview: 1 {currency} = {exchangeRate(exchangeRatePreview.data.data.rate)} RON · {exchangeRatePreview.data.data.source.toUpperCase()} · {exchangeRatePreview.data.data.day}</>
+                    : "Nu există acum un curs eligibil pentru această dată. Emiterea va rămâne blocată până la disponibilitatea lui."}
+                <span className="mt-1 block">Preview-ul este informativ; la emitere serverul recalculează și salvează definitiv cursul.</span>
+              </div>}
             </div>
           </section>
 
@@ -532,18 +546,24 @@ export function NewInvoicePage() {
                       <td className="py-2.5 px-2 align-top">
                         <SelectBox
                           ariaLabel="Cotă TVA"
-                          className="w-[86px]"
-                          value={String(row.vat_rate)}
-                          onChange={(v) => updateRow(row.key, {
-                            vat_rate: Number(v),
-                            vat_category: vatCategoryFor(Number(v)),
-                            vat_exemption_code: null,
-                            vat_exemption_reason: null,
-                          })}
+                          className="w-[150px]"
+                          value={row.vat_profile_id ?? ""}
+                          onChange={(v) => {
+                            const profile = (vatProfiles.data?.data ?? []).find((item) => item.id === v);
+                            if (!profile) return;
+                            updateRow(row.key, {
+                              vat_profile_id: profile.id,
+                              vat_rate: Number(profile.rate),
+                              vat_category: profile.vat_category,
+                              vat_exemption_code: profile.vat_exemption_code,
+                              vat_exemption_reason: profile.vat_exemption_reason,
+                            });
+                          }}
                         >
-                          {VAT_RATES.map((r) => (
-                            <option key={r} value={r}>
-                              {r}%
+                          <option value="">Selectează TVA</option>
+                          {(vatProfiles.data?.data ?? []).filter((profile) => profile.is_active).map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name} · {Number(profile.rate)}%
                             </option>
                           ))}
                         </SelectBox>
@@ -612,11 +632,18 @@ export function NewInvoicePage() {
                   {money(totals.total, currency)}
                 </dd>
               </div>
-              {ronTotal !== null && (
-                <div className="flex items-center justify-end text-[12px] text-[var(--text-muted)]">
-                  ≈ {money(ronTotal, "RON")}
+              {isForeign && exchangeRatePreview.data ? <>
+                <div className="flex items-center justify-between text-[12px] text-[var(--text-muted)]">
+                  <dt>Subtotal estimat RON</dt>
+                  <dd>{money(Math.round(totals.subtotal * Number(exchangeRatePreview.data.data.rate)), "RON")}</dd>
                 </div>
-              )}
+                <div className="flex items-center justify-between text-[12px] text-[var(--text-muted)]">
+                  <dt>Total estimat RON</dt>
+                  <dd>{money(Math.round(totals.total * Number(exchangeRatePreview.data.data.rate)), "RON")}</dd>
+                </div>
+              </> : isForeign ? <div className="text-right text-[12px] text-[var(--text-muted)]">
+                Echivalentul RON va apărea după emitere.
+              </div> : null}
             </dl>
 
             <div className="mt-4 flex flex-col gap-2.5">

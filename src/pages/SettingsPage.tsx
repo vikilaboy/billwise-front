@@ -5,7 +5,8 @@ import {useNavigate, useSearchParams} from "react-router";
 import {Building2, Check, Globe, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {api, ApiError} from "../lib/api";
-import type {Address, CompanyProfile, Currency, SpvAuthorize, SpvConnection} from "../lib/types";
+import type {Address, CompanyProfile, Currency, SpvAuthorize, SpvConnection, VatProfile} from "../lib/types";
+import {exchangeRate} from "../lib/format";
 
 // Editable shape mirrors PUT /companies/{companyProfile} (UpdateCompanyProfileRequest).
 // The nested `address` requires RO nomenclature (state_id/locality_id) which this
@@ -149,6 +150,38 @@ export function SettingsPage() {
         }),
       }),
     onSuccess: () => queryClient.invalidateQueries({queryKey: ["currencies"]}),
+  });
+  const vatProfilesQuery = useQuery({
+    queryKey: ["vat-profiles", company?.id],
+    queryFn: () => api<VatProfile[]>(`/companies/${company!.id}/vat-profiles`),
+    enabled: Boolean(company?.id),
+  });
+  const vatProfiles = Array.isArray(vatProfilesQuery.data?.data) ? vatProfilesQuery.data.data : [];
+  const [newVatName, setNewVatName] = useState("");
+  const [newVatRate, setNewVatRate] = useState("19");
+  const vatProfileMutation = useMutation({
+    mutationFn: (input: {profile?: VatProfile; create?: boolean}) => input.create
+      ? api<VatProfile>(`/companies/${company!.id}/vat-profiles`, {
+          method: "POST",
+          body: JSON.stringify({
+            name: newVatName.trim(),
+            rate: newVatRate,
+            vat_category: Number(newVatRate) > 0 ? "S" : "Z",
+            vat_exemption_code: null,
+            vat_exemption_reason: null,
+            is_active: true,
+            is_default: vatProfiles.length === 0,
+            position: vatProfiles.length,
+          }),
+        })
+      : api<VatProfile>(`/companies/${company!.id}/vat-profiles/${input.profile!.id}`, {
+          method: "PUT",
+          body: JSON.stringify({...input.profile, is_active: !input.profile!.is_active}),
+        }),
+    onSuccess: () => {
+      setNewVatName("");
+      void queryClient.invalidateQueries({queryKey: ["vat-profiles", company?.id]});
+    },
   });
 
   const connectMutation = useMutation({
@@ -617,7 +650,7 @@ export function SettingsPage() {
                   <div>
                     <div className="text-[13.5px] font-semibold">{currency.code} · {currency.name}</div>
                     <div className="text-[11.5px] text-[var(--text-muted)]">
-                      {currency.is_local ? "Monedă locală" : currency.latest_rate ? `Ultimul curs: ${currency.latest_rate.rate} · ${currency.latest_rate.day}` : "Fără curs disponibil"}
+                      {currency.is_local ? "Monedă locală" : currency.latest_rate ? `Ultimul curs: ${exchangeRate(currency.latest_rate.rate)} · ${currency.latest_rate.day}` : "Fără curs disponibil"}
                     </div>
                   </div>
                   <label className="flex items-center gap-2 text-xs">
@@ -645,6 +678,26 @@ export function SettingsPage() {
             ))}
           </div>
         )}
+      </section>
+      <section className={cardClass}>
+        <header className="mb-4">
+          <h2 className="text-[15px] font-bold tracking-tight">Profiluri TVA</h2>
+          <p className="text-[12.5px] text-[var(--text-muted)]">Cotele și tratamentele fiscale selectabile pe produse, facturi și recurențe</p>
+        </header>
+        <div className="mb-4 grid grid-cols-[1fr_100px_auto] gap-2">
+          <Input aria-label="Denumire profil TVA" placeholder="TVA standard" value={newVatName} onChange={(event) => setNewVatName(event.target.value)} />
+          <Input aria-label="Cotă TVA" type="number" min="0" max="100" value={newVatRate} onChange={(event) => setNewVatRate(event.target.value)} />
+          <Button variant="primary" isDisabled={!newVatName.trim() || vatProfileMutation.isPending} onPress={() => vatProfileMutation.mutate({create: true})}>Adaugă</Button>
+        </div>
+        {vatProfilesQuery.isLoading ? <Spinner size="sm" /> : (
+          <div className="divide-y divide-[var(--border)]">
+            {vatProfiles.map((profile) => <div key={profile.id} className="flex items-center justify-between py-3">
+              <div><div className="text-[13.5px] font-semibold">{profile.name} · {Number(profile.rate)}%</div><div className="text-xs text-[var(--text-muted)]">{profile.vat_category}{profile.is_default ? " · implicit" : ""}{profile.is_referenced ? " · utilizat" : ""}</div></div>
+              <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={profile.is_active} disabled={vatProfileMutation.isPending} onChange={() => vatProfileMutation.mutate({profile})} /> Activ</label>
+            </div>)}
+          </div>
+        )}
+        {vatProfileMutation.isError ? <p role="alert" className="mt-3 text-xs text-[var(--danger)]">{vatProfileMutation.error instanceof ApiError ? vatProfileMutation.error.problem.detail : "Profilul TVA nu a putut fi salvat."}</p> : null}
       </section>
       </div>
     </div>

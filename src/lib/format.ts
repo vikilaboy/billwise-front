@@ -17,6 +17,14 @@ export function integer(value: number | null | undefined): string {
   return intFmt.format(value ?? 0);
 }
 
+export function exchangeRate(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "—";
+  return new Intl.NumberFormat("ro-RO", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  }).format(Number(value));
+}
+
 // "2026-07-10" → "10.07.2026". Passthrough for anything unparseable.
 export function date(value: string | null | undefined): string {
   if (!value) return "—";
