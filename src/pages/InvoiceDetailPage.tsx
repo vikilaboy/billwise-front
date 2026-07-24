@@ -13,6 +13,7 @@ import {
   date,
   displayStatus,
   displayStatusLabels,
+  exchangeRate,
   money,
   spvStatusLabels,
   statusTone,
@@ -287,6 +288,11 @@ export function InvoiceDetailPage() {
         <Chip color={statusTone[ds]} variant="soft" size="lg">
           <Chip.Label>{displayStatusLabels[ds]}</Chip.Label>
         </Chip>
+        {invoice.recurring_source ? (
+          <Button variant="outline" onPress={() => navigate("/recurente")}>
+            Sursă: {invoice.recurring_source.template_name ?? "șablon recurent"} · v{invoice.recurring_source.version ?? "—"}
+          </Button>
+        ) : null}
         <div className="flex-1" />
         {isDraft ? (
           <>
@@ -363,6 +369,10 @@ export function InvoiceDetailPage() {
                 <div className="mt-2 text-[12px] tabular-nums" style={{color: PAPER.muted}}>
                   Emitere: {date(invoice.issue_date)}
                 </div>
+                {invoice.exchange_rate && <div className="mt-1 text-[12px]" style={{color: PAPER.muted}}>
+                  Curs {invoice.exchange_rate_source?.toUpperCase() ?? "BNR"}: 1 {invoice.currency} = {exchangeRate(invoice.exchange_rate)} RON
+                  {invoice.exchange_rate_day ? ` (${date(invoice.exchange_rate_day)})` : ""}
+                </div>}
                 <div className="text-[12px] tabular-nums" style={{color: PAPER.muted}}>
                   Scadență: {date(invoice.due_date)}
                 </div>
@@ -426,6 +436,9 @@ export function InvoiceDetailPage() {
                       </td>
                       <td className="border-b px-2 py-2.5 text-right align-top" style={{borderColor: PAPER.border}}>
                         {money(line.unit_price_cents, currency)}
+                        {invoice.exchange_rate && <div className="text-[10px]" style={{color: PAPER.faint}}>
+                          {money(Math.round(line.unit_price_cents * Number(invoice.exchange_rate)), "RON")}
+                        </div>}
                       </td>
                       <td className="border-b px-2 py-2.5 text-right align-top" style={{borderColor: PAPER.border}}>
                         {Number(line.vat_rate)}%
@@ -435,6 +448,9 @@ export function InvoiceDetailPage() {
                         style={{borderColor: PAPER.border}}
                       >
                         {money(line.subtotal_cents, currency)}
+                        {invoice.exchange_rate && <div className="text-[10px] font-normal" style={{color: PAPER.faint}}>
+                          {money(Math.round(line.subtotal_cents * Number(invoice.exchange_rate)), "RON")}
+                        </div>}
                       </td>
                     </tr>
                   ))}
@@ -460,6 +476,11 @@ export function InvoiceDetailPage() {
                   <span>Total</span>
                   <span>{money(invoice.total_cents, currency)}</span>
                 </div>
+                {invoice.total_cents_ron !== null && invoice.currency !== "RON" && <div className="mt-2 border-t pt-2" style={{borderColor: PAPER.border}}>
+                  <div className="flex justify-between py-1" style={{color: PAPER.muted}}><span>Subtotal RON</span><span>{money(invoice.subtotal_cents_ron, "RON")}</span></div>
+                  <div className="flex justify-between py-1" style={{color: PAPER.muted}}><span>TVA RON</span><span>{money(invoice.vat_cents_ron, "RON")}</span></div>
+                  <div className="flex justify-between py-1 font-bold"><span>Total RON</span><span>{money(invoice.total_cents_ron, "RON")}</span></div>
+                </div>}
               </div>
             </div>
 

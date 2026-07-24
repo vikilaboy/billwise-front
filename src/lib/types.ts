@@ -138,6 +138,7 @@ export type Product = {
   unit_price_cents: number;
   currency: string;
   vat_rate: string;
+  vat_profile_id: string | null;
   vat_category: VatCategory;
   vat_exemption_code: string | null;
   vat_exemption_reason: string | null;
@@ -158,6 +159,7 @@ export type InvoiceLine = {
   unit_code: string | null;
   unit_price_cents: number;
   vat_rate: string; // decimal:2, e.g. "19.00"
+  vat_profile_id: string | null;
   vat_category: VatCategory;
   vat_exemption_code: string | null;
   vat_exemption_reason: string | null;
@@ -209,6 +211,17 @@ export type Invoice = {
   currency: string;
   exchange_rate: string | null; // decimal:6
   exchange_rate_day: string | null;
+  exchange_rate_source: string | null;
+  source_type: "manual" | "recurring" | "duplicate" | string;
+  source_recurring_run_id: string | null;
+  recurring_source: {
+    run_id: string;
+    template_id: string;
+    template_name: string | null;
+    version_id: string;
+    version: number | null;
+    scheduled_for: string;
+  } | null;
   notes: string | null;
   locale: "ro" | "en";
   subtotal_cents: number;
@@ -290,7 +303,22 @@ export type RecurringInvoiceTemplate = {
   customer_id: string;
   invoice_series_id: string;
   name: string;
-  frequency: "monthly" | "quarterly";
+  frequency: "monthly" | "quarterly" | "custom";
+  schedule: {
+    unit: "week" | "month";
+    interval: number;
+    weekdays: number[] | null;
+    month_days: Array<number | "last_day"> | null;
+    run_time: string;
+    timezone: string;
+    start_date: string;
+    end_date: string | null;
+  };
+  period_strategy: "previous_schedule_window";
+  contract_number: string | null;
+  contract_date: string | null;
+  is_locked: boolean;
+  locked_at: string | null;
   timezone: string;
   start_date: string;
   end_date: string | null;
@@ -300,24 +328,26 @@ export type RecurringInvoiceTemplate = {
   locale: "ro" | "en";
   lines: Array<{
     description: string;
+    description_template: string;
     quantity: string;
     unit: string;
     unit_code: string;
     unit_price_cents: number;
     vat_rate: string;
+    vat_profile_id: string | null;
     vat_category: VatCategory;
     vat_exemption_code: string | null;
     vat_exemption_reason: string | null;
   }>;
   notes: string | null;
-  status: "active" | "paused";
+  status: "active" | "paused" | "archived";
   mode: "create_draft";
   customer: {id: string; name: string} | null;
   series: {id: string; name: string} | null;
   runs: Array<{
     id: string;
     scheduled_for: string;
-    status: "running" | "created" | "failed";
+    status: "running" | "created" | "failed" | "skipped";
     error: string | null;
     invoice_id: string | null;
   }>;
@@ -380,4 +410,17 @@ export type Currency = {
     rate: string;
     source: string;
   } | null;
+};
+
+export type VatProfile = {
+  id: string;
+  company_profile_id: string;
+  name: string;
+  rate: string;
+  vat_category: VatCategory;
+  vat_exemption_code: string | null;
+  vat_exemption_reason: string | null;
+  is_default: boolean;
+  is_active: boolean;
+  is_referenced: boolean;
 };

@@ -7,7 +7,7 @@ import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
 import {api, apiErrorMessage, ApiError, listQuery} from "../lib/api";
 import {money} from "../lib/format";
-import type {Product, VatCategory} from "../lib/types";
+import type {Currency, Product, VatCategory, VatProfile} from "../lib/types";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
 type ProductForm = {
@@ -19,6 +19,7 @@ type ProductForm = {
   unit_price: string;
   currency: string;
   vat_rate: string;
+  vat_profile_id: string;
   vat_category: VatCategory;
   vat_exemption_code: string;
   vat_exemption_reason: string;
@@ -27,7 +28,7 @@ type ProductForm = {
 
 const emptyForm: ProductForm = {
   type: "service", name: "", description: "", unit: "buc", unit_code: "C62",
-  unit_price: "0", currency: "RON", vat_rate: "19", vat_category: "S",
+  unit_price: "0", currency: "RON", vat_rate: "19", vat_profile_id: "", vat_category: "S",
   vat_exemption_code: "", vat_exemption_reason: "", is_active: true,
 };
 
@@ -36,7 +37,7 @@ function fromProduct(product: Product): ProductForm {
     type: product.type, name: product.name, description: product.description ?? "",
     unit: product.unit, unit_code: product.unit_code,
     unit_price: String(product.unit_price_cents / 100), currency: product.currency,
-    vat_rate: product.vat_rate, vat_category: product.vat_category,
+    vat_rate: product.vat_rate, vat_profile_id: product.vat_profile_id ?? "", vat_category: product.vat_category,
     vat_exemption_code: product.vat_exemption_code ?? "",
     vat_exemption_reason: product.vat_exemption_reason ?? "", is_active: product.is_active,
   };
@@ -130,6 +131,8 @@ export function ProductsPage() {
 
 function ProductModal({companyId, product, onClose, onSaved}: {companyId: string; product: Product | null; onClose: () => void; onSaved: () => void}) {
   const [form, setForm] = useState<ProductForm>(() => product ? fromProduct(product) : emptyForm);
+  const currencies = useQuery({queryKey: ["currencies", "active"], queryFn: () => api<Currency[]>("/settings/currencies?_per_page=100&_sort=code")});
+  const vatProfiles = useQuery({queryKey: ["vat-profiles", companyId], queryFn: () => api<VatProfile[]>(`/companies/${companyId}/vat-profiles`)});
   const save = useMutation({
     mutationFn: () => api<Product>(`/companies/${companyId}/products${product ? `/${product.id}` : ""}`, {
       method: product ? "PUT" : "POST",
@@ -158,15 +161,16 @@ function ProductModal({companyId, product, onClose, onSaved}: {companyId: string
           <Field label="Unitate"><Input value={form.unit} onChange={(e) => set("unit", e.target.value)} /></Field>
           <Field label="Cod UM"><Input value={form.unit_code} onChange={(e) => set("unit_code", e.target.value.toUpperCase())} /></Field>
           <Field label="Preț unitar"><Input type="number" value={form.unit_price} onChange={(e) => set("unit_price", e.target.value)} /></Field>
-          <Field label="Monedă"><Input value={form.currency} onChange={(e) => set("currency", e.target.value.toUpperCase())} /></Field>
-          <Field label="Categorie TVA"><select className={input} value={form.vat_category} onChange={(e) => set("vat_category", e.target.value as VatCategory)}>{["S","AE","E","Z","K","G","O"].map((value) => <option key={value}>{value}</option>)}</select></Field>
-          <Field label="Cotă TVA"><Input type="number" value={form.vat_rate} onChange={(e) => set("vat_rate", e.target.value)} /></Field>
-          <Field label="Cod scutire"><Input value={form.vat_exemption_code} onChange={(e) => set("vat_exemption_code", e.target.value)} /></Field>
-          <Field label="Motiv scutire"><Input value={form.vat_exemption_reason} onChange={(e) => set("vat_exemption_reason", e.target.value)} /></Field>
+          <Field label="Monedă"><select className={input} value={form.currency} onChange={(e) => set("currency", e.target.value)}>{(currencies.data?.data ?? []).filter((currency) => currency.is_active).map((currency) => <option key={currency.id} value={currency.code}>{currency.code} — {currency.name}</option>)}</select></Field>
+          <Field label="Profil TVA"><select className={input} value={form.vat_profile_id} onChange={(e) => {
+            const profile = (vatProfiles.data?.data ?? []).find((item) => item.id === e.target.value);
+            if (!profile) return;
+            setForm((current) => ({...current, vat_profile_id: profile.id, vat_rate: profile.rate, vat_category: profile.vat_category, vat_exemption_code: profile.vat_exemption_code ?? "", vat_exemption_reason: profile.vat_exemption_reason ?? ""}));
+          }}><option value="">Selectează</option>{(vatProfiles.data?.data ?? []).filter((profile) => profile.is_active).map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {Number(profile.rate)}%</option>)}</select></Field>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.is_active} onChange={(e) => set("is_active", e.target.checked)} /> Activ</label>
           {save.isError && !Object.keys(errors).length ? <p role="alert" className="text-sm text-[var(--danger)]">Datele nu au putut fi salvate.</p> : null}
         </div>
-        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={!form.name.trim() || save.isPending} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null} Salvează</Button></footer>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={!form.name.trim() || !form.vat_profile_id || save.isPending} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null} Salvează</Button></footer>
       </div>
     </div>
   );
