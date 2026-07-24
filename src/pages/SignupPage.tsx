@@ -1,20 +1,22 @@
 import {FormEvent, useState} from "react";
 import {Link, Navigate, useNavigate} from "react-router";
 import {Button} from "@heroui/react";
+import {Eye, EyeOff} from "lucide-react";
 import {ApiError, api, session} from "../lib/api";
-import type {AuthPayload} from "../lib/types";
+import type {RegisterPayload} from "../lib/types";
 import {AuthLayout, authInputCls, authLabelCls} from "../components/AuthLayout";
 
 type Errors = Record<string, string[]>;
 
 export function SignupPage() {
   const navigate = useNavigate();
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [company, setCompany] = useState("");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [general, setGeneral] = useState("");
   const [loading, setLoading] = useState(false);
@@ -34,18 +36,17 @@ export function SignupPage() {
       return;
     }
     try {
-      const r = await api<AuthPayload>("/auth/register", {
+      const r = await api<RegisterPayload>("/auth/register", {
         method: "POST",
         body: JSON.stringify({
-          name: `${firstName} ${lastName}`.trim(),
+          name,
           email,
+          phone,
           password,
           password_confirmation: confirm,
-          tenant_name: company.trim() || null,
         }),
       });
-      session.save(r.data.access_token);
-      navigate("/dashboard", {replace: true});
+      navigate(`/verifica-email?email=${encodeURIComponent(r.data.email)}`, {replace: true});
     } catch (c) {
       if (c instanceof ApiError) {
         setErrors(c.problem.errors ?? {});
@@ -67,27 +68,23 @@ export function SignupPage() {
         <h2 className="mb-1.5 text-[26px] font-bold tracking-tight text-[var(--text)]">Creează cont</h2>
         <p className="mb-6 text-[14.5px] text-[var(--text-muted)]">14 zile gratuit, fără card.</p>
 
-        <div className="mb-3.5 grid grid-cols-2 gap-3">
-          <div>
-            <label className={authLabelCls}>Nume</label>
-            <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Andrei" className={authInputCls} />
-          </div>
-          <div>
-            <label className={authLabelCls}>Prenume</label>
-            <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Popescu" className={authInputCls} />
-          </div>
-        </div>
-        {err("name")}
-
-        <div className="mt-3.5">
-          <label className={authLabelCls}>Nume firmă (opțional)</label>
-          <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Firma ta SRL" className={authInputCls} />
-          {err("tenant_name")}
-        </div>
-
-        <div className="mt-3.5">
-          <label className={authLabelCls}>Email de serviciu</label>
+        <div className="mb-3.5">
+          <label htmlFor="signup-name" className={authLabelCls}>Nume</label>
           <input
+            id="signup-name"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Andrei Popescu"
+            className={authInputCls}
+          />
+          {err("name")}
+        </div>
+
+        <div>
+          <label htmlFor="signup-email" className={authLabelCls}>Email</label>
+          <input
+            id="signup-email"
             type="email"
             required
             value={email}
@@ -99,28 +96,68 @@ export function SignupPage() {
         </div>
 
         <div className="mt-3.5">
-          <label className={authLabelCls}>Parolă</label>
+          <label htmlFor="signup-phone" className={authLabelCls}>Telefon</label>
           <input
-            type="password"
+            id="signup-phone"
+            type="tel"
             required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Minim 8 caractere"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+40 712 345 678"
             className={authInputCls}
           />
+          {err("phone")}
+        </div>
+
+        <div className="mt-3.5">
+          <label htmlFor="signup-password" className={authLabelCls}>Parolă</label>
+          <div className="relative">
+            <input
+              id="signup-password"
+              type={showPassword ? "text" : "password"}
+              required
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Minim 8 caractere"
+              className={`${authInputCls} pr-11`}
+            />
+            <button
+              type="button"
+              aria-label={showPassword ? "Ascunde parola" : "Arată parola"}
+              onClick={() => setShowPassword((value) => !value)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-faint)]"
+            >
+              {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">Minimum 8 caractere.</p>
           {err("password")}
         </div>
 
         <div className="mb-5 mt-3.5">
-          <label className={authLabelCls}>Confirmă parola</label>
-          <input
-            type="password"
-            required
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            placeholder="Reintrodu parola"
-            className={authInputCls}
-          />
+          <label htmlFor="signup-password-confirmation" className={authLabelCls}>Confirmă parola</label>
+          <div className="relative">
+            <input
+              id="signup-password-confirmation"
+              type={showConfirmation ? "text" : "password"}
+              required
+              minLength={8}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="Reintrodu parola"
+              className={`${authInputCls} pr-11`}
+            />
+            <button
+              type="button"
+              aria-label={showConfirmation ? "Ascunde confirmarea parolei" : "Arată confirmarea parolei"}
+              onClick={() => setShowConfirmation((value) => !value)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-faint)]"
+            >
+              {showConfirmation ? <EyeOff size={17} /> : <Eye size={17} />}
+            </button>
+          </div>
+          {err("password_confirmation")}
         </div>
 
         {general && (

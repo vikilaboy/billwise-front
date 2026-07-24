@@ -1,10 +1,10 @@
 import {useMemo} from "react";
-import {useNavigate} from "react-router";
+import {useNavigate, useSearchParams} from "react-router";
 import {useQuery} from "@tanstack/react-query";
 import {Button, Card, Chip, Spinner} from "@heroui/react";
 import {KPI} from "@heroui-pro/react/kpi";
 import {BarChart} from "@heroui-pro/react/bar-chart";
-import {AlertTriangle, ArrowRight, Check, Clock, FileText, TrendingUp} from "lucide-react";
+import {AlertTriangle, ArrowRight, CheckCircle2, Clock, FileText, TrendingUp} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {api, listQuery} from "../lib/api";
 import type {Invoice} from "../lib/types";
@@ -99,6 +99,7 @@ function monthTotal(issued: Invoice[], y: number, m: number): number {
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const {company} = useCompany();
 
   const invoicesQuery = useQuery({
@@ -196,6 +197,31 @@ export function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {searchParams.get("onboarding") === "complete" ? (
+        <section className="rounded-2xl border border-[var(--success)]/30 bg-[var(--success-soft)] p-5">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 size={21} className="mt-0.5 shrink-0 text-[var(--success)]" />
+            <div>
+              <h2 className="font-bold text-[var(--success)]">Firma este configurată</h2>
+              <p className="mt-1 text-sm text-[var(--text-muted)]">
+                Poți continua cu pașii neblocanți de mai jos.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onPress={() => navigate("/serii")}>
+                  Configurează seria
+                </Button>
+                <Button size="sm" variant="outline" onPress={() => navigate("/conturi")}>
+                  Adaugă un cont bancar
+                </Button>
+                <span className="inline-flex items-center rounded-lg border border-[var(--border)] px-3 text-xs text-[var(--text-muted)]">
+                  Conectarea SPV urmează în setările integrării
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       {/* 1. KPI grid ------------------------------------------------------ */}
       <section
         style={{display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 16}}
@@ -326,13 +352,6 @@ export function DashboardPage() {
               </div>
             ))}
 
-            <div className="mt-auto flex items-center gap-2 border-t border-[var(--border)] pt-4">
-              <Chip color="success" variant="soft" size="sm">
-                <Chip.Label className="flex items-center gap-1.5">
-                  <Check size={14} /> Conectat la SPV / e-Factura
-                </Chip.Label>
-              </Chip>
-            </div>
           </Card.Content>
         </Card>
       </section>

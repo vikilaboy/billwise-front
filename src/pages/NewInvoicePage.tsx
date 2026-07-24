@@ -1,7 +1,7 @@
 import {useMemo, useState} from "react";
 import {useNavigate} from "react-router";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
-import {Button, Input, Spinner, Switch, TextArea} from "@heroui/react";
+import {Button, Input, Spinner, TextArea} from "@heroui/react";
 import {ChevronDown, Loader2, Plus, Send, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {ApiError, api, listQuery} from "../lib/api";
@@ -143,7 +143,6 @@ export function NewInvoicePage() {
   const [exchangeRate, setExchangeRate] = useState("");
   const [notes, setNotes] = useState("");
   const [rows, setRows] = useState<LineRow[]>(() => [newRow()]);
-  const [sendEfactura, setSendEfactura] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
   const customerList = customers.data?.data ?? [];
@@ -527,22 +526,6 @@ export function NewInvoicePage() {
                 </div>
               )}
             </dl>
-
-            <label className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-[var(--bg-muted)] p-3">
-              <span className="min-w-0">
-                <span className="flex items-center gap-1.5 text-[13px] font-semibold">
-                  <Send size={14} className="text-[var(--accent)]" /> Trimite în e-Factura
-                </span>
-                <span className="mt-0.5 block text-[11.5px] text-[var(--text-muted)]">
-                  Depune automat în SPV la emitere
-                </span>
-              </span>
-              <Switch
-                aria-label="Trimite în e-Factura"
-                isSelected={sendEfactura}
-                onChange={setSendEfactura}
-              />
-            </label>
 
             <div className="mt-4 flex flex-col gap-2.5">
               <Button

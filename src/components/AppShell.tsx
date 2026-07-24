@@ -1,10 +1,9 @@
 import {createContext, useContext, useEffect, useState} from "react";
-import {Outlet, useLocation, useNavigate} from "react-router";
+import {Navigate, Outlet, useLocation, useNavigate} from "react-router";
 import {useQuery} from "@tanstack/react-query";
-import {Avatar, Button, Dropdown} from "@heroui/react";
+import {Avatar, Button, Dropdown, Spinner} from "@heroui/react";
 import {Sidebar} from "@heroui-pro/react/sidebar";
 import {
-  Building2,
   Check,
   ChevronsUpDown,
   CircleGauge,
@@ -90,6 +89,41 @@ export function AppShell() {
   };
 
   const groups = [...new Set(NAV.map((n) => n.group))];
+
+  if (companies.isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center gap-2.5 bg-[var(--bg-subtle)] text-sm text-[var(--text-muted)]">
+        <Spinner size="sm" /> Se verifică firmele contului…
+      </div>
+    );
+  }
+
+  if (companies.isError) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[var(--bg-subtle)] px-6 text-center">
+        <p className="text-sm font-medium text-[var(--danger)]">Firmele contului nu au putut fi încărcate.</p>
+        <Button variant="outline" onPress={() => companies.refetch()}>
+          Încearcă din nou
+        </Button>
+      </div>
+    );
+  }
+
+  if (list.length === 0) {
+    if (location.pathname !== "/onboarding/firma") {
+      return <Navigate to="/onboarding/firma" replace />;
+    }
+
+    return (
+      <CompanyContext.Provider value={{company: undefined}}>
+        <Outlet />
+      </CompanyContext.Provider>
+    );
+  }
+
+  if (location.pathname === "/onboarding/firma") {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   return (
     <CompanyContext.Provider value={{company}}>
@@ -203,13 +237,7 @@ export function AppShell() {
 
           <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-[30px]">
             <div className="w-full">
-              {companies.isLoading ? (
-                <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-                  <Building2 size={16} /> Se încarcă firma…
-                </div>
-              ) : (
-                <Outlet />
-              )}
+              <Outlet />
             </div>
           </main>
         </Sidebar.Main>

@@ -8,9 +8,16 @@ export type User = {
   id: string;
   name: string;
   email: string;
+  phone: string | null;
+  email_verified_at: string | null;
   tenant: Tenant;
   roles: string[];
   permissions: string[];
+};
+
+export type RegisterPayload = {
+  message: string;
+  email: string;
 };
 
 export type AuthPayload = {
@@ -48,6 +55,31 @@ export type CompanyProfile = {
   address: Address | null;
   created_at: string | null;
   updated_at: string | null;
+};
+
+export type FiscalEntity = {
+  cui: string;
+  name: string;
+  is_vat_payer: boolean;
+  registration_number: string | null;
+  address: string | null;
+  is_active: boolean;
+};
+
+export type State = {
+  id: string;
+  country_code: string;
+  code: string;
+  name: string;
+};
+
+export type Locality = {
+  id: string;
+  state_id: string;
+  siruta_code: string;
+  name: string;
+  type: string | null;
+  superior_siruta: string | null;
 };
 
 export type Customer = {
