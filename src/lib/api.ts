@@ -32,7 +32,7 @@ function apiBase(raw: string): string {
   if (!base) return "/v1";
   return /\/v\d+$/.test(base) ? base : `${base}/v1`;
 }
-const API_URL = apiBase(__API_URL__ || import.meta.env.VITE_API_URL || "/v1");
+export const API_URL = apiBase(__API_URL__ || import.meta.env.VITE_API_URL || "/v1");
 const TOKEN_KEY = "billwise_access_token";
 
 export const session = {
@@ -59,6 +59,35 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiE
       type: payload.type,
     });
   return payload;
+}
+
+export async function downloadApiFile(path: string, fallbackName: string): Promise<void> {
+  const headers = new Headers({Accept: "*/*"});
+  const token = session.token();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(`${API_URL}${path}`, {headers});
+  if (!response.ok) {
+    let problem: ProblemDetails = {title: "Fișierul nu a putut fi descărcat", status: response.status};
+    try {
+      problem = {...problem, ...(await response.json())};
+    } catch {
+      // A non-JSON upstream error still becomes a consistent client error.
+    }
+    throw new ApiError(problem);
+  }
+
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = /filename="?([^";]+)"?/i.exec(disposition);
+  const filename = (match?.[1] ?? fallbackName).replace(/[\\/\r\n"]/g, "_");
+  const url = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 // Build a `?_page=…&_filter[status][eq]=…` query string from the API's `_`-prefixed controls.

@@ -1,10 +1,11 @@
 import {useEffect, useMemo, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner, Switch} from "@heroui/react";
-import {Building2, Check, Globe, Landmark, MapPin} from "lucide-react";
+import {useSearchParams} from "react-router";
+import {Building2, Check, Globe, Landmark, Link2, Link2Off, MapPin, RefreshCw} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {api, ApiError} from "../lib/api";
-import type {Address, CompanyProfile} from "../lib/types";
+import type {Address, CompanyProfile, SpvAuthorize, SpvConnection} from "../lib/types";
 
 // Editable shape mirrors PUT /companies/{companyProfile} (UpdateCompanyProfileRequest).
 // The nested `address` requires RO nomenclature (state_id/locality_id) which this
@@ -109,6 +110,8 @@ function Field({
 export function SettingsPage() {
   const {company} = useCompany();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [spvFeedback] = useState(() => searchParams.get("spv"));
 
   const profileQuery = useQuery({
     queryKey: ["company", company?.id],
@@ -117,6 +120,32 @@ export function SettingsPage() {
   });
 
   const profile = profileQuery.data?.data;
+  const spvQuery = useQuery({
+    queryKey: ["spv-connection", company?.id],
+    queryFn: () => api<SpvConnection>(`/efactura/spv/connection?company_profile_id=${company!.id}`),
+    enabled: Boolean(company?.id),
+  });
+
+  const connectMutation = useMutation({
+    mutationFn: () => api<SpvAuthorize>(`/efactura/spv/authorize?company_profile_id=${company!.id}`),
+    onSuccess: ({data}) => window.location.assign(data.authorize_url),
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: () =>
+      api<void>(`/efactura/spv/connection?company_profile_id=${company!.id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["spv-connection", company?.id]}),
+  });
+
+  useEffect(() => {
+    if (!spvFeedback) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("spv");
+    setSearchParams(next, {replace: true});
+    void queryClient.invalidateQueries({queryKey: ["spv-connection", company?.id]});
+  }, [company?.id, queryClient, searchParams, setSearchParams, spvFeedback]);
 
   const [form, setForm] = useState<FormState>(emptyForm);
   const [justSaved, setJustSaved] = useState(false);
@@ -360,6 +389,7 @@ export function SettingsPage() {
       </section>
 
       {/* Card 2 — preferences */}
+      <div className="flex flex-col gap-4">
       <section className={cardClass}>
         <header className="mb-5 flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
@@ -392,6 +422,88 @@ export function SettingsPage() {
 
         </div>
       </section>
+
+      <section className={cardClass}>
+        <header className="mb-4 flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
+            <Link2 size={18} />
+          </span>
+          <div>
+            <h2 className="text-[15px] font-bold tracking-tight">Conexiune ANAF SPV</h2>
+            <p className="text-[12.5px] text-[var(--text-muted)]">Configurată pentru firma selectată</p>
+          </div>
+        </header>
+
+        {spvFeedback === "connected" ? (
+          <p role="status" className="mb-3 rounded-lg bg-[var(--success-soft)] px-3 py-2 text-[12.5px] font-medium text-[var(--success)]">
+            Conexiunea SPV a fost realizată.
+          </p>
+        ) : null}
+        {spvFeedback === "error" ? (
+          <p role="alert" className="mb-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
+            Conectarea SPV nu a reușit. Încearcă din nou.
+          </p>
+        ) : null}
+
+        {spvQuery.isLoading ? (
+          <div className="flex items-center gap-2 text-[13px] text-[var(--text-muted)]"><Spinner size="sm" /> Verificăm conexiunea…</div>
+        ) : spvQuery.isError ? (
+          <div className="space-y-3">
+            <p className="text-[12.5px] text-[var(--danger)]">Starea conexiunii nu a putut fi verificată.</p>
+            <Button size="sm" variant="outline" onPress={() => spvQuery.refetch()}><RefreshCw size={14} /> Reîncearcă</Button>
+          </div>
+        ) : (() => {
+          const connection = spvQuery.data?.data;
+          const expired = Boolean(connection?.expires_at && new Date(connection.expires_at) <= new Date());
+          if (connection?.connected && !expired) {
+            return (
+              <div>
+                <div className="flex items-center gap-2 text-[13.5px] font-semibold text-[var(--success)]">
+                  <Check size={16} /> Conectat
+                </div>
+                <p className="mt-1 text-[12px] text-[var(--text-muted)]">
+                  {connection.expires_at ? `Token valabil până la ${new Date(connection.expires_at).toLocaleString("ro-RO")}.` : "Conexiune activă."}
+                </p>
+                <Button
+                  className="mt-4"
+                  size="sm"
+                  variant="outline"
+                  isDisabled={disconnectMutation.isPending}
+                  onPress={() => {
+                    if (window.confirm("Deconectezi firma selectată de la ANAF SPV?")) disconnectMutation.mutate();
+                  }}
+                >
+                  <Link2Off size={14} /> Deconectează
+                </Button>
+              </div>
+            );
+          }
+          return (
+            <div>
+              <p className="text-[12.5px] text-[var(--text-muted)]">
+                {expired ? "Tokenul SPV a expirat. Reconectează firma pentru a continua." : "Firma selectată nu este conectată la ANAF SPV."}
+              </p>
+              <Button
+                className="mt-4"
+                size="sm"
+                variant="primary"
+                isDisabled={connectMutation.isPending}
+                onPress={() => connectMutation.mutate()}
+              >
+                {connectMutation.isPending ? <Spinner size="sm" /> : <Link2 size={14} />}
+                {expired ? "Reconectează" : "Conectează SPV"}
+              </Button>
+            </div>
+          );
+        })()}
+
+        {connectMutation.isError || disconnectMutation.isError ? (
+          <p role="alert" className="mt-3 text-[12.5px] font-medium text-[var(--danger)]">
+            Operația SPV nu a putut fi finalizată.
+          </p>
+        ) : null}
+      </section>
+      </div>
     </div>
   );
 }

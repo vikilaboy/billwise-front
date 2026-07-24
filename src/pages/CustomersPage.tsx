@@ -33,6 +33,7 @@ type CreatePayload = {
   tax_id: string | null;
   registration_number: string | null;
   is_vat_payer: boolean;
+  locale: "ro" | "en";
 };
 
 function initials(name?: string | null): string {
@@ -199,6 +200,7 @@ type FormState = {
   locality: string;
   street: string;
   is_vat_payer: boolean;
+  locale: "ro" | "en";
 };
 
 const EMPTY_FORM: FormState = {
@@ -208,6 +210,7 @@ const EMPTY_FORM: FormState = {
   locality: "",
   street: "",
   is_vat_payer: false,
+  locale: "ro",
 };
 
 function fieldLabel(label: string, children: React.ReactNode, error?: string) {
@@ -280,6 +283,7 @@ function AddCustomerModal({
       tax_id: form.cui.trim() || null,
       registration_number: form.registration_number.trim() || null,
       is_vat_payer: form.is_vat_payer,
+      locale: form.locale,
     });
   }
 
@@ -365,6 +369,18 @@ function AddCustomerModal({
                 value={form.locality}
                 onChange={(e) => set("locality", e.target.value)}
               />,
+            )}
+            {fieldLabel(
+              "Limba implicită a facturii",
+              <select
+                aria-label="Limba implicită a facturii"
+                value={form.locale}
+                onChange={(event) => set("locale", event.target.value as "ro" | "en")}
+                className="h-10 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm"
+              >
+                <option value="ro">Română</option>
+                <option value="en">Română + Engleză</option>
+              </select>,
             )}
             {fieldLabel(
               "Adresă",

@@ -1,12 +1,12 @@
-import type {CSSProperties, ReactNode} from "react";
+import {useRef, useState, type ReactNode} from "react";
 import {useNavigate, useParams} from "react-router";
-import {useQuery} from "@tanstack/react-query";
+import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Card, Chip, Spinner} from "@heroui/react";
 import {Timeline} from "@heroui-pro/react/timeline";
 import type {TimelineStatus} from "@heroui-pro/react/timeline";
-import {Banknote, Check, ChevronLeft, X} from "lucide-react";
+import {Banknote, Check, ChevronLeft, Download, FileCode2, Send, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
-import {api} from "../lib/api";
+import {api, ApiError, downloadApiFile} from "../lib/api";
 import type {Address, EfacturaSubmission, Invoice} from "../lib/types";
 import {
   cents,
@@ -108,6 +108,10 @@ export function InvoiceDetailPage() {
   const {id} = useParams();
   const navigate = useNavigate();
   const {company} = useCompany();
+  const queryClient = useQueryClient();
+  const submittingRef = useRef(false);
+  const [downloading, setDownloading] = useState<"pdf" | "xml" | "confirmation" | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const invoiceQuery = useQuery({
     queryKey: ["invoice", company?.id, id],
@@ -120,6 +124,22 @@ export function InvoiceDetailPage() {
     queryFn: () =>
       api<EfacturaSubmission[]>(`/companies/${company!.id}/invoices/${id}/efactura/submissions`),
     enabled: Boolean(company?.id && id),
+    refetchInterval: (query) => {
+      const latestSubmission = query.state.data?.data?.[0];
+      return latestSubmission && ["queued", "sent", "processing"].includes(latestSubmission.status) ? 5000 : false;
+    },
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: () =>
+      api<EfacturaSubmission>(`/companies/${company!.id}/invoices/${id}/efactura/submissions`, {method: "POST"}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id]});
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "submissions"]});
+    },
+    onSettled: () => {
+      submittingRef.current = false;
+    },
   });
 
   if (invoiceQuery.isLoading || !company) {
@@ -155,6 +175,35 @@ export function InvoiceDetailPage() {
   const latest = submissions[0];
   const steps = buildSteps(invoice, latest);
   const isDraft = invoice.status === "draft";
+  const formattedNumber = invoice.formatted_number;
+  const hasBlockingSubmission = Boolean(latest && ["queued", "sent", "processing", "accepted"].includes(latest.status));
+  const eligibilityMessages = {
+    invoice_not_issued: "Factura trebuie emisă înainte de trimiterea în SPV.",
+    customer_address_missing: "Completează adresa clientului înainte de trimitere.",
+    outside_jurisdiction: "Clientul este în afara jurisdicției e-Factura România.",
+  } as const;
+
+  async function download(kind: "pdf" | "xml" | "confirmation") {
+    if (!company?.id || !id) return;
+    setDownloading(kind);
+    setDownloadError(null);
+    try {
+      if (kind === "pdf") {
+        await downloadApiFile(`/companies/${company.id}/invoices/${id}/pdf`, `${formattedNumber}.pdf`);
+      } else if (kind === "xml") {
+        await downloadApiFile(`/companies/${company.id}/invoices/${id}/efactura`, `${formattedNumber}.xml`);
+      } else if (latest) {
+        await downloadApiFile(
+          `/companies/${company.id}/invoices/${id}/efactura/submissions/${latest.id}/download`,
+          `${formattedNumber}.zip`,
+        );
+      }
+    } catch (error) {
+      setDownloadError(error instanceof ApiError ? error.problem.detail ?? error.problem.title : "Descărcarea a eșuat.");
+    } finally {
+      setDownloading(null);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -167,6 +216,11 @@ export function InvoiceDetailPage() {
           <Chip.Label>{displayStatusLabels[ds]}</Chip.Label>
         </Chip>
         <div className="flex-1" />
+        {!isDraft ? (
+          <Button variant="outline" isDisabled={downloading !== null} onPress={() => void download("pdf")}>
+            {downloading === "pdf" ? <Spinner size="sm" /> : <Download size={16} />} Descarcă PDF
+          </Button>
+        ) : null}
       </div>
 
       {/* 2-column grid */}
@@ -355,6 +409,63 @@ export function InvoiceDetailPage() {
                     ))}
                   </Timeline>
                 )}
+
+                {!invoice.efactura_eligibility.eligible ? (
+                  <p className="mt-3 text-[12px] text-[var(--text-muted)]">
+                    {invoice.efactura_eligibility.reason
+                      ? eligibilityMessages[invoice.efactura_eligibility.reason]
+                      : "Factura nu este eligibilă pentru e-Factura."}
+                  </p>
+                ) : null}
+
+                {latest?.error ? (
+                  <p role="alert" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">
+                    {latest.error}
+                  </p>
+                ) : null}
+                {submitMutation.error ? (
+                  <p role="alert" className="mt-3 text-[12px] font-medium text-[var(--danger)]">
+                    {submitMutation.error instanceof ApiError
+                      ? submitMutation.error.problem.detail ?? submitMutation.error.problem.title
+                      : "Trimiterea în SPV nu a putut fi pornită."}
+                  </p>
+                ) : null}
+                {downloadError ? <p role="alert" className="mt-3 text-[12px] font-medium text-[var(--danger)]">{downloadError}</p> : null}
+
+                <div className="mt-4 flex flex-col gap-2">
+                  {invoice.efactura_eligibility.eligible && !hasBlockingSubmission ? (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      isDisabled={submitMutation.isPending}
+                      onPress={() => {
+                        if (submittingRef.current || !window.confirm("Trimiți explicit această factură în ANAF SPV?")) return;
+                        submittingRef.current = true;
+                        submitMutation.mutate();
+                      }}
+                    >
+                      {submitMutation.isPending ? <Spinner size="sm" /> : <Send size={14} />}
+                      Trimite în SPV
+                    </Button>
+                  ) : null}
+                  {invoice.efactura_eligibility.eligible ? (
+                    <Button size="sm" variant="outline" isDisabled={downloading !== null} onPress={() => void download("xml")}>
+                      {downloading === "xml" ? <Spinner size="sm" /> : <FileCode2 size={14} />}
+                      Descarcă XML validat
+                    </Button>
+                  ) : null}
+                  {latest?.has_confirmation ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      isDisabled={downloading !== null}
+                      onPress={() => void download("confirmation")}
+                    >
+                      {downloading === "confirmation" ? <Spinner size="sm" /> : <Download size={14} />}
+                      Descarcă confirmarea ZIP
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </Card.Content>
           </Card>

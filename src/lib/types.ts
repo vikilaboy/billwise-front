@@ -92,6 +92,7 @@ export type Customer = {
   registration_number: string | null;
   is_vat_payer: boolean;
   notes: string | null;
+  locale: "ro" | "en";
   address: Address | null;
   created_at: string | null;
   updated_at: string | null;
@@ -163,6 +164,7 @@ export type Invoice = {
   exchange_rate: string | null; // decimal:6
   exchange_rate_day: string | null;
   notes: string | null;
+  locale: "ro" | "en";
   subtotal_cents: number;
   vat_cents: number;
   total_cents: number;
@@ -171,6 +173,11 @@ export type Invoice = {
   total_cents_ron: number | null;
   lines: InvoiceLine[]; // [] in list, populated in show
   vat_breakdown: VatBreakdownGroup[]; // [] in list, populated in show
+  latest_efactura_submission: EfacturaSubmission | null;
+  efactura_eligibility: {
+    eligible: boolean;
+    reason: "invoice_not_issued" | "customer_address_missing" | "outside_jurisdiction" | null;
+  };
   created_at: string | null;
   updated_at: string | null;
 };
@@ -190,6 +197,16 @@ export type EfacturaSubmission = {
   download_id: string | null;
   error: string | null;
   has_confirmation: boolean;
+  next_poll_after: string | null;
   submitted_at: string | null;
   created_at: string | null;
+};
+
+export type SpvConnection = {
+  connected: boolean;
+  expires_at: string | null;
+};
+
+export type SpvAuthorize = {
+  authorize_url: string;
 };

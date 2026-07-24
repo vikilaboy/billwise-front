@@ -140,6 +140,7 @@ export function NewInvoicePage() {
   const [issueDate, setIssueDate] = useState(todayIso);
   const [dueDate, setDueDate] = useState(() => isoPlusDays(15));
   const [currency, setCurrency] = useState("RON");
+  const [locale, setLocale] = useState<"ro" | "en">("ro");
   const [exchangeRate, setExchangeRate] = useState("");
   const [notes, setNotes] = useState("");
   const [rows, setRows] = useState<LineRow[]>(() => [newRow()]);
@@ -192,6 +193,7 @@ export function NewInvoicePage() {
       issue_date: issueDate,
       due_date: dueDate || null,
       currency,
+      locale,
       notes: notes.trim() ? notes.trim() : null,
       lines: rows.map((r) => ({
         description: r.description,
@@ -272,7 +274,10 @@ export function NewInvoicePage() {
                 <SelectBox
                   ariaLabel="Client"
                   value={customerId}
-                  onChange={setCustomerId}
+                  onChange={(value) => {
+                    setCustomerId(value);
+                    setLocale(customerList.find((customer) => customer.id === value)?.locale ?? "ro");
+                  }}
                   disabled={customers.isLoading}
                 >
                   <option value="">
@@ -347,6 +352,14 @@ export function NewInvoicePage() {
                       {c.label}
                     </option>
                   ))}
+                </SelectBox>
+              </div>
+
+              <div>
+                <FieldLabel>Limba documentului</FieldLabel>
+                <SelectBox ariaLabel="Limba documentului" value={locale} onChange={(value) => setLocale(value as "ro" | "en")}>
+                  <option value="ro">Română</option>
+                  <option value="en">Română + Engleză</option>
                 </SelectBox>
               </div>
 
