@@ -267,6 +267,20 @@ export type DashboardSummary = {
   balance_ron_cents: number;
   overdue_count: number;
   draft_count: number;
+  billed_this_month_ron_cents: number;
+  issued_this_month_count: number;
+  previous_month_invoiced_ron_cents: number;
+  same_month_last_year_invoiced_ron_cents: number;
+  outstanding_balance_ron_cents: number;
+  overdue_balance_ron_cents: number;
+  outstanding_count: number;
+  draft_total_ron_cents: number;
+  weekly_invoiced_ron_cents: number[];
+  weekly_overdue_balance_ron_cents: number[];
+  monthly_invoiced_ron_cents: Array<{
+    month: string;
+    total_ron_cents: number;
+  }>;
   recent_invoices: Invoice[];
 };
 
