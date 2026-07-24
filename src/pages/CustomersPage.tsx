@@ -3,11 +3,11 @@ import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Avatar, Button, Input, Spinner} from "@heroui/react";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
-import {Building2, Pencil, Plus, RotateCcw, Search, Trash2, X} from "lucide-react";
+import {Building2, Download, Pencil, Plus, RotateCcw, Search, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {ApiError, api, listQuery} from "../lib/api";
+import {ApiError, api, downloadApiFile, listQuery} from "../lib/api";
 import type {BankAccount, Customer, Locality, State} from "../lib/types";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
@@ -154,6 +154,15 @@ export function CustomersPage() {
         </div>
         <Button variant="primary" onPress={() => setEditing(null)}>
           <Plus size={17} /> Adaugă firmă
+        </Button>
+        <Button variant="outline" onPress={() => void downloadApiFile(
+          `/companies/${company!.id}/customers/export${listQuery({
+            sort: grid.apiSort,
+            filter: grid.debouncedSearch ? {name: {contains: grid.debouncedSearch}} : undefined,
+          })}`,
+          "clienti.csv",
+        )}>
+          <Download size={16} /> Exportă CSV
         </Button>
       </div>
 

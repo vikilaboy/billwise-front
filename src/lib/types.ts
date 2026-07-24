@@ -182,6 +182,22 @@ export type Invoice = {
   company_profile: CompanyProfile | null;
   customer: Customer | null;
   status: InvoiceStatus;
+  document_type: "invoice" | "correction";
+  corrects_invoice_id: string | null;
+  corrected_invoice: {
+    id: string;
+    formatted_number: string;
+    status: InvoiceStatus;
+    total_cents: number;
+    currency: string;
+  } | null;
+  corrections: Array<{
+    id: string;
+    formatted_number: string;
+    status: InvoiceStatus;
+    total_cents: number;
+    currency: string;
+  }>;
   number: number;
   formatted_number: string;
   issue_date: string | null;
@@ -202,7 +218,7 @@ export type Invoice = {
   total_cents_ron: number | null;
   paid_cents: number;
   balance_cents: number;
-  payment_status: "unpaid" | "partial" | "paid" | "overdue";
+  payment_status: "unpaid" | "partial" | "paid" | "overdue" | "not_applicable";
   last_paid_at: string | null;
   lines: InvoiceLine[]; // [] in list, populated in show
   vat_breakdown: VatBreakdownGroup[]; // [] in list, populated in show
@@ -230,6 +246,20 @@ export type InvoicePayment = {
   updated_at: string | null;
 };
 
+export type InvoiceDelivery = {
+  id: string;
+  channel: "email";
+  recipient: string;
+  cc: string[];
+  subject: string;
+  message: string | null;
+  status: "queued" | "sending" | "sent" | "failed";
+  provider_message_id: string | null;
+  error: string | null;
+  sent_at: string | null;
+  created_at: string | null;
+};
+
 export type DashboardSummary = {
   total_invoiced_ron_cents: number;
   total_paid_ron_cents: number;
@@ -237,6 +267,60 @@ export type DashboardSummary = {
   overdue_count: number;
   draft_count: number;
   recent_invoices: Invoice[];
+};
+
+export type RecurringInvoiceTemplate = {
+  id: string;
+  company_profile_id: string;
+  customer_id: string;
+  invoice_series_id: string;
+  name: string;
+  frequency: "monthly" | "quarterly";
+  timezone: string;
+  start_date: string;
+  end_date: string | null;
+  next_run_at: string;
+  payment_terms_days: number;
+  currency: string;
+  locale: "ro" | "en";
+  lines: Array<{
+    description: string;
+    quantity: string;
+    unit: string;
+    unit_code: string;
+    unit_price_cents: number;
+    vat_rate: string;
+    vat_category: VatCategory;
+    vat_exemption_code: string | null;
+    vat_exemption_reason: string | null;
+  }>;
+  notes: string | null;
+  status: "active" | "paused";
+  mode: "create_draft";
+  customer: {id: string; name: string} | null;
+  series: {id: string; name: string} | null;
+  runs: Array<{
+    id: string;
+    scheduled_for: string;
+    status: "running" | "created" | "failed";
+    error: string | null;
+    invoice_id: string | null;
+  }>;
+};
+
+export type ActivityNotification = {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  url: string | null;
+  read_at: string | null;
+  created_at: string;
+};
+
+export type ActivityNotificationFeed = {
+  unread_count: number;
+  items: ActivityNotification[];
 };
 
 export type SpvSubmissionStatus =

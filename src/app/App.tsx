@@ -10,6 +10,7 @@ import {ResetPasswordPage} from "../pages/ResetPasswordPage";
 import {VerifyEmailPendingPage} from "../pages/VerifyEmailPendingPage";
 import {AccountActivationPage} from "../pages/AccountActivationPage";
 import {CompanyOnboardingPage} from "../pages/CompanyOnboardingPage";
+import {AppErrorBoundary} from "../components/AppErrorBoundary";
 
 // Route-level code splitting: each page (and its heavy deps — charts, timeline,
 // data-grid) loads on navigation, keeping the initial bundle small.
@@ -36,8 +37,9 @@ const PageFallback = () => (
 
 export function App() {
   return (
-    <Suspense fallback={<PageFallback />}>
-      <Routes>
+    <AppErrorBoundary>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/inregistrare" element={<SignupPage />} />
         <Route path="/recuperare-parola" element={<ForgotPasswordPage />} />
@@ -51,6 +53,7 @@ export function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/facturi" element={<InvoicesPage />} />
           <Route path="/facturi/noi" element={<NewInvoicePage />} />
+          <Route path="/facturi/:id/editeaza" element={<NewInvoicePage />} />
           <Route path="/facturi/:id" element={<InvoiceDetailPage />} />
           <Route path="/recurente" element={<RecurringPage />} />
           <Route path="/clienti" element={<CustomersPage />} />
@@ -60,7 +63,8 @@ export function App() {
           <Route path="/setari" element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </Suspense>
+        </Routes>
+      </Suspense>
+    </AppErrorBoundary>
   );
 }

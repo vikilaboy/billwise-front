@@ -4,10 +4,10 @@ import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Card, Chip, Spinner} from "@heroui/react";
 import {Timeline} from "@heroui-pro/react/timeline";
 import type {TimelineStatus} from "@heroui-pro/react/timeline";
-import {Banknote, Check, ChevronLeft, Download, FileCode2, Pencil, Plus, Send, Trash2, X} from "lucide-react";
+import {Ban, Banknote, Check, ChevronLeft, Copy, Download, FileCode2, Mail, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {api, ApiError, downloadApiFile} from "../lib/api";
-import type {Address, EfacturaSubmission, Invoice, InvoicePayment, PaymentMethod} from "../lib/types";
+import type {Address, EfacturaSubmission, Invoice, InvoiceDelivery, InvoicePayment, PaymentMethod} from "../lib/types";
 import {
   cents,
   date,
@@ -113,6 +113,8 @@ export function InvoiceDetailPage() {
   const [downloading, setDownloading] = useState<"pdf" | "xml" | "confirmation" | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [editingPayment, setEditingPayment] = useState<InvoicePayment | null | undefined>(undefined);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
 
   const invoiceQuery = useQuery({
     queryKey: ["invoice", company?.id, id],
@@ -133,7 +135,18 @@ export function InvoiceDetailPage() {
   const paymentsQuery = useQuery({
     queryKey: ["invoice", company?.id, id, "payments"],
     queryFn: () => api<InvoicePayment[]>(`/companies/${company!.id}/invoices/${id}/payments`),
+    enabled: Boolean(company?.id && id && invoiceQuery.data?.data.document_type === "invoice"),
+  });
+  const deliveriesQuery = useQuery({
+    queryKey: ["invoice", company?.id, id, "deliveries"],
+    queryFn: () => api<InvoiceDelivery[]>(`/companies/${company!.id}/invoices/${id}/deliveries`),
     enabled: Boolean(company?.id && id),
+    refetchInterval: (query) => query.state.data?.data.some((delivery) => ["queued", "sending"].includes(delivery.status)) ? 5000 : false,
+  });
+  const retryDelivery = useMutation({
+    mutationFn: (deliveryId: string) =>
+      api<InvoiceDelivery>(`/companies/${company!.id}/invoices/${id}/deliveries/${deliveryId}/retry`, {method: "POST"}),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "deliveries"]}),
   });
   const deletePayment = useMutation({
     mutationFn: (paymentId: string) =>
@@ -175,6 +188,28 @@ export function InvoiceDetailPage() {
     },
     onSettled: () => {
       submittingRef.current = false;
+    },
+  });
+  const lifecycleMutation = useMutation({
+    mutationFn: async (action: "issue" | "cancel" | "delete" | "duplicate") => {
+      if (action === "delete") {
+        await api<void>(`/companies/${company!.id}/invoices/${id}`, {method: "DELETE"});
+        return null;
+      }
+      let body: string | undefined;
+      if (action === "cancel") {
+        const reason = window.prompt("Motivul anulării (rămâne în istoricul documentului):")?.trim();
+        if (!reason) throw new Error("Motivul anulării este obligatoriu.");
+        body = JSON.stringify({cancellation_reason: reason});
+      }
+      return api<Invoice>(`/companies/${company!.id}/invoices/${id}/${action}`, {method: "POST", body});
+    },
+    onSuccess: (result, action) => {
+      void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+      void queryClient.invalidateQueries({queryKey: ["dashboard", company?.id]});
+      if (action === "delete") navigate("/facturi", {replace: true});
+      else if (action === "duplicate" && result) navigate(`/facturi/${result.data.id}`);
+      else void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id]});
     },
   });
 
@@ -253,12 +288,40 @@ export function InvoiceDetailPage() {
           <Chip.Label>{displayStatusLabels[ds]}</Chip.Label>
         </Chip>
         <div className="flex-1" />
+        {isDraft ? (
+          <>
+            <Button variant="outline" onPress={() => navigate(`/facturi/${id}/editeaza`)}><Pencil size={16} /> Editează</Button>
+            <Button variant="primary" isDisabled={lifecycleMutation.isPending} onPress={() => {
+              if (window.confirm("Emiți această ciornă? După emitere conținutul fiscal nu mai poate fi editat.")) lifecycleMutation.mutate("issue");
+            }}><Send size={16} /> Emite</Button>
+            <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => {
+              if (window.confirm("Ștergi definitiv această ciornă?")) lifecycleMutation.mutate("delete");
+            }}><Trash2 size={16} /> Șterge</Button>
+          </>
+        ) : null}
+        <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => lifecycleMutation.mutate("duplicate")}><Copy size={16} /> Duplică</Button>
+        {invoice.status === "issued" ? (
+          <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => {
+            if (window.confirm("Anularea nu creează un storno și nu modifică documentul original. Continui?")) lifecycleMutation.mutate("cancel");
+          }}><Ban size={16} /> Anulează</Button>
+        ) : null}
+        {invoice.status === "issued" && invoice.document_type === "invoice" ? (
+          <Button variant="outline" onPress={() => setCorrectionOpen(true)}><RotateCcw size={16} /> Stornează</Button>
+        ) : null}
         {!isDraft ? (
           <Button variant="outline" isDisabled={downloading !== null} onPress={() => void download("pdf")}>
             {downloading === "pdf" ? <Spinner size="sm" /> : <Download size={16} />} Descarcă PDF
           </Button>
         ) : null}
+        {invoice.status === "issued" ? <Button variant="outline" onPress={() => setEmailOpen(true)}><Mail size={16} /> Trimite pe email</Button> : null}
       </div>
+      {lifecycleMutation.isError ? (
+        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          {lifecycleMutation.error instanceof ApiError
+            ? lifecycleMutation.error.problem.detail ?? lifecycleMutation.error.problem.title
+            : "Operația nu a putut fi finalizată."}
+        </p>
+      ) : null}
 
       {/* 2-column grid */}
       <div className="invoice-detail-grid">
@@ -422,7 +485,7 @@ export function InvoiceDetailPage() {
               <div className="mt-1 text-[26px] font-extrabold tracking-tight tabular-nums">
                 {cents(invoice.total_cents)} {currency}
               </div>
-              {!isDraft ? (
+              {!isDraft && invoice.document_type === "invoice" ? (
                 <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-[var(--bg-muted)] p-3 text-sm">
                   <div>
                     <div className="text-xs text-[var(--text-muted)]">Încasat</div>
@@ -434,8 +497,53 @@ export function InvoiceDetailPage() {
                   </div>
                 </div>
               ) : null}
+              {(invoice.corrections?.length ?? 0) > 0 ? (
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <div className="text-[12px] font-semibold">Documente de corecție</div>
+                  {invoice.corrections.map((correction) => (
+                    <button key={correction.id} className="mt-2 flex w-full justify-between rounded-lg bg-[var(--bg-muted)] px-3 py-2 text-xs" onClick={() => navigate(`/facturi/${correction.id}`)}>
+                      <span className="font-semibold">{correction.formatted_number}</span>
+                      <span>{money(correction.total_cents, correction.currency)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {invoice.corrected_invoice ? (
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <div className="text-[12px] font-semibold">Document original</div>
+                  <button className="mt-2 flex w-full justify-between rounded-lg bg-[var(--bg-muted)] px-3 py-2 text-xs" onClick={() => navigate(`/facturi/${invoice.corrected_invoice!.id}`)}>
+                    <span className="font-semibold">{invoice.corrected_invoice.formatted_number}</span>
+                    <span>{money(invoice.corrected_invoice.total_cents, invoice.corrected_invoice.currency)}</span>
+                  </button>
+                </div>
+              ) : null}
 
               {!isDraft ? (
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <div className="text-[12px] font-semibold">Livrări email</div>
+                  {(deliveriesQuery.data?.data ?? []).length === 0 ? (
+                    <p className="mt-2 text-xs text-[var(--text-muted)]">Documentul nu a fost trimis încă.</p>
+                  ) : (
+                    <div className="mt-2 flex flex-col">
+                      {(deliveriesQuery.data?.data ?? []).map((delivery) => (
+                        <div key={delivery.id} className="flex items-center gap-2 border-b border-[var(--border)] py-2.5 text-xs last:border-0">
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-semibold">{delivery.recipient}</div>
+                            <div className={delivery.status === "failed" ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}>
+                              {delivery.status === "sent" ? `Trimisă ${delivery.sent_at ? date(delivery.sent_at) : ""}` : ["queued", "sending"].includes(delivery.status) ? "În curs de trimitere" : delivery.error ?? "Livrare eșuată"}
+                            </div>
+                          </div>
+                          {delivery.status === "failed" ? (
+                            <Button isIconOnly size="sm" variant="ghost" aria-label="Reîncearcă livrarea" onPress={() => retryDelivery.mutate(delivery.id)}><RefreshCw size={14} /></Button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {!isDraft && invoice.document_type === "invoice" ? (
                 <div className="mt-5 border-t border-[var(--border)] pt-4">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-[12px] font-semibold">Încasări</div>
@@ -580,6 +688,28 @@ export function InvoiceDetailPage() {
           }}
         />
       ) : null}
+      {emailOpen && company?.id && id ? (
+        <EmailDeliveryModal
+          companyId={company.id}
+          invoice={invoice}
+          onClose={() => setEmailOpen(false)}
+          onSaved={() => {
+            void queryClient.invalidateQueries({queryKey: ["invoice", company.id, id, "deliveries"]});
+            setEmailOpen(false);
+          }}
+        />
+      ) : null}
+      {correctionOpen && company?.id ? (
+        <CorrectionModal
+          companyId={company.id}
+          invoice={invoice}
+          onClose={() => setCorrectionOpen(false)}
+          onCreated={(correction) => {
+            void queryClient.invalidateQueries({queryKey: ["invoice", company.id, id]});
+            navigate(`/facturi/${correction.id}`);
+          }}
+        />
+      ) : null}
 
       {/* Scoped layout: responsive 2-col grid + sticky rail. */}
       <style>{`
@@ -598,6 +728,109 @@ export function InvoiceDetailPage() {
           .invoice-detail-rail { position: static; }
         }
       `}</style>
+    </div>
+  );
+}
+
+function CorrectionModal({companyId, invoice, onClose, onCreated}: {
+  companyId: string;
+  invoice: Invoice;
+  onClose: () => void;
+  onCreated: (invoice: Invoice) => void;
+}) {
+  const [mode, setMode] = useState<"total" | "partial">("total");
+  const [reason, setReason] = useState("");
+  const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const create = useMutation({
+    mutationFn: () => api<Invoice>(`/companies/${companyId}/invoices/${invoice.id}/corrections`, {
+      method: "POST",
+      body: JSON.stringify({
+        mode,
+        reason: reason.trim(),
+        lines: mode === "partial"
+          ? invoice.lines.filter((line) => Number(quantities[line.id]) > 0).map((line) => ({
+              invoice_line_id: line.id,
+              quantity: Number(quantities[line.id]),
+            }))
+          : undefined,
+      }),
+    }),
+    onSuccess: ({data}) => onCreated(data),
+  });
+  const error = create.error instanceof ApiError ? create.error.problem.detail ?? create.error.problem.title : null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="Creează factură de corecție">
+      <div className="w-full max-w-xl rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
+        <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">Creează factură de corecție</h2><p className="mt-1 text-xs text-[var(--text-muted)]">Originalul rămâne nemodificat. Se creează o ciornă separată, cu referință fiscală la {invoice.formatted_number}.</p></div><Button isIconOnly variant="ghost" onPress={onClose}><X size={17} /></Button></header>
+        <div className="grid gap-4 p-5">
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Tip corecție
+            <select className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm" value={mode} onChange={(event) => setMode(event.target.value as "total" | "partial")}>
+              <option value="total">Stornare totală</option><option value="partial">Corecție parțială</option>
+            </select>
+          </label>
+          {mode === "partial" ? (
+            <div>
+              <div className="text-xs font-semibold text-[var(--text-muted)]">Cantități de corectat</div>
+              <div className="mt-2 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
+                {invoice.lines.map((line) => (
+                  <label key={line.id} className="flex items-center gap-3 p-3 text-sm">
+                    <span className="min-w-0 flex-1 truncate">{line.description} (max. {Number(line.quantity)})</span>
+                    <input className="h-9 w-24 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-2" type="number" min="0" max={Number(line.quantity)} step="0.01" value={quantities[line.id] ?? ""} onChange={(event) => setQuantities((current) => ({...current, [line.id]: event.target.value}))} />
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Motiv<textarea className="mt-1.5 min-h-24 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+          {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={create.isPending || !reason.trim() || (mode === "partial" && !Object.values(quantities).some((value) => Number(value) > 0))} onPress={() => {
+          if (window.confirm("Creezi ciorna documentului de corecție? Aceasta nu se trimite automat în SPV sau pe email.")) create.mutate();
+        }}>{create.isPending ? <Spinner size="sm" /> : <RotateCcw size={15} />} Creează ciorna</Button></footer>
+      </div>
+    </div>
+  );
+}
+
+function EmailDeliveryModal({companyId, invoice, onClose, onSaved}: {
+  companyId: string;
+  invoice: Invoice;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [recipient, setRecipient] = useState(invoice.customer?.email ?? "");
+  const [cc, setCc] = useState("");
+  const [subject, setSubject] = useState(`Factura ${invoice.formatted_number}`);
+  const [message, setMessage] = useState("Bună ziua,\n\nVă transmitem factura atașată.");
+  const send = useMutation({
+    mutationFn: () => api<InvoiceDelivery>(`/companies/${companyId}/invoices/${invoice.id}/deliveries/email`, {
+      method: "POST",
+      body: JSON.stringify({
+        recipient: recipient.trim(),
+        cc: cc.split(",").map((value) => value.trim()).filter(Boolean),
+        subject: subject.trim(),
+        message: message.trim() || null,
+      }),
+    }),
+    onSuccess: onSaved,
+  });
+  const errors = send.error instanceof ApiError ? send.error.problem.errors ?? {} : {};
+  const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="Trimite factura pe email">
+      <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
+        <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">Trimite factura pe email</h2><p className="mt-1 text-xs text-[var(--text-muted)]">PDF-ul este atașat; trimiterea în SPV nu este afectată.</p></div><Button isIconOnly variant="ghost" aria-label="Închide" onPress={onClose}><X size={17} /></Button></header>
+        <div className="grid gap-4 p-5">
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Destinatar<input className={`${input} mt-1.5`} type="email" value={recipient} onChange={(event) => setRecipient(event.target.value)} />{errors.recipient?.[0] ? <span className="text-[var(--danger)]">{errors.recipient[0]}</span> : null}</label>
+          <label className="text-xs font-semibold text-[var(--text-muted)]">CC (separate prin virgulă)<input className={`${input} mt-1.5`} value={cc} onChange={(event) => setCc(event.target.value)} /></label>
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Subiect<input className={`${input} mt-1.5`} value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Mesaj<textarea className="mt-1.5 min-h-28 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={message} onChange={(event) => setMessage(event.target.value)} /></label>
+          {send.isError && !Object.keys(errors).length ? <p role="alert" className="text-sm text-[var(--danger)]">Livrarea nu a putut fi pusă în coadă.</p> : null}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={send.isPending || !recipient.trim() || !subject.trim()} onPress={() => {
+          if (window.confirm(`Trimiți explicit factura către ${recipient.trim()}?`)) send.mutate();
+        }}>{send.isPending ? <Spinner size="sm" /> : <Mail size={15} />} Trimite</Button></footer>
+      </div>
     </div>
   );
 }

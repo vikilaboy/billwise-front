@@ -1,10 +1,11 @@
 import {createContext, useContext, useEffect, useState} from "react";
 import {Navigate, Outlet, useLocation, useNavigate} from "react-router";
-import {useQuery, useQueryClient} from "@tanstack/react-query";
+import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Avatar, Button, Dropdown, Spinner} from "@heroui/react";
 import {Sidebar} from "@heroui-pro/react/sidebar";
 import {
   Check,
+  Bell,
   ChevronsUpDown,
   CircleGauge,
   CreditCard,
@@ -14,18 +15,20 @@ import {
   Moon,
   Package,
   Plus,
+  Repeat,
   Settings,
   Sun,
   Users,
 } from "lucide-react";
 import {api, session} from "../lib/api";
-import type {CompanyProfile, User} from "../lib/types";
+import type {ActivityNotificationFeed, CompanyProfile, User} from "../lib/types";
 
 type NavItem = {to: string; label: string; icon: typeof FileText; group: string; badge?: number};
 
 const NAV: NavItem[] = [
   {to: "/dashboard", label: "Dashboard", icon: CircleGauge, group: "Principal"},
   {to: "/facturi", label: "Facturi", icon: FileText, group: "Principal"},
+  {to: "/recurente", label: "Facturi recurente", icon: Repeat, group: "Principal"},
   {to: "/clienti", label: "Clienți", icon: Users, group: "Date firmă"},
   {to: "/produse", label: "Produse și servicii", icon: Package, group: "Date firmă"},
   {to: "/conturi", label: "Conturi bancare", icon: CreditCard, group: "Date firmă"},
@@ -36,6 +39,7 @@ const NAV: NavItem[] = [
 const META: Record<string, [string, string]> = {
   "/dashboard": ["Dashboard", "Sumarul activității firmei tale"],
   "/facturi": ["Facturi", "Toate documentele emise"],
+  "/recurente": ["Facturi recurente", "Generare controlată de ciorne"],
   "/clienti": ["Clienți", "Firmele cu care lucrezi"],
   "/produse": ["Produse și servicii", "Catalogul firmei selectate"],
   "/conturi": ["Conturi bancare", "Conturile afișate pe facturi"],
@@ -73,6 +77,19 @@ export function AppShell() {
 
   const me = useQuery({queryKey: ["me"], queryFn: () => api<User>("/me")});
   const companies = useQuery({queryKey: ["companies"], queryFn: () => api<CompanyProfile[]>("/companies")});
+  const notifications = useQuery({
+    queryKey: ["notifications"],
+    queryFn: () => api<ActivityNotificationFeed>("/notifications"),
+    refetchInterval: 30000,
+  });
+  const readNotification = useMutation({
+    mutationFn: (id: string) => api(`/notifications/${id}/read`, {method: "PATCH"}),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["notifications"]}),
+  });
+  const readAll = useMutation({
+    mutationFn: () => api("/notifications/read-all", {method: "POST"}),
+    onSuccess: () => queryClient.invalidateQueries({queryKey: ["notifications"]}),
+  });
 
   const list = companies.data?.data ?? [];
   const company = list.find((c) => c.id === activeId) ?? list[0];
@@ -252,6 +269,39 @@ export function AppShell() {
 
             <div className="flex-1" />
 
+            <Dropdown>
+              <Dropdown.Trigger className="relative grid h-9 w-9 place-items-center rounded-lg border border-[var(--border)] bg-[var(--surface)]" aria-label="Notificări">
+                <Bell size={17} />
+                {(notifications.data?.data.unread_count ?? 0) > 0 ? (
+                  <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[var(--danger)] px-1 text-center text-[10px] font-bold text-white">
+                    {Math.min(99, notifications.data!.data.unread_count)}
+                  </span>
+                ) : null}
+              </Dropdown.Trigger>
+              <Dropdown.Popover className="w-[min(360px,calc(100vw-24px))]">
+                <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
+                  <b className="text-sm">Activitate</b>
+                  {(notifications.data?.data.unread_count ?? 0) > 0 ? <Button size="sm" variant="ghost" onPress={() => readAll.mutate()}>Marchează toate citite</Button> : null}
+                </div>
+                <Dropdown.Menu aria-label="Notificări" onAction={(key) => {
+                  const item = notifications.data?.data.items.find((notification) => notification.id === String(key));
+                  if (!item) return;
+                  if (!item.read_at) readNotification.mutate(item.id);
+                  if (item.url) navigate(item.url);
+                }}>
+                  {(notifications.data?.data.items ?? []).length === 0 ? (
+                    <Dropdown.Item id="empty" isDisabled textValue="Nicio notificare">Nu există notificări.</Dropdown.Item>
+                  ) : (notifications.data?.data.items ?? []).map((notification) => (
+                    <Dropdown.Item key={notification.id} id={notification.id} textValue={notification.title}>
+                      <div className={`py-1 ${notification.read_at ? "opacity-65" : ""}`}>
+                        <div className="text-xs font-semibold">{notification.title}</div>
+                        <div className="mt-0.5 whitespace-normal text-[11px] text-[var(--text-muted)]">{notification.message}</div>
+                      </div>
+                    </Dropdown.Item>
+                  ))}
+                </Dropdown.Menu>
+              </Dropdown.Popover>
+            </Dropdown>
             <Button isIconOnly variant="outline" size="sm" aria-label="Comută tema" onPress={() => setDark((v) => !v)}>
               {dark ? <Sun size={18} /> : <Moon size={18} />}
             </Button>

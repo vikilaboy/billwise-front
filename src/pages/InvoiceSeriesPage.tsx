@@ -10,24 +10,13 @@ import {DataTablePagination} from "../components/DataTablePagination";
 import {api, ApiError, listQuery} from "../lib/api";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
-// The API models `document_type` as a free-form string (max 50); only `invoice`
-// is used in practice. These are the document kinds the UI offers, with RO labels.
-type DocumentType = "invoice" | "proforma" | "storno" | "receipt";
+// Other document families require distinct legal flows. The current product
+// exposes only invoice series; corrections reference the original invoice.
+type DocumentType = "invoice";
 
 const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   invoice: "Factură",
-  proforma: "Proformă",
-  storno: "Storno",
-  credit_note: "Storno",
-  receipt: "Chitanță",
 };
-
-const DOCUMENT_TYPE_OPTIONS: {value: DocumentType; label: string}[] = [
-  {value: "invoice", label: "Factură"},
-  {value: "proforma", label: "Proformă"},
-  {value: "storno", label: "Storno"},
-  {value: "receipt", label: "Chitanță"},
-];
 
 // Shape of `InvoiceSeriesResource` (billwise-api).
 type Series = {
@@ -375,17 +364,9 @@ function SeriesModal({
           </Field>
 
           <Field label="Tip document" error={fieldErrors.document_type?.[0]}>
-            <select
-              value={form.document_type}
-              onChange={(e) => update("document_type", e.target.value as DocumentType)}
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--accent)]"
-            >
-              {DOCUMENT_TYPE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+            <div className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-[13px] text-[var(--text)]">
+              Factură
+            </div>
           </Field>
 
           <Field label="Prefix" error={fieldErrors.prefix?.[0]}>

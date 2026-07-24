@@ -66,7 +66,7 @@ export function SignupPage() {
     <AuthLayout>
       <form onSubmit={submit}>
         <h2 className="mb-1.5 text-[26px] font-bold tracking-tight text-[var(--text)]">Creează cont</h2>
-        <p className="mb-6 text-[14.5px] text-[var(--text-muted)]">14 zile gratuit, fără card.</p>
+        <p className="mb-6 text-[14.5px] text-[var(--text-muted)]">Activezi contul prin email, fără date de firmă în acest pas.</p>
 
         <div className="mb-3.5">
           <label htmlFor="signup-name" className={authLabelCls}>Nume</label>

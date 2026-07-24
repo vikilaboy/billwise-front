@@ -1,14 +1,14 @@
-import {useMemo} from "react";
+import {useMemo, useState} from "react";
 import {useNavigate} from "react-router";
-import {useQuery} from "@tanstack/react-query";
+import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Chip, Spinner} from "@heroui/react";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
-import {FileText, Plus, RotateCcw, Search} from "lucide-react";
+import {Copy, Download, FileText, Pencil, Plus, RotateCcw, Search, Send, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {api, listQuery} from "../lib/api";
+import {api, downloadApiFile, listQuery} from "../lib/api";
 import type {Invoice} from "../lib/types";
 import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
@@ -51,12 +51,22 @@ const paymentFilter: Partial<Record<FilterKey, Invoice["payment_status"]>> = {
 export function InvoicesPage() {
   const {company} = useCompany();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [selectedDrafts, setSelectedDrafts] = useState<Set<string>>(new Set());
   const grid = useServerDataGridState<FilterKey>({
     defaultSort: DEFAULT_SORT,
     sortColumns: SORT_COLUMNS,
     filter: FILTER_CONFIG,
   });
   const filter = grid.filter ?? "toate";
+  const exportQuery = listQuery({
+    sort: grid.apiSort,
+    filter: {
+      ...(filter in displayFilter ? {display_status: displayFilter[filter as keyof typeof displayFilter]} : {}),
+      ...(paymentFilter[filter] ? {payment_status: paymentFilter[filter]} : {}),
+      ...(grid.debouncedSearch ? {formatted_number: {contains: grid.debouncedSearch}} : {}),
+    },
+  });
 
   const invoices = useQuery({
     queryKey: ["invoices", company?.id, "list", grid.page, filter, grid.debouncedSearch, grid.apiSort],
@@ -78,9 +88,55 @@ export function InvoicesPage() {
   });
 
   const rows = useMemo(() => invoices.data?.data ?? [], [invoices.data]);
+  const action = useMutation({
+    mutationFn: async ({invoice, kind}: {invoice: Invoice; kind: "issue" | "duplicate" | "delete"}) => {
+      if (kind === "delete") {
+        await api<void>(`/companies/${company!.id}/invoices/${invoice.id}`, {method: "DELETE"});
+        return null;
+      }
+      return api<Invoice>(`/companies/${company!.id}/invoices/${invoice.id}/${kind}`, {method: "POST"});
+    },
+    onSuccess: (result, variables) => {
+      void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+      if (variables.kind === "duplicate" && result) navigate(`/facturi/${result.data.id}`);
+    },
+  });
+  const bulkDelete = useMutation({
+    mutationFn: async () => {
+      const targets = rows.filter((invoice) => selectedDrafts.has(invoice.id));
+      const results = await Promise.allSettled(targets.map((invoice) =>
+        api<void>(`/companies/${company!.id}/invoices/${invoice.id}`, {method: "DELETE"})));
+      return results.map((result, index) => ({
+        id: targets[index].id,
+        label: targets[index].formatted_number,
+        success: result.status === "fulfilled",
+      }));
+    },
+    onSuccess: (results) => {
+      setSelectedDrafts(new Set(results.filter((result) => !result.success).map((result) => result.id)));
+      void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+    },
+  });
 
   const columns = useMemo<DataGridColumn<Invoice>[]>(
     () => [
+      {
+        id: "select",
+        header: "",
+        minWidth: 48,
+        cell: (invoice) => invoice.status === "draft" ? (
+          <input
+            type="checkbox"
+            aria-label={`Selectează ${invoice.formatted_number}`}
+            checked={selectedDrafts.has(invoice.id)}
+            onChange={(event) => setSelectedDrafts((current) => {
+              const next = new Set(current);
+              if (event.target.checked) next.add(invoice.id); else next.delete(invoice.id);
+              return next;
+            })}
+          />
+        ) : null,
+      },
       {
         id: "formatted_number",
         header: "Număr",
@@ -139,7 +195,7 @@ export function InvoicesPage() {
         minWidth: 130,
         cell: (invoice) => {
           const status = displayStatus(invoice);
-          const paymentLabels = {unpaid: "Neachitată", partial: "Parțială", paid: "Achitată", overdue: "Restantă"};
+          const paymentLabels = {unpaid: "Neachitată", partial: "Parțială", paid: "Achitată", overdue: "Restantă", not_applicable: "Corecție"};
           const label = invoice.status === "issued" ? paymentLabels[invoice.payment_status] : displayStatusLabels[status];
           return (
             <Chip size="sm" color={invoice.payment_status === "paid" ? "success" : statusTone[status]} variant="soft">
@@ -148,8 +204,30 @@ export function InvoicesPage() {
           );
         },
       },
+      {
+        id: "actions",
+        header: "Acțiuni",
+        align: "end",
+        minWidth: 160,
+        cell: (invoice) => (
+          <div className="flex justify-end gap-1">
+            {invoice.status === "draft" ? (
+              <>
+                <Button isIconOnly size="sm" variant="ghost" aria-label="Editează" onPress={() => navigate(`/facturi/${invoice.id}/editeaza`)}><Pencil size={14} /></Button>
+                <Button isIconOnly size="sm" variant="ghost" aria-label="Emite" onPress={() => {
+                  if (window.confirm("Emiți această ciornă?")) action.mutate({invoice, kind: "issue"});
+                }}><Send size={14} /></Button>
+                <Button isIconOnly size="sm" variant="ghost" aria-label="Șterge" onPress={() => {
+                  if (window.confirm("Ștergi această ciornă?")) action.mutate({invoice, kind: "delete"});
+                }}><Trash2 size={14} className="text-[var(--danger)]" /></Button>
+              </>
+            ) : null}
+            <Button isIconOnly size="sm" variant="ghost" aria-label="Duplică" onPress={() => action.mutate({invoice, kind: "duplicate"})}><Copy size={14} /></Button>
+          </div>
+        ),
+      },
     ],
-    [],
+    [action, navigate, selectedDrafts],
   );
 
   return (
@@ -195,6 +273,22 @@ export function InvoicesPage() {
         <Button variant="primary" onPress={() => navigate("/facturi/noi")}>
           <Plus size={17} /> Emite factură
         </Button>
+        <Button variant="outline" onPress={() => void downloadApiFile(`/companies/${company!.id}/invoices/export${exportQuery}`, "facturi.csv")}>
+          <Download size={16} /> Exportă CSV
+        </Button>
+        {selectedDrafts.size > 0 ? (
+          <Button variant="outline" isDisabled={bulkDelete.isPending} onPress={() => {
+            if (window.confirm(`Ștergi ${selectedDrafts.size} ciorne selectate?`)) bulkDelete.mutate();
+          }}><Trash2 size={16} /> Șterge ciornele ({selectedDrafts.size})</Button>
+        ) : null}
+        {bulkDelete.data ? (
+          <p role="status" className="w-full text-xs text-[var(--text-muted)]">
+            {bulkDelete.data.filter((result) => result.success).length} ciorne șterse.
+            {bulkDelete.data.some((result) => !result.success)
+              ? ` Nu s-au putut șterge: ${bulkDelete.data.filter((result) => !result.success).map((result) => result.label).join(", ")}.`
+              : ""}
+          </p>
+        ) : null}
       </div>
 
       {/* Table card */}

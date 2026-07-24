@@ -1,5 +1,5 @@
-import {useMemo, useState} from "react";
-import {useNavigate} from "react-router";
+import {useEffect, useMemo, useState} from "react";
+import {useNavigate, useParams} from "react-router";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner, TextArea} from "@heroui/react";
 import {ChevronDown, Loader2, Plus, Send, Trash2} from "lucide-react";
@@ -128,6 +128,7 @@ function FieldLabel({children}: {children: React.ReactNode}) {
 
 export function NewInvoicePage() {
   const {company} = useCompany();
+  const {id} = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -148,6 +149,11 @@ export function NewInvoicePage() {
     queryFn: () => api<Product[]>(`/companies/${company!.id}/products${listQuery({perPage: 100, sort: "name", filter: {is_active: {eq: 1}}})}`),
     enabled: Boolean(company?.id),
   });
+  const invoiceQuery = useQuery({
+    queryKey: ["invoice", company?.id, id, "edit"],
+    queryFn: () => api<Invoice>(`/companies/${company!.id}/invoices/${id}`),
+    enabled: Boolean(company?.id && id),
+  });
 
   const [customerId, setCustomerId] = useState("");
   const [seriesId, setSeriesId] = useState("");
@@ -159,6 +165,33 @@ export function NewInvoicePage() {
   const [notes, setNotes] = useState("");
   const [rows, setRows] = useState<LineRow[]>(() => [newRow()]);
   const [error, setError] = useState<ApiError | null>(null);
+
+  useEffect(() => {
+    const invoice = invoiceQuery.data?.data;
+    if (!invoice) return;
+    if (invoice.status !== "draft") {
+      navigate(`/facturi/${invoice.id}`, {replace: true});
+      return;
+    }
+    setCustomerId(invoice.customer?.id ?? "");
+    setIssueDate(invoice.issue_date ?? todayIso());
+    setDueDate(invoice.due_date ?? "");
+    setCurrency(invoice.currency);
+    setLocale(invoice.locale);
+    setNotes(invoice.notes ?? "");
+    setRows(invoice.lines.map((line) => ({
+      key: line.id,
+      description: line.description,
+      unit: line.unit ?? UNIT_LABEL,
+      unit_code: line.unit_code ?? UNIT_CODE,
+      quantity: Number(line.quantity),
+      unit_price: line.unit_price_cents / 100,
+      vat_rate: Number(line.vat_rate),
+      vat_category: line.vat_category,
+      vat_exemption_code: line.vat_exemption_code,
+      vat_exemption_reason: line.vat_exemption_reason,
+    })));
+  }, [invoiceQuery.data, navigate]);
 
   const customerList = customers.data?.data ?? [];
   const seriesList = series.data?.data ?? [];
@@ -243,8 +276,8 @@ export function NewInvoicePage() {
 
   const mutation = useMutation({
     mutationFn: async (opts: {issue: boolean}) => {
-      const created = await api<Invoice>(`/companies/${company!.id}/invoices`, {
-        method: "POST",
+      const created = await api<Invoice>(`/companies/${company!.id}/invoices${id ? `/${id}` : ""}`, {
+        method: id ? "PUT" : "POST",
         body: JSON.stringify(buildPayload()),
       });
       let invoice = created.data;
@@ -301,7 +334,7 @@ export function NewInvoicePage() {
         <div className="flex flex-col gap-5">
           {/* 1. Invoice details */}
           <section className={cardClass}>
-            <h2 className="mb-4 text-[15px] font-bold tracking-tight">Detalii factură</h2>
+            <h2 className="mb-4 text-[15px] font-bold tracking-tight">{id ? "Editează ciorna" : "Detalii factură"}</h2>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <FieldLabel>Client</FieldLabel>
