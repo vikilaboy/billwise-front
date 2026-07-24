@@ -5,7 +5,7 @@ import {Package, Pencil, Plus, RotateCcw, Search, Trash2, X} from "lucide-react"
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {api, ApiError, listQuery} from "../lib/api";
+import {api, apiErrorMessage, ApiError, listQuery} from "../lib/api";
 import {money} from "../lib/format";
 import type {Product, VatCategory} from "../lib/types";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
@@ -74,6 +74,11 @@ export function ProductsPage() {
         </div>
         <Button variant="primary" onPress={() => setEditing(null)}><Plus size={16} /> Adaugă produs sau serviciu</Button>
       </div>
+      {remove.isError ? (
+        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          {apiErrorMessage(remove.error, "Produsul nu a putut fi șters.")}
+        </p>
+      ) : null}
 
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
         <DataTableLoadingOverlay isLoading={products.isFetching && !products.isLoading} />

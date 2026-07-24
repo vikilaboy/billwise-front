@@ -7,7 +7,7 @@ import {Building2, Download, Pencil, Plus, RotateCcw, Search, Trash2, X} from "l
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {ApiError, api, downloadApiFile, listQuery} from "../lib/api";
+import {ApiError, api, apiErrorMessage, downloadApiFile, listQuery} from "../lib/api";
 import type {BankAccount, Customer, Locality, State} from "../lib/types";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
@@ -59,8 +59,7 @@ function oneLineAddress(customer: Customer): string {
 }
 
 function problemMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.problem.detail ?? error.problem.title;
-  return "A apărut o eroare neașteptată.";
+  return apiErrorMessage(error, "A apărut o eroare neașteptată.");
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +92,15 @@ export function CustomersPage() {
   const remove = useMutation({
     mutationFn: (id: string) => api<void>(`/companies/${company!.id}/customers/${id}`, {method: "DELETE"}),
     onSuccess: () => queryClient.invalidateQueries({queryKey: ["customers", company?.id]}),
+  });
+  const exportCustomers = useMutation({
+    mutationFn: () => downloadApiFile(
+      `/companies/${company!.id}/customers/export${listQuery({
+        sort: grid.apiSort,
+        filter: grid.debouncedSearch ? {name: {contains: grid.debouncedSearch}} : undefined,
+      })}`,
+      "clienti.csv",
+    ),
   });
   const columns = useMemo<DataGridColumn<Customer>[]>(
     () => [
@@ -131,7 +139,7 @@ export function CustomersPage() {
         ),
       },
     ],
-    [],
+    [remove],
   );
 
   return (
@@ -155,16 +163,15 @@ export function CustomersPage() {
         <Button variant="primary" onPress={() => setEditing(null)}>
           <Plus size={17} /> Adaugă firmă
         </Button>
-        <Button variant="outline" onPress={() => void downloadApiFile(
-          `/companies/${company!.id}/customers/export${listQuery({
-            sort: grid.apiSort,
-            filter: grid.debouncedSearch ? {name: {contains: grid.debouncedSearch}} : undefined,
-          })}`,
-          "clienti.csv",
-        )}>
+        <Button variant="outline" isDisabled={exportCustomers.isPending} onPress={() => exportCustomers.mutate()}>
           <Download size={16} /> Exportă CSV
         </Button>
       </div>
+      {remove.isError || exportCustomers.isError ? (
+        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          {problemMessage(remove.error ?? exportCustomers.error)}
+        </p>
+      ) : null}
 
       {/* Table card */}
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">

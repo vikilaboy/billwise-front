@@ -8,7 +8,7 @@ import {Copy, Download, FileText, Pencil, Plus, RotateCcw, Search, Send, Trash2}
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {api, downloadApiFile, listQuery} from "../lib/api";
+import {api, apiErrorMessage, downloadApiFile, listQuery} from "../lib/api";
 import type {Invoice} from "../lib/types";
 import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
@@ -116,6 +116,9 @@ export function InvoicesPage() {
       setSelectedDrafts(new Set(results.filter((result) => !result.success).map((result) => result.id)));
       void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
     },
+  });
+  const exportInvoices = useMutation({
+    mutationFn: () => downloadApiFile(`/companies/${company!.id}/invoices/export${exportQuery}`, "facturi.csv"),
   });
 
   const columns = useMemo<DataGridColumn<Invoice>[]>(
@@ -275,7 +278,7 @@ export function InvoicesPage() {
         <Button variant="primary" onPress={() => navigate("/facturi/noi")}>
           <Plus size={17} /> Emite factură
         </Button>
-        <Button variant="outline" onPress={() => void downloadApiFile(`/companies/${company!.id}/invoices/export${exportQuery}`, "facturi.csv")}>
+        <Button variant="outline" isDisabled={exportInvoices.isPending} onPress={() => exportInvoices.mutate()}>
           <Download size={16} /> Exportă CSV
         </Button>
         {selectedDrafts.size > 0 ? (
@@ -292,6 +295,11 @@ export function InvoicesPage() {
           </p>
         ) : null}
       </div>
+      {action.isError || exportInvoices.isError ? (
+        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          {apiErrorMessage(action.error ?? exportInvoices.error, "Operația asupra facturilor a eșuat.")}
+        </p>
+      ) : null}
 
       {/* Table card */}
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
