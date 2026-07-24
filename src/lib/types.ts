@@ -53,6 +53,7 @@ export type CompanyProfile = {
   phone: string | null;
   website: string | null;
   address: Address | null;
+  archived_at: string | null;
   created_at: string | null;
   updated_at: string | null;
 };

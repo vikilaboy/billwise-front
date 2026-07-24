@@ -121,6 +121,11 @@ export function SettingsPage() {
   });
 
   const profile = profileQuery.data?.data;
+  const archivedCompaniesQuery = useQuery({
+    queryKey: ["companies", "archived"],
+    queryFn: () => api<CompanyProfile[]>("/companies?include_archived=1"),
+  });
+  const archivedCompanies = (archivedCompaniesQuery.data?.data ?? []).filter((item) => item.archived_at !== null);
   const spvQuery = useQuery({
     queryKey: ["spv-connection", company?.id],
     queryFn: () => api<SpvConnection>(`/efactura/spv/connection?company_profile_id=${company!.id}`),
@@ -164,6 +169,16 @@ export function SettingsPage() {
       localStorage.removeItem("billwise_active_company_id");
       await queryClient.invalidateQueries({queryKey: ["companies"]});
       navigate("/dashboard", {replace: true});
+    },
+  });
+  const restoreMutation = useMutation({
+    mutationFn: (companyId: string) =>
+      api<CompanyProfile>(`/companies/${companyId}/restore`, {method: "POST"}),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({queryKey: ["companies"]}),
+        queryClient.invalidateQueries({queryKey: ["companies", "archived"]}),
+      ]);
     },
   });
 
@@ -418,7 +433,9 @@ export function SettingsPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <div className="text-[13.5px] font-semibold">Arhivează firma</div>
-              <p className="mt-1 text-xs text-[var(--text-muted)]">Firma dispare din selector, însă istoricul fiscal rămâne păstrat. Ultima firmă a contului nu poate fi arhivată.</p>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                Doar firmele fără istoric de facturare pot fi arhivate. Recurențele active vor fi pauzate, iar firma poate fi restaurată ulterior.
+              </p>
             </div>
             <Button
               size="sm"
@@ -437,6 +454,34 @@ export function SettingsPage() {
                 ? archiveMutation.error.problem.detail ?? archiveMutation.error.problem.title
                 : "Firma nu a putut fi arhivată."}
             </p>
+          ) : null}
+          {archivedCompanies.length > 0 ? (
+            <div className="mt-4 border-t border-[var(--border)] pt-4">
+              <div className="text-[13px] font-semibold">Firme arhivate</div>
+              <div className="mt-2 flex flex-col gap-2">
+                {archivedCompanies.map((archived) => (
+                  <div key={archived.id} className="flex items-center justify-between gap-3 rounded-xl bg-[var(--bg-muted)] px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-[13px] font-medium">{archived.legal_name}</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">{archived.tax_id ?? "Fără CUI"}</div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      isDisabled={restoreMutation.isPending}
+                      onPress={() => restoreMutation.mutate(archived.id)}
+                    >
+                      <RefreshCw size={13} /> Restaurează
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              {restoreMutation.isError ? (
+                <p role="alert" className="mt-3 text-xs font-medium text-[var(--danger)]">
+                  Firma nu a putut fi restaurată.
+                </p>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </section>

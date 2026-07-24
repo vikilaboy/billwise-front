@@ -27,6 +27,14 @@ function ronCents(inv: Invoice): number {
   return inv.total_cents_ron ?? inv.total_cents;
 }
 
+export function balanceRonCents(inv: Invoice): number {
+  if (inv.balance_cents <= 0) return 0;
+  if (inv.total_cents_ron != null && inv.total_cents > 0) {
+    return Math.round((inv.balance_cents * inv.total_cents_ron) / inv.total_cents);
+  }
+  return inv.balance_cents;
+}
+
 // Parse a "YYYY-MM-DD" prefix into a UTC timestamp, ignoring time/zone noise.
 function dateMs(value: string | null): number | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value ?? "");
@@ -41,14 +49,23 @@ function yearMonth(value: string | null): {y: number; m: number} | null {
 
 const isIssued = (inv: Invoice): boolean => inv.status === "issued";
 const isDraft = (inv: Invoice): boolean => inv.status === "draft";
-const isOverdue = (inv: Invoice, today: Date): boolean => displayStatus(inv, today) === "overdue";
+export const isOverdue = (inv: Invoice): boolean => inv.payment_status === "overdue";
 
 function sumRon(invoices: Invoice[]): number {
   return invoices.reduce((acc, inv) => acc + ronCents(inv), 0);
 }
 
+function sumBalanceRon(invoices: Invoice[]): number {
+  return invoices.reduce((acc, inv) => acc + balanceRonCents(inv), 0);
+}
+
 // Issued RON totals bucketed into the last `weeks` weekly windows ending today.
-function weeklySpark(issued: Invoice[], today: Date, weeks = 8): SparkPoint[] {
+function weeklySpark(
+  issued: Invoice[],
+  today: Date,
+  valueFor: (invoice: Invoice) => number = ronCents,
+  weeks = 8,
+): SparkPoint[] {
   const week = 7 * 24 * 3600 * 1000;
   const now = today.getTime();
   const buckets = Array.from({length: weeks}, () => 0);
@@ -56,7 +73,7 @@ function weeklySpark(issued: Invoice[], today: Date, weeks = 8): SparkPoint[] {
     const t = dateMs(inv.issue_date);
     if (t == null) continue;
     const diff = Math.floor((now - t) / week);
-    if (diff >= 0 && diff < weeks) buckets[weeks - 1 - diff] += ronCents(inv) / 100;
+    if (diff >= 0 && diff < weeks) buckets[weeks - 1 - diff] += valueFor(inv) / 100;
   }
   return buckets.map((v) => ({value: Math.round(v)}));
 }
@@ -122,8 +139,9 @@ export function DashboardPage() {
     const curM = today.getMonth();
 
     const issued = invoices.filter(isIssued);
-    const overdue = issued.filter((inv) => isOverdue(inv, today));
-    const outstanding = issued.filter((inv) => !isOverdue(inv, today));
+    const open = issued.filter((inv) => inv.balance_cents > 0);
+    const overdue = open.filter(isOverdue);
+    const outstanding = open.filter((inv) => !isOverdue(inv));
     const drafts = invoices.filter(isDraft);
     const issuedThisMonth = issued.filter((inv) => {
       const ym = yearMonth(inv.issue_date);
@@ -133,26 +151,27 @@ export function DashboardPage() {
     // KPI figures (all RON cents).
     const billedThisMonth = sumRon(issuedThisMonth);
     const totalBilled = sumRon(issued);
-    const toCollect = sumRon(outstanding);
-    const overdueAmount = sumRon(overdue);
+    const toCollect = sumBalanceRon(open);
+    const outstandingAmount = sumBalanceRon(outstanding);
+    const overdueAmount = sumBalanceRon(overdue);
 
     // Real month-over-month growth for "Facturat luna aceasta".
     const prev = new Date(curY, curM - 1, 1);
     const billedPrevMonth = monthTotal(issued, prev.getFullYear(), prev.getMonth());
     const momPct = billedPrevMonth > 0 ? Math.round(((billedThisMonth - billedPrevMonth) / billedPrevMonth) * 100) : null;
 
-    // Real overdue share of everything billed — signals the "Restant" danger trend.
-    const overduePct = totalBilled > 0 ? Math.round((overdueAmount / totalBilled) * 100) : null;
+    // Share of the currently open balance that is overdue.
+    const overduePct = toCollect > 0 ? Math.round((overdueAmount / toCollect) * 100) : null;
 
     // Real year-over-year delta for the revenue chart (same month, previous year).
     const lastYearMonth = monthTotal(issued, curY - 1, curM);
     const yoyPct = lastYearMonth > 0 ? Math.round(((billedThisMonth - lastYearMonth) / lastYearMonth) * 100) : null;
 
     const spark = weeklySpark(issued, today);
-    const overdueSpark = weeklySpark(overdue, today);
+    const overdueSpark = weeklySpark(overdue, today, balanceRonCents);
 
     const buckets: Bucket[] = [
-      {key: "in-termen", label: "În termen", value: toCollect, color: "var(--success)", dot: "var(--success)"},
+      {key: "in-termen", label: "În termen", value: outstandingAmount, color: "var(--success)", dot: "var(--success)"},
       {key: "restante", label: "Restante", value: overdueAmount, color: "var(--danger)", dot: "var(--danger)"},
       {key: "ciorne", label: "Ciorne", value: sumRon(drafts), color: "var(--warning)", dot: "var(--warning)"},
     ];
