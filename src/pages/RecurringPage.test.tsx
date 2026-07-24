@@ -41,4 +41,50 @@ describe("RecurringPage", () => {
       String(url).includes("_filter%5Bstatus%5D=active"),
     )).toBe(true));
   });
+
+  it("afișează motivul când generarea manuală nu creează ciorna", async () => {
+    const template = {
+      id: "template-1",
+      name: "Abonament lunar",
+      customer_id: "customer-1",
+      invoice_series_id: "series-1",
+      frequency: "monthly",
+      timezone: "Europe/Bucharest",
+      start_date: "2028-01-01",
+      end_date: null,
+      next_run_at: "2028-02-01T07:00:00Z",
+      payment_terms_days: 15,
+      currency: "RON",
+      locale: "ro",
+      lines: [],
+      notes: null,
+      status: "active",
+      mode: "create_draft",
+      customer: {id: "customer-1", name: "Client Test"},
+      series: {id: "series-1", name: "Factura"},
+      runs: [],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [template],
+        meta: {pagination: {current_page: 1, per_page: 20, total: 1, last_page: 1}},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: {status: "failed", error: "Seria nu mai este activă.", invoice_id: null},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}, mutations: {retry: false}}})}>
+        <MemoryRouter>
+          <RecurringPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: /Generează acum/}));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Seria nu mai este activă.");
+  });
 });

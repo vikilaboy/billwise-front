@@ -5,10 +5,11 @@ import {Pause, Pencil, Play, Plus, Repeat, Trash2, X} from "lucide-react";
 import {useNavigate, useSearchParams} from "react-router";
 import {useCompany} from "../components/AppShell";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {api, ApiError, listQuery} from "../lib/api";
+import {api, apiErrorMessage, ApiError, listQuery} from "../lib/api";
 import type {Customer, RecurringInvoiceTemplate} from "../lib/types";
 
 type Series = {id: string; name: string; is_active: boolean};
+type RecurringRunResult = {status: string; error: string | null; invoice_id: string | null};
 type RecurringLineForm = {description: string; quantity: string; unit_price: string; vat_rate: string};
 type Form = {
   name: string; customer_id: string; invoice_series_id: string;
@@ -50,7 +51,13 @@ export function RecurringPage() {
   const mutate = useMutation({
     mutationFn: async ({template, action}: {template: RecurringInvoiceTemplate; action: "toggle" | "run" | "delete"}) => {
       if (action === "delete") return api<void>(`/companies/${company!.id}/recurring-invoices/${template.id}`, {method: "DELETE"});
-      if (action === "run") return api(`/companies/${company!.id}/recurring-invoices/${template.id}/run`, {method: "POST"});
+      if (action === "run") {
+        const result = await api<RecurringRunResult>(`/companies/${company!.id}/recurring-invoices/${template.id}/run`, {method: "POST"});
+        if (result.data.status !== "created" || !result.data.invoice_id) {
+          throw new Error(result.data.error ?? "Ciorna recurentă nu a putut fi generată.");
+        }
+        return result;
+      }
       return api(`/companies/${company!.id}/recurring-invoices/${template.id}`, {
         method: "PUT",
         body: JSON.stringify({...template, status: template.status === "active" ? "paused" : "active", customer: undefined, series: undefined, runs: undefined, mode: undefined}),
@@ -75,6 +82,11 @@ export function RecurringPage() {
         </div>
         <Button variant="primary" onPress={() => setEditing(null)}><Plus size={16} /> Șablon nou</Button>
       </div>
+      {mutate.isError ? (
+        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+          {apiErrorMessage(mutate.error, "Operația asupra șablonului recurent a eșuat.")}
+        </p>
+      ) : null}
       <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
         {templates.isLoading ? <div className="flex justify-center gap-2 py-20"><Spinner size="sm" /> Se încarcă…</div>
           : templates.isError ? <div className="py-20 text-center text-sm text-[var(--danger)]">Șabloanele nu au putut fi încărcate.</div>
