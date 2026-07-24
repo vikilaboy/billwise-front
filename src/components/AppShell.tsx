@@ -102,6 +102,7 @@ export function AppShell() {
 
   useEffect(() => {
     const handleExpiredSession = () => {
+      localStorage.removeItem("billwise_active_company_id");
       queryClient.clear();
       navigate("/login", {replace: true});
     };
@@ -129,6 +130,8 @@ export function AppShell() {
       await api("/auth/logout", {method: "POST"});
     } finally {
       session.clear();
+      localStorage.removeItem("billwise_active_company_id");
+      queryClient.clear();
       navigate("/login", {replace: true});
     }
   };
