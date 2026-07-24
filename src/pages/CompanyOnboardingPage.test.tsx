@@ -86,6 +86,8 @@ describe("CompanyOnboardingPage", () => {
     fireEvent.change(screen.getByLabelText("Județ"), {target: {value: "state-cj"}});
     await screen.findByRole("option", {name: "Cluj-Napoca"});
     fireEvent.change(screen.getByLabelText("Localitate"), {target: {value: "locality-cluj"}});
+    fireEvent.submit(screen.getByRole("button", {name: "Salvează firma și continuă"}).closest("form")!);
+    expect(companyBody).toBeUndefined();
     fireEvent.click(screen.getByLabelText(/Confirm datele firmei/));
     fireEvent.click(screen.getByRole("button", {name: "Salvează firma și continuă"}));
 

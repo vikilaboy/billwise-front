@@ -169,7 +169,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
 
   const submitCompany = (event: FormEvent) => {
     event.preventDefault();
-    if (!fiscal?.is_active) return;
+    if (!fiscal?.is_active || !form.confirmed) return;
     create.mutate();
   };
 
@@ -457,6 +457,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
               <label className="mt-5 flex items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg-subtle)] p-4 text-sm">
                 <input
                   type="checkbox"
+                  required
                   className="mt-0.5"
                   checked={form.confirmed}
                   onChange={(event) => update("confirmed", event.target.checked)}

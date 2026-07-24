@@ -20,7 +20,7 @@ import {
   Sun,
   Users,
 } from "lucide-react";
-import {api, session} from "../lib/api";
+import {api, AUTH_EXPIRED_EVENT, session} from "../lib/api";
 import type {ActivityNotificationFeed, CompanyProfile, User} from "../lib/types";
 
 type NavItem = {to: string; label: string; icon: typeof FileText; group: string; badge?: number};
@@ -99,6 +99,16 @@ export function AppShell() {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("billwise_theme", dark ? "dark" : "light");
   }, [dark]);
+
+  useEffect(() => {
+    const handleExpiredSession = () => {
+      queryClient.clear();
+      navigate("/login", {replace: true});
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleExpiredSession);
+
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpiredSession);
+  }, [navigate, queryClient]);
 
   useEffect(() => {
     if (!company?.id) return;
