@@ -1,9 +1,10 @@
 import {useEffect, useMemo, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
-import {Button, Spinner} from "@heroui/react";
+import {Button, Spinner, Switch} from "@heroui/react";
 import {EmptyState} from "@heroui-pro/react/empty-state";
 import {Landmark, Pencil, Plus, Star, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
+import {AppSelect} from "../components/FormControls";
 import {ApiError, api} from "../lib/api";
 import type {BankAccount} from "../lib/types";
 
@@ -108,75 +109,70 @@ function accountIdentifier(account: BankAccount): {label: string; value: string}
   return {label: "IBAN", value: account.iban || "—"};
 }
 
-// Lightweight role="switch" toggle so the modal stays dependency-light.
 function Toggle({
+  name,
   checked,
   onChange,
   label,
   hint,
 }: {
+  name: string;
   checked: boolean;
   onChange: (next: boolean) => void;
   label: string;
   hint?: string;
 }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-3">
+    <div className="flex items-center justify-between gap-3">
       <span className="min-w-0">
         <span className="block text-[13px] font-semibold text-[var(--text)]">{label}</span>
         {hint ? <span className="block text-[11.5px] text-[var(--text-muted)]">{hint}</span> : null}
       </span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
+      <Switch
+        name={name}
         aria-label={label}
-        onClick={() => onChange(!checked)}
-        className={
-          "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors " +
-          (checked ? "bg-[var(--accent)]" : "bg-[var(--strong)]")
-        }
+        isSelected={checked}
+        onChange={onChange}
       >
-        <span
-          className={
-            "inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform " +
-            (checked ? "translate-x-[22px]" : "translate-x-[2px]")
-          }
-        />
-      </button>
-    </label>
+        <Switch.Content>
+          <Switch.Control>
+            <Switch.Thumb />
+          </Switch.Control>
+        </Switch.Content>
+      </Switch>
+    </div>
   );
 }
 
 function Field({
+  name,
   label,
   value,
   onChange,
   placeholder,
-  error,
   mono,
 }: {
+  name: string;
   label: string;
   value: string;
   onChange: (next: string) => void;
   placeholder?: string;
-  error?: string;
   mono?: boolean;
 }) {
   return (
     <label className="flex flex-col gap-1.5">
       <span className="text-[12px] font-semibold text-[var(--text-muted)]">{label}</span>
       <input
+        name={name}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className={
           "h-10 rounded-[10px] border bg-[var(--surface)] px-3 text-[13.5px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--faint)] focus:border-[var(--accent)] " +
-          (error ? "border-[var(--danger)]" : "border-[var(--border)]") +
+          "border-[var(--border)]" +
           (mono ? " font-mono tabular-nums tracking-wide" : "")
         }
       />
-      {error ? <span className="text-[11.5px] font-medium text-[var(--danger)]">{error}</span> : null}
     </label>
   );
 }
@@ -258,10 +254,6 @@ export function BankAccountsPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
-
-  const problem = save.error instanceof ApiError ? save.error.problem : null;
-  const fieldError = (field: string) => problem?.errors?.[field]?.[0];
-  const generalError = problem && !problem.errors ? (problem.detail ?? problem.title) : null;
 
   function submit() {
     if (!company?.id) return;
@@ -407,129 +399,105 @@ export function BankAccountsPage() {
             </div>
 
             <div className="flex flex-col gap-4 overflow-y-auto px-5 py-5">
-              {generalError ? (
-                <div className="rounded-lg border border-[var(--danger)] bg-[var(--danger)]/10 px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
-                  {generalError}
-                </div>
-              ) : null}
-
               <Field
+                name="bank_name"
                 label="Bancă"
                 value={form.bank_name}
                 onChange={(v) => set("bank_name", v)}
                 placeholder="ex. Banca Transilvania"
-                error={fieldError("bank_name")}
               />
 
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold text-[var(--text-muted)]">Schemă</span>
-                <select
-                  value={form.scheme}
-                  onChange={(e) => set("scheme", e.target.value as Scheme)}
-                  className="h-10 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] px-3 text-[13.5px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)]"
-                >
-                  {SCHEMES.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-                {fieldError("scheme") ? (
-                  <span className="text-[11.5px] font-medium text-[var(--danger)]">
-                    {fieldError("scheme")}
-                  </span>
-                ) : null}
-              </label>
+              <AppSelect
+                name="scheme"
+                ariaLabel="Schemă"
+                label="Schemă"
+                value={form.scheme}
+                options={SCHEMES.map((scheme) => ({id: scheme.value, label: scheme.label}))}
+                onChange={(value) => set("scheme", value as Scheme)}
+              />
 
               {form.scheme === "iban" ? (
                 <>
                   <Field
+                    name="iban"
                     label="IBAN"
                     value={form.iban}
                     onChange={(v) => set("iban", v)}
                     placeholder="RO49 AAAA 1B31 0075 9384 0000"
-                    error={fieldError("iban")}
                     mono
                   />
                   <Field
+                    name="swift_bic"
                     label="SWIFT / BIC (opțional)"
                     value={form.swift_bic}
                     onChange={(v) => set("swift_bic", v)}
                     placeholder="BTRLRO22"
-                    error={fieldError("swift_bic")}
                     mono
                   />
                 </>
               ) : form.scheme === "uk_domestic" ? (
                 <>
                   <Field
+                    name="sort_code"
                     label="Sort code"
                     value={form.sort_code}
                     onChange={(v) => set("sort_code", v)}
                     placeholder="123456"
-                    error={fieldError("sort_code")}
                     mono
                   />
                   <Field
+                    name="account_number"
                     label="Număr cont"
                     value={form.account_number}
                     onChange={(v) => set("account_number", v)}
                     placeholder="12345678"
-                    error={fieldError("account_number")}
                     mono
                   />
                 </>
               ) : (
                 <>
                   <Field
+                    name="routing_number"
                     label="Routing number"
                     value={form.routing_number}
                     onChange={(v) => set("routing_number", v)}
                     placeholder="123456789"
-                    error={fieldError("routing_number")}
                     mono
                   />
                   <Field
+                    name="account_number"
                     label="Număr cont"
                     value={form.account_number}
                     onChange={(v) => set("account_number", v)}
                     placeholder="Număr cont"
-                    error={fieldError("account_number")}
                     mono
                   />
                 </>
               )}
 
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold text-[var(--text-muted)]">Monedă</span>
-                <select
-                  value={form.currency_id}
-                  onChange={(e) => set("currency_id", e.target.value)}
-                  className="h-10 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] px-3 text-[13.5px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)]"
-                >
-                  <option value="">Fără monedă preferată</option>
-                  {(currencies.data?.data ?? []).map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.code}
-                      {c.name ? ` — ${c.name}` : ""}
-                    </option>
-                  ))}
-                </select>
-                {fieldError("currency_id") ? (
-                  <span className="text-[11.5px] font-medium text-[var(--danger)]">
-                    {fieldError("currency_id")}
-                  </span>
-                ) : null}
-              </label>
+              <AppSelect
+                name="currency_id"
+                ariaLabel="Monedă"
+                label="Monedă"
+                placeholder="Fără monedă preferată"
+                value={form.currency_id}
+                options={(currencies.data?.data ?? []).map((currency) => ({
+                  id: currency.id,
+                  label: `${currency.code}${currency.name ? ` — ${currency.name}` : ""}`,
+                }))}
+                onChange={(value) => set("currency_id", value)}
+              />
 
               <div className="flex flex-col gap-3 rounded-xl bg-[var(--subtle)] px-4 py-3.5">
                 <Toggle
+                  name="is_active"
                   label="Cont activ"
                   hint="Disponibil pentru a fi afișat pe facturi."
                   checked={form.is_active}
                   onChange={(v) => set("is_active", v)}
                 />
                 <Toggle
+                  name="is_primary"
                   label="Cont implicit"
                   hint="Folosit pentru e-Factura și afișat prima dată."
                   checked={form.is_primary}

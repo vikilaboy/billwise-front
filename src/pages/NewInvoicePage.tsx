@@ -2,9 +2,10 @@ import {useEffect, useMemo, useState} from "react";
 import {useNavigate, useParams} from "react-router";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner, TextArea} from "@heroui/react";
-import {ChevronDown, Loader2, Plus, Send, Trash2} from "lucide-react";
+import {Loader2, Plus, Send, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
-import {ApiError, api, listQuery} from "../lib/api";
+import {AppDatePicker, AppSelect} from "../components/FormControls";
+import {api, listQuery} from "../lib/api";
 import type {Currency, Customer, Invoice, Product, VatCategory, VatProfile} from "../lib/types";
 import {exchangeRate, money} from "../lib/format";
 
@@ -81,35 +82,28 @@ const cardClass =
 const inputBase =
   "h-10 w-full rounded-[10px] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-[13.5px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[var(--subtle)] disabled:text-[var(--text-muted)]";
 
-// Styled native select (the mockup uses native selects; the HeroUI Select compound
-// API is avoided here for robustness).
 function SelectBox(props: {
+  name?: string;
+  apiFields?: string[];
   value: string;
   onChange: (v: string) => void;
-  children: React.ReactNode;
+  options: {id: string; label: string}[];
+  placeholder?: string;
   disabled?: boolean;
   ariaLabel?: string;
   className?: string;
 }) {
-  return (
-    <div className="relative">
-      <select
-        aria-label={props.ariaLabel}
-        value={props.value}
-        disabled={props.disabled}
-        onChange={(e) => props.onChange(e.target.value)}
-        className={
-          inputBase + " cursor-pointer appearance-none pr-9 " + (props.className ?? "")
-        }
-      >
-        {props.children}
-      </select>
-      <ChevronDown
-        size={16}
-        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-faint)]"
-      />
-    </div>
-  );
+  return <AppSelect
+    name={props.name}
+    apiFields={props.apiFields}
+    ariaLabel={props.ariaLabel}
+    value={props.value}
+    options={props.options}
+    placeholder={props.placeholder}
+    className={props.className}
+    isDisabled={props.disabled}
+    onChange={props.onChange}
+  />;
 }
 
 function FieldLabel({children}: {children: React.ReactNode}) {
@@ -166,7 +160,6 @@ export function NewInvoicePage() {
   const [locale, setLocale] = useState<"ro" | "en">("ro");
   const [notes, setNotes] = useState("");
   const [rows, setRows] = useState<LineRow[]>(() => [newRow()]);
-  const [error, setError] = useState<ApiError | null>(null);
 
   useEffect(() => {
     const profile = (vatProfiles.data?.data ?? []).find((item) => item.is_active && item.is_default);
@@ -237,9 +230,6 @@ export function NewInvoicePage() {
     const vat = rows.reduce((sum, r) => sum + lineVatCents(r), 0);
     return {subtotal, vat, total: subtotal + vat};
   }, [rows]);
-
-  // Field-level errors from the API problem+json (keys like "lines.0.description").
-  const fieldErrors = error?.problem.errors ?? {};
 
   function updateRow(key: string, patch: Partial<LineRow>) {
     setRows((prev) => prev.map((r) => (r.key === key ? {...r, ...patch} : r)));
@@ -316,14 +306,9 @@ export function NewInvoicePage() {
       queryClient.invalidateQueries({queryKey: ["invoices"]});
       navigate(`/facturi/${invoice.id}`);
     },
-    onError: (err) => {
-      setError(err instanceof ApiError ? err : null);
-      window.scrollTo({top: 0, behavior: "smooth"});
-    },
   });
 
   function submit(issue: boolean) {
-    setError(null);
     mutation.mutate({issue});
   }
 
@@ -332,25 +317,6 @@ export function NewInvoicePage() {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Error banner (RFC7807 problem details) */}
-      {error && (
-        <div
-          role="alert"
-          className="rounded-2xl border border-[var(--danger)] bg-[var(--danger-soft,var(--surface))] p-4 text-[13px]"
-        >
-          <div className="font-semibold text-[var(--danger)]">
-            {error.problem.detail ?? error.problem.title}
-          </div>
-          {Object.keys(fieldErrors).length > 0 && (
-            <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-[var(--text-muted)]">
-              {Object.entries(fieldErrors).map(([field, msgs]) => (
-                <li key={field}>{msgs.join(" ")}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_340px]">
         {/* LEFT COLUMN */}
         <div className="flex flex-col gap-5">
@@ -361,6 +327,7 @@ export function NewInvoicePage() {
               <div className="sm:col-span-2">
                 <FieldLabel>Client</FieldLabel>
                 <SelectBox
+                  name="customer_id"
                   ariaLabel="Client"
                   value={customerId}
                   onChange={(value) => {
@@ -368,40 +335,28 @@ export function NewInvoicePage() {
                     setLocale(customerList.find((customer) => customer.id === value)?.locale ?? "ro");
                   }}
                   disabled={customers.isLoading}
-                >
-                  <option value="">
-                    {customers.isLoading ? "Se încarcă clienții…" : "Selectează clientul"}
-                  </option>
-                  {customerList.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </SelectBox>
+                  placeholder={customers.isLoading ? "Se încarcă clienții…" : "Selectează clientul"}
+                  options={customerList.map((customer) => ({id: customer.id, label: customer.name}))}
+                />
               </div>
 
               <div>
                 <FieldLabel>Serie</FieldLabel>
                 <SelectBox
+                  name="invoice_series_id"
                   ariaLabel="Serie"
                   value={selectedSeries?.id ?? ""}
                   onChange={setSeriesId}
                   disabled={series.isLoading}
-                >
-                  <option value="">
-                    {series.isLoading ? "Se încarcă…" : "Selectează seria"}
-                  </option>
-                  {seriesList.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.prefix})
-                    </option>
-                  ))}
-                </SelectBox>
+                  placeholder={series.isLoading ? "Se încarcă…" : "Selectează seria"}
+                  options={seriesList.map((item) => ({id: item.id, label: `${item.name} (${item.prefix})`}))}
+                />
               </div>
 
               <div>
                 <FieldLabel>Număr</FieldLabel>
                 <input
+                  name="issue_date"
                   disabled
                   aria-label="Număr factură"
                   value={numberPreview}
@@ -412,44 +367,22 @@ export function NewInvoicePage() {
 
               <div>
                 <FieldLabel>Data emiterii</FieldLabel>
-                <input
-                  type="date"
-                  aria-label="Data emiterii"
-                  value={issueDate}
-                  onChange={(e) => setIssueDate(e.target.value)}
-                  className={inputBase + " tabular-nums"}
-                />
+                <AppDatePicker name="issue_date" ariaLabel="Data emiterii" value={issueDate} onChange={setIssueDate} />
               </div>
 
               <div>
                 <FieldLabel>Scadență</FieldLabel>
-                <input
-                  type="date"
-                  aria-label="Scadență"
-                  value={dueDate}
-                  min={issueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className={inputBase + " tabular-nums"}
-                />
+                <AppDatePicker name="due_date" ariaLabel="Scadență" value={dueDate} minValue={issueDate} onChange={setDueDate} />
               </div>
 
               <div>
                 <FieldLabel>Monedă</FieldLabel>
-                <SelectBox ariaLabel="Monedă" value={currency} onChange={setCurrency}>
-                  {(currencies.data?.data ?? []).filter((c) => c.is_active).map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.code} — {c.name}
-                    </option>
-                  ))}
-                </SelectBox>
+                <SelectBox name="currency" ariaLabel="Monedă" value={currency} onChange={setCurrency} options={(currencies.data?.data ?? []).filter((item) => item.is_active).map((item) => ({id: item.code, label: `${item.code} — ${item.name}`}))} />
               </div>
 
               <div>
                 <FieldLabel>Limba documentului</FieldLabel>
-                <SelectBox ariaLabel="Limba documentului" value={locale} onChange={(value) => setLocale(value as "ro" | "en")}>
-                  <option value="ro">Română</option>
-                  <option value="en">Română + Engleză</option>
-                </SelectBox>
+                <SelectBox name="locale" ariaLabel="Limba documentului" value={locale} onChange={(value) => setLocale(value as "ro" | "en")} options={[{id: "ro", label: "Română"}, {id: "en", label: "Română + Engleză"}]} />
               </div>
 
               {isForeign && <div className="self-end text-xs text-[var(--text-muted)]">
@@ -468,10 +401,7 @@ export function NewInvoicePage() {
             <h2 className="mb-4 text-[15px] font-bold tracking-tight">Produse / servicii</h2>
             <div className="mb-4">
               <FieldLabel>Adaugă din catalog</FieldLabel>
-              <SelectBox ariaLabel="Adaugă din catalog" value="" onChange={addProduct} disabled={products.isLoading}>
-                <option value="">{products.isLoading ? "Se încarcă…" : "Selectează un produs sau serviciu"}</option>
-                {(products.data?.data ?? []).map((product) => <option key={product.id} value={product.id}>{product.name} · {money(product.unit_price_cents, product.currency)}</option>)}
-              </SelectBox>
+              <SelectBox ariaLabel="Adaugă din catalog" value="" onChange={addProduct} disabled={products.isLoading} placeholder={products.isLoading ? "Se încarcă…" : "Selectează un produs sau serviciu"} options={(products.data?.data ?? []).map((product) => ({id: product.id, label: `${product.name} · ${money(product.unit_price_cents, product.currency)}`}))} />
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] border-collapse text-[13px]">
@@ -486,10 +416,11 @@ export function NewInvoicePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row) => (
+                  {rows.map((row, index) => (
                     <tr key={row.key} className="border-b border-[var(--border)] last:border-0">
                       <td className="py-2.5 pr-3 align-top">
                         <input
+                          name={`lines.${index}.description`}
                           aria-label="Descriere linie"
                           placeholder="Descriere produs sau serviciu"
                           value={row.description}
@@ -510,6 +441,7 @@ export function NewInvoicePage() {
                             −
                           </button>
                           <input
+                            name={`lines.${index}.quantity`}
                             type="number"
                             aria-label="Cantitate"
                             min="0"
@@ -532,6 +464,7 @@ export function NewInvoicePage() {
                       </td>
                       <td className="py-2.5 px-2 align-top">
                         <input
+                          name={`lines.${index}.unit_price_cents`}
                           type="number"
                           aria-label="Preț unitar"
                           min="0"
@@ -545,6 +478,8 @@ export function NewInvoicePage() {
                       </td>
                       <td className="py-2.5 px-2 align-top">
                         <SelectBox
+                          name={`lines.${index}.vat_profile_id`}
+                          apiFields={[`lines.${index}.vat_rate`, `lines.${index}.vat_category`, `lines.${index}.vat_exemption_code`, `lines.${index}.vat_exemption_reason`]}
                           ariaLabel="Cotă TVA"
                           className="w-[150px]"
                           value={row.vat_profile_id ?? ""}
@@ -559,14 +494,9 @@ export function NewInvoicePage() {
                               vat_exemption_reason: profile.vat_exemption_reason,
                             });
                           }}
-                        >
-                          <option value="">Selectează TVA</option>
-                          {(vatProfiles.data?.data ?? []).filter((profile) => profile.is_active).map((profile) => (
-                            <option key={profile.id} value={profile.id}>
-                              {profile.name} · {Number(profile.rate)}%
-                            </option>
-                          ))}
-                        </SelectBox>
+                          placeholder="Selectează TVA"
+                          options={(vatProfiles.data?.data ?? []).filter((profile) => profile.is_active).map((profile) => ({id: profile.id, label: `${profile.name} · ${Number(profile.rate)}%`}))}
+                        />
                       </td>
                       <td className="py-2.5 px-2 text-right align-middle font-semibold tabular-nums text-[var(--text)]">
                         {money(lineNetCents(row), currency)}
@@ -602,6 +532,7 @@ export function NewInvoicePage() {
           <section className={cardClass}>
             <h2 className="mb-4 text-[15px] font-bold tracking-tight">Observații / mențiuni</h2>
             <TextArea
+              name="notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Mențiuni afișate pe factură (opțional)…"

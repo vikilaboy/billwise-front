@@ -2,6 +2,7 @@ import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {MemoryRouter} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
+import {API_ERROR_EVENT, type ApiErrorEventDetail} from "../lib/apiErrorPresentation";
 import {bucharestRunAt, RecurringPage} from "./RecurringPage";
 
 vi.mock("../components/AppShell", () => ({
@@ -35,14 +36,15 @@ describe("RecurringPage", () => {
     );
 
     expect(await screen.findByText(/Șabloanele generează numai ciorne/)).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("combobox"), {target: {value: "active"}});
+    fireEvent.click(screen.getByRole("button", {name: /Starea șabloanelor recurente/}));
+    fireEvent.click(await screen.findByRole("option", {name: "Active"}));
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) =>
       String(url).includes("_filter%5Bstatus%5D=active"),
     )).toBe(true));
   });
 
-  it("afișează motivul când generarea manuală nu creează ciorna", async () => {
+  it("publică global motivul când generarea manuală nu creează ciorna", async () => {
     const template = {
       id: "template-1",
       name: "Abonament lunar",
@@ -83,8 +85,65 @@ describe("RecurringPage", () => {
       </QueryClientProvider>,
     );
 
+    const apiErrorEvent = new Promise<ApiErrorEventDetail>((resolve) => {
+      window.addEventListener(API_ERROR_EVENT, (event) => {
+        resolve((event as CustomEvent<ApiErrorEventDetail>).detail);
+      }, {once: true});
+    });
     fireEvent.click(await screen.findByRole("button", {name: /Generează acum/}));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Seria nu mai este activă.");
+    await expect(apiErrorEvent).resolves.toMatchObject({
+      problem: {
+        title: "Ciorna recurentă nu a putut fi generată",
+        detail: "Seria nu mai este activă.",
+      },
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("trimite snapshot-ul fiscal complet pentru opțiunea fără TVA", async () => {
+    const emptyList = {data: [], meta: {pagination: {current_page: 1, per_page: 100, total: 0, last_page: 1}}};
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/preview")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          data: {
+            scheduled_for: "2028-01-01T07:00:00Z",
+            issue_date: "2028-01-01",
+            due_date: "2028-01-16",
+            period: {start: "2027-12-01", end: "2027-12-31"},
+            lines: [{description: "Servicii"}],
+          },
+        }), {status: 200, headers: {"Content-Type": "application/json"}}));
+      }
+
+      return Promise.resolve(new Response(JSON.stringify(emptyList), {
+        status: 200,
+        headers: {"Content-Type": "application/json"},
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}, mutations: {retry: false}}})}>
+        <MemoryRouter>
+          <RecurringPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Șablon nou"}));
+    expect(await screen.findByText(/Nu există profiluri TVA configurate/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name: "Previzualizează"}));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/preview"))).toBe(true));
+    const previewCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/preview"));
+    const body = JSON.parse(String(previewCall?.[1]?.body));
+
+    expect(body.lines[0]).toMatchObject({
+      vat_profile_id: null,
+      vat_rate: "0.00",
+      vat_category: "O",
+      vat_exemption_reason: "Neînregistrat în scopuri de TVA / Not registered for VAT",
+    });
   });
 });

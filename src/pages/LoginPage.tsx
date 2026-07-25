@@ -9,7 +9,6 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
   const [needsVerification, setNeedsVerification] = useState(false);
   const [resendMessage, setResendMessage] = useState("");
   const [resending, setResending] = useState(false);
@@ -29,7 +28,6 @@ export function LoginPage() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError("");
     setNeedsVerification(false);
     setResendMessage("");
     try {
@@ -42,9 +40,6 @@ export function LoginPage() {
     } catch (c) {
       if (c instanceof ApiError && c.problem.type?.endsWith("/email-not-verified")) {
         setNeedsVerification(true);
-        setError("Contul nu este activat. Verifică emailul sau solicită un link nou.");
-      } else {
-        setError(c instanceof ApiError ? c.message : "Nu ne-am putut conecta la server.");
       }
     } finally {
       setLoading(false);
@@ -62,7 +57,7 @@ export function LoginPage() {
       setResendMessage(response.data.message);
       setResendCooldown(60);
     } catch {
-      setResendMessage("Nu am putut retrimite linkul. Încearcă din nou.");
+      // The API client presents the error globally.
     } finally {
       setResending(false);
     }
@@ -82,6 +77,7 @@ export function LoginPage() {
 
         <label className={authLabelCls}>Email</label>
         <input
+          name="email"
           type="email"
           required
           value={email}
@@ -97,6 +93,7 @@ export function LoginPage() {
           </Link>
         </div>
         <input
+          name="password"
           type="password"
           required
           value={password}
@@ -105,11 +102,6 @@ export function LoginPage() {
           className={`${authInputCls} mb-5`}
         />
 
-        {error && (
-          <div className="mb-4 text-[13px] font-medium text-[var(--danger)]" role="alert">
-            {error}
-          </div>
-        )}
 
         {needsVerification ? (
           <div className="mb-4">

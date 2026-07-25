@@ -1,10 +1,11 @@
-import {useEffect, useMemo, useState} from "react";
+import {useEffect, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner, Switch} from "@heroui/react";
 import {useNavigate, useSearchParams} from "react-router";
 import {Building2, Check, Globe, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
-import {api, ApiError} from "../lib/api";
+import {AppCheckbox} from "../components/FormControls";
+import {api} from "../lib/api";
 import type {Address, CompanyProfile, Currency, SpvAuthorize, SpvConnection, VatProfile} from "../lib/types";
 import {exchangeRate} from "../lib/format";
 
@@ -65,16 +66,18 @@ function addressSummary(a: Address | null): string {
 
 // Reusable HeroUI Switch (compound) wired to a boolean value.
 function Toggle({
+  name,
   isSelected,
   onChange,
   label,
 }: {
+  name?: string;
   isSelected: boolean;
   onChange: (value: boolean) => void;
   label: string;
 }) {
   return (
-    <Switch isSelected={isSelected} onChange={onChange} aria-label={label}>
+    <Switch name={name} isSelected={isSelected} onChange={onChange} aria-label={label}>
       <Switch.Content>
         <Switch.Control>
           <Switch.Thumb />
@@ -87,13 +90,11 @@ function Toggle({
 function Field({
   label,
   htmlFor,
-  error,
   className,
   children,
 }: {
   label: string;
   htmlFor?: string;
-  error?: string;
   className?: string;
   children: React.ReactNode;
 }) {
@@ -103,7 +104,6 @@ function Field({
         {label}
       </label>
       {children}
-      {error ? <p className="mt-1 text-[12px] font-medium text-[var(--danger)]">{error}</p> : null}
     </div>
   );
 }
@@ -248,22 +248,6 @@ export function SettingsPage() {
     },
   });
 
-  const fieldErrors = useMemo<Record<string, string[]>>(() => {
-    const err = saveMutation.error;
-    if (err instanceof ApiError && err.problem.errors) return err.problem.errors;
-    return {};
-  }, [saveMutation.error]);
-
-  const errorFor = (key: string): string | undefined => fieldErrors[key]?.[0];
-
-  // A non-field-level failure (network, 500, or 422 without `errors`).
-  const generalError =
-    saveMutation.error instanceof ApiError && !saveMutation.error.problem.errors
-      ? saveMutation.error.problem.detail ?? saveMutation.error.problem.title
-      : saveMutation.error && !(saveMutation.error instanceof ApiError)
-        ? "A apărut o eroare la salvare. Încearcă din nou."
-        : undefined;
-
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({...prev, [key]: value}));
     if (justSaved) setJustSaved(false);
@@ -347,9 +331,10 @@ export function SettingsPage() {
         </header>
 
         <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-          <Field label="Denumire" htmlFor="legal_name" error={errorFor("legal_name")} className="sm:col-span-2">
+          <Field label="Denumire" htmlFor="legal_name" className="sm:col-span-2">
             <Input
               id="legal_name"
+              name="legal_name"
               value={form.legal_name}
               onChange={(e) => update("legal_name", e.target.value)}
               placeholder="Denumirea legală a firmei"
@@ -357,9 +342,10 @@ export function SettingsPage() {
             />
           </Field>
 
-          <Field label="CUI" htmlFor="tax_id" error={errorFor("tax_id")}>
+          <Field label="CUI" htmlFor="tax_id">
             <Input
               id="tax_id"
+              name="tax_id"
               value={form.tax_id}
               onChange={(e) => update("tax_id", e.target.value)}
               placeholder="RO12345678"
@@ -367,9 +353,10 @@ export function SettingsPage() {
             />
           </Field>
 
-          <Field label="Reg. Com." htmlFor="registration_number" error={errorFor("registration_number")}>
+          <Field label="Reg. Com." htmlFor="registration_number">
             <Input
               id="registration_number"
+              name="registration_number"
               value={form.registration_number}
               onChange={(e) => update("registration_number", e.target.value)}
               placeholder="J40/1234/2020"
@@ -380,11 +367,11 @@ export function SettingsPage() {
           <Field
             label="Adresă sediu"
             htmlFor="street"
-            error={errorFor("address.street")}
             className="sm:col-span-2"
           >
             <Input
               id="street"
+              name="address.street"
               value={form.street}
               onChange={(e) => update("street", e.target.value)}
               placeholder="Stradă, număr"
@@ -403,15 +390,17 @@ export function SettingsPage() {
               <div className="text-[12px] text-[var(--text-muted)]">Firma colectează și declară TVA</div>
             </div>
             <Toggle
+              name="is_vat_payer"
               isSelected={form.is_vat_payer}
               onChange={(v) => update("is_vat_payer", v)}
               label="Plătitor de TVA"
             />
           </div>
 
-          <Field label="Email" htmlFor="email" error={errorFor("email")}>
+          <Field label="Email" htmlFor="email">
             <Input
               id="email"
+              name="email"
               type="email"
               value={form.email}
               onChange={(e) => update("email", e.target.value)}
@@ -420,9 +409,10 @@ export function SettingsPage() {
             />
           </Field>
 
-          <Field label="Telefon" htmlFor="phone" error={errorFor("phone")}>
+          <Field label="Telefon" htmlFor="phone">
             <Input
               id="phone"
+              name="phone"
               type="tel"
               value={form.phone}
               onChange={(e) => update("phone", e.target.value)}
@@ -431,9 +421,10 @@ export function SettingsPage() {
             />
           </Field>
 
-          <Field label="Website" htmlFor="website" error={errorFor("website")} className="sm:col-span-2">
+          <Field label="Website" htmlFor="website" className="sm:col-span-2">
             <Input
               id="website"
+              name="website"
               type="url"
               value={form.website}
               onChange={(e) => update("website", e.target.value)}
@@ -442,10 +433,6 @@ export function SettingsPage() {
             />
           </Field>
         </div>
-
-        {generalError ? (
-          <p className="mt-4 text-[12.5px] font-medium text-[var(--danger)]">{generalError}</p>
-        ) : null}
 
         <div className="mt-5 flex items-center gap-3 border-t border-[var(--border)] pt-4">
           <Button
@@ -481,13 +468,6 @@ export function SettingsPage() {
               <Trash2 size={14} /> Arhivează
             </Button>
           </div>
-          {archiveMutation.isError ? (
-            <p role="alert" className="mt-3 text-xs font-medium text-[var(--danger)]">
-              {archiveMutation.error instanceof ApiError
-                ? archiveMutation.error.problem.detail ?? archiveMutation.error.problem.title
-                : "Firma nu a putut fi arhivată."}
-            </p>
-          ) : null}
           {archivedCompanies.length > 0 ? (
             <div className="mt-4 border-t border-[var(--border)] pt-4">
               <div className="text-[13px] font-semibold">Firme arhivate</div>
@@ -509,11 +489,6 @@ export function SettingsPage() {
                   </div>
                 ))}
               </div>
-              {restoreMutation.isError ? (
-                <p role="alert" className="mt-3 text-xs font-medium text-[var(--danger)]">
-                  Firma nu a putut fi restaurată.
-                </p>
-              ) : null}
             </div>
           ) : null}
         </div>
@@ -628,11 +603,6 @@ export function SettingsPage() {
           );
         })()}
 
-        {connectMutation.isError || disconnectMutation.isError ? (
-          <p role="alert" className="mt-3 text-[12.5px] font-medium text-[var(--danger)]">
-            Operația SPV nu a putut fi finalizată.
-          </p>
-        ) : null}
       </section>
 
       <section className={cardClass}>
@@ -653,26 +623,14 @@ export function SettingsPage() {
                       {currency.is_local ? "Monedă locală" : currency.latest_rate ? `Ultimul curs: ${exchangeRate(currency.latest_rate.rate)} · ${currency.latest_rate.day}` : "Fără curs disponibil"}
                     </div>
                   </div>
-                  <label className="flex items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={currency.is_active}
-                      disabled={currencyMutation.isPending || currency.is_local}
-                      onChange={(event) => currencyMutation.mutate({...currency, is_active: event.target.checked})}
-                    />
+                  <AppCheckbox name={`currencies.${currency.id}.is_active`} isSelected={currency.is_active} isDisabled={currencyMutation.isPending || currency.is_local} onChange={(selected) => currencyMutation.mutate({...currency, is_active: selected})}>
                     Activă
-                  </label>
+                  </AppCheckbox>
                 </div>
                 {!currency.is_local ? (
-                  <label className="mt-2 flex items-center gap-2 text-xs text-[var(--text-muted)]">
-                    <input
-                      type="checkbox"
-                      checked={currency.auto_update}
-                      disabled={currencyMutation.isPending}
-                      onChange={(event) => currencyMutation.mutate({...currency, auto_update: event.target.checked})}
-                    />
+                  <AppCheckbox className="mt-2 text-xs text-[var(--text-muted)]" name={`currencies.${currency.id}.auto_update`} isSelected={currency.auto_update} isDisabled={currencyMutation.isPending} onChange={(selected) => currencyMutation.mutate({...currency, auto_update: selected})}>
                     Actualizare automată BNR
-                  </label>
+                  </AppCheckbox>
                 ) : null}
               </div>
             ))}
@@ -685,19 +643,18 @@ export function SettingsPage() {
           <p className="text-[12.5px] text-[var(--text-muted)]">Cotele și tratamentele fiscale selectabile pe produse, facturi și recurențe</p>
         </header>
         <div className="mb-4 grid grid-cols-[1fr_100px_auto] gap-2">
-          <Input aria-label="Denumire profil TVA" placeholder="TVA standard" value={newVatName} onChange={(event) => setNewVatName(event.target.value)} />
-          <Input aria-label="Cotă TVA" type="number" min="0" max="100" value={newVatRate} onChange={(event) => setNewVatRate(event.target.value)} />
+          <Input name="name" aria-label="Denumire profil TVA" placeholder="TVA standard" value={newVatName} onChange={(event) => setNewVatName(event.target.value)} />
+          <Input name="rate" aria-label="Cotă TVA" type="number" min="0" max="100" value={newVatRate} onChange={(event) => setNewVatRate(event.target.value)} />
           <Button variant="primary" isDisabled={!newVatName.trim() || vatProfileMutation.isPending} onPress={() => vatProfileMutation.mutate({create: true})}>Adaugă</Button>
         </div>
         {vatProfilesQuery.isLoading ? <Spinner size="sm" /> : (
           <div className="divide-y divide-[var(--border)]">
             {vatProfiles.map((profile) => <div key={profile.id} className="flex items-center justify-between py-3">
               <div><div className="text-[13.5px] font-semibold">{profile.name} · {Number(profile.rate)}%</div><div className="text-xs text-[var(--text-muted)]">{profile.vat_category}{profile.is_default ? " · implicit" : ""}{profile.is_referenced ? " · utilizat" : ""}</div></div>
-              <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={profile.is_active} disabled={vatProfileMutation.isPending} onChange={() => vatProfileMutation.mutate({profile})} /> Activ</label>
+              <AppCheckbox name={`vat_profiles.${profile.id}.is_active`} isSelected={profile.is_active} isDisabled={vatProfileMutation.isPending} onChange={() => vatProfileMutation.mutate({profile})}>Activ</AppCheckbox>
             </div>)}
           </div>
         )}
-        {vatProfileMutation.isError ? <p role="alert" className="mt-3 text-xs text-[var(--danger)]">{vatProfileMutation.error instanceof ApiError ? vatProfileMutation.error.problem.detail : "Profilul TVA nu a putut fi salvat."}</p> : null}
       </section>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import {fireEvent, render, screen} from "@testing-library/react";
 import {MemoryRouter} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
+import {API_ERROR_EVENT, type ApiErrorEventDetail} from "../lib/apiErrorPresentation";
 import {VerifyEmailPendingPage} from "./VerifyEmailPendingPage";
 
 afterEach(() => {
@@ -35,7 +36,7 @@ describe("VerifyEmailPendingPage", () => {
     expect(screen.getByText(/Dacă adresa există/)).toBeInTheDocument();
   });
 
-  it("afișează eroarea serverului fără a porni cooldown-ul", async () => {
+  it("publică global eroarea serverului fără a porni cooldown-ul", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -52,8 +53,16 @@ describe("VerifyEmailPendingPage", () => {
       </MemoryRouter>,
     );
 
+    const apiErrorEvent = new Promise<ApiErrorEventDetail>((resolve) => {
+      window.addEventListener(API_ERROR_EVENT, (event) => {
+        resolve((event as CustomEvent<ApiErrorEventDetail>).detail);
+      }, {once: true});
+    });
     fireEvent.click(screen.getByRole("button", {name: "Retrimite linkul"}));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Încearcă mai târziu.");
+    await expect(apiErrorEvent).resolves.toMatchObject({
+      problem: {title: "Prea multe cereri", status: 429, detail: "Încearcă mai târziu."},
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("button", {name: "Retrimite linkul"})).toBeEnabled();
   });
 });

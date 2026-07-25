@@ -7,7 +7,8 @@ import {Hash, Pencil, Plus, RotateCcw, Search, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {api, apiErrorMessage, ApiError, listQuery} from "../lib/api";
+import {AppSelect} from "../components/FormControls";
+import {api, ApiError, listQuery} from "../lib/api";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
 // Other document families require distinct legal flows. The current product
@@ -203,16 +204,11 @@ export function InvoiceSeriesPage() {
               className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
             />
           </label>
-          <select
-            value={activeFilter}
-            onChange={(event) => grid.setFilter(event.target.value as ActiveFilter)}
-            aria-label="Filtrează după stare"
-            className="h-10 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm outline-none"
-          >
-            <option value="all">Toate stările</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
+          <AppSelect ariaLabel="Filtrează după stare" className="w-44" value={activeFilter} onChange={(value) => grid.setFilter(value as ActiveFilter)} options={[
+            {id: "all", label: "Toate stările"},
+            {id: "active", label: "Active"},
+            {id: "inactive", label: "Inactive"},
+          ]} />
           <Button variant="outline" size="sm" isDisabled={!grid.isDirty} onPress={grid.reset}>
             <RotateCcw size={15} /> Resetează
           </Button>
@@ -221,12 +217,6 @@ export function InvoiceSeriesPage() {
           <Plus size={17} /> Serie nouă
         </Button>
       </div>
-      {remove.isError ? (
-        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
-          {apiErrorMessage(remove.error, "Seria nu a putut fi ștearsă.")}
-        </p>
-      ) : null}
-
       {/* Table card */}
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
         <DataTableLoadingOverlay isLoading={series.isFetching && !series.isLoading} />
@@ -325,9 +315,6 @@ function SeriesModal({
     onSuccess: onSaved,
   });
 
-  const problem = mutation.error instanceof ApiError ? mutation.error.problem : undefined;
-  const fieldErrors = problem?.errors ?? {};
-
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({...prev, [key]: value}));
   }
@@ -359,8 +346,9 @@ function SeriesModal({
         </div>
 
         <div className="flex flex-col gap-4 px-5 py-5">
-          <Field label="Denumire" error={fieldErrors.name?.[0]}>
+          <Field label="Denumire">
             <Input
+              name="name"
               fullWidth
               value={form.name}
               onChange={(e) => update("name", e.target.value)}
@@ -368,14 +356,15 @@ function SeriesModal({
             />
           </Field>
 
-          <Field label="Tip document" error={fieldErrors.document_type?.[0]}>
-            <div className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-[13px] text-[var(--text)]">
+          <Field label="Tip document">
+            <div data-api-fields="document_type" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-muted)] px-3 py-2 text-[13px] text-[var(--text)]">
               Factură
             </div>
           </Field>
 
-          <Field label="Prefix" error={fieldErrors.prefix?.[0]}>
+          <Field label="Prefix">
             <Input
+              name="prefix"
               fullWidth
               value={form.prefix}
               onChange={(e) => update("prefix", e.target.value)}
@@ -384,8 +373,9 @@ function SeriesModal({
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Următorul număr de start" error={fieldErrors.next_number?.[0]}>
+            <Field label="Următorul număr de start">
               <Input
+                name="next_number"
                 fullWidth
                 type="number"
                 min={1}
@@ -393,8 +383,9 @@ function SeriesModal({
                 onChange={(e) => update("next_number", e.target.value)}
               />
             </Field>
-            <Field label="Padding" error={fieldErrors.padding?.[0]}>
+            <Field label="Padding">
               <Input
+                name="padding"
                 fullWidth
                 type="number"
                 min={0}
@@ -407,6 +398,7 @@ function SeriesModal({
           <label className="flex items-center justify-between gap-3">
             <span className="text-[13px] font-medium text-[var(--text)]">Serie implicită</span>
             <Switch
+              name="is_default"
               isSelected={form.is_default}
               onChange={(v) => update("is_default", v)}
               aria-label="Serie implicită"
@@ -422,6 +414,7 @@ function SeriesModal({
           <label className="flex items-center justify-between gap-3">
             <span className="text-[13px] font-medium text-[var(--text)]">Activă</span>
             <Switch
+              name="is_active"
               isSelected={form.is_active}
               onChange={(v) => update("is_active", v)}
               aria-label="Activă"
@@ -434,11 +427,6 @@ function SeriesModal({
             </Switch>
           </label>
 
-          {problem && !problem.errors && (
-            <div className="rounded-lg bg-[var(--danger-soft,var(--bg-muted))] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
-              {problem.detail ?? problem.title}
-            </div>
-          )}
         </div>
 
         <div className="flex justify-end gap-2 border-t border-[var(--border)] px-5 py-4">
@@ -460,18 +448,15 @@ function SeriesModal({
 
 function Field({
   label,
-  error,
   children,
 }: {
   label: string;
-  error?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-[12px] font-semibold text-[var(--text-muted)]">{label}</span>
       {children}
-      {error && <span className="text-[11.5px] font-medium text-[var(--danger)]">{error}</span>}
     </div>
   );
 }

@@ -6,7 +6,8 @@ import {Timeline} from "@heroui-pro/react/timeline";
 import type {TimelineStatus} from "@heroui-pro/react/timeline";
 import {Ban, Banknote, Check, ChevronLeft, Copy, Download, FileCode2, Mail, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
-import {api, apiErrorMessage, ApiError, downloadApiFile} from "../lib/api";
+import {AppDatePicker, AppSelect} from "../components/FormControls";
+import {api, downloadApiFile} from "../lib/api";
 import type {Address, EfacturaSubmission, Invoice, InvoiceDelivery, InvoicePayment, PaymentMethod} from "../lib/types";
 import {
   cents,
@@ -112,7 +113,6 @@ export function InvoiceDetailPage() {
   const queryClient = useQueryClient();
   const submittingRef = useRef(false);
   const [downloading, setDownloading] = useState<"pdf" | "xml" | "confirmation" | null>(null);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [editingPayment, setEditingPayment] = useState<InvoicePayment | null | undefined>(undefined);
   const [emailOpen, setEmailOpen] = useState(false);
   const [correctionOpen, setCorrectionOpen] = useState(false);
@@ -259,7 +259,6 @@ export function InvoiceDetailPage() {
   async function download(kind: "pdf" | "xml" | "confirmation") {
     if (!company?.id || !id) return;
     setDownloading(kind);
-    setDownloadError(null);
     try {
       if (kind === "pdf") {
         await downloadApiFile(`/companies/${company.id}/invoices/${id}/pdf`, `${formattedNumber}.pdf`);
@@ -271,8 +270,8 @@ export function InvoiceDetailPage() {
           `${formattedNumber}.zip`,
         );
       }
-    } catch (error) {
-      setDownloadError(error instanceof ApiError ? error.problem.detail ?? error.problem.title : "Descărcarea a eșuat.");
+    } catch {
+      // downloadApiFile reports API and network failures through the global toast.
     } finally {
       setDownloading(null);
     }
@@ -323,19 +322,6 @@ export function InvoiceDetailPage() {
         ) : null}
         {invoice.status === "issued" ? <Button variant="outline" onPress={() => setEmailOpen(true)}><Mail size={16} /> Trimite pe email</Button> : null}
       </div>
-      {lifecycleMutation.isError ? (
-        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
-          {lifecycleMutation.error instanceof ApiError
-            ? lifecycleMutation.error.problem.detail ?? lifecycleMutation.error.problem.title
-            : "Operația nu a putut fi finalizată."}
-        </p>
-      ) : null}
-      {retryDelivery.isError || deletePayment.isError ? (
-        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
-          {apiErrorMessage(retryDelivery.error ?? deletePayment.error, "Operația nu a putut fi finalizată.")}
-        </p>
-      ) : null}
-
       {/* 2-column grid */}
       <div className="invoice-detail-grid">
         {/* LEFT — the paper */}
@@ -590,7 +576,6 @@ export function InvoiceDetailPage() {
                       ) : null}
                     </div>
                   </div>
-                  {settleInvoice.isError ? <p role="alert" className="mt-2 text-xs text-[var(--danger)]">Încasarea integrală nu a putut fi salvată.</p> : null}
                   {paymentsQuery.isLoading ? (
                     <div className="mt-3 flex items-center gap-2 text-xs text-[var(--text-muted)]"><Spinner size="sm" /> Se încarcă…</div>
                   ) : payments.length === 0 ? (
@@ -651,14 +636,6 @@ export function InvoiceDetailPage() {
                     {latest.error}
                   </p>
                 ) : null}
-                {submitMutation.error ? (
-                  <p role="alert" className="mt-3 text-[12px] font-medium text-[var(--danger)]">
-                    {submitMutation.error instanceof ApiError
-                      ? submitMutation.error.problem.detail ?? submitMutation.error.problem.title
-                      : "Trimiterea în SPV nu a putut fi pornită."}
-                  </p>
-                ) : null}
-                {downloadError ? <p role="alert" className="mt-3 text-[12px] font-medium text-[var(--danger)]">{downloadError}</p> : null}
 
                 <div className="mt-4 flex flex-col gap-2">
                   {invoice.efactura_eligibility.eligible && !hasBlockingSubmission ? (
@@ -785,32 +762,31 @@ function CorrectionModal({companyId, invoice, onClose, onCreated}: {
     }),
     onSuccess: ({data}) => onCreated(data),
   });
-  const error = create.error instanceof ApiError ? create.error.problem.detail ?? create.error.problem.title : null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="Creează factură de corecție">
       <div className="w-full max-w-xl rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
         <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">Creează factură de corecție</h2><p className="mt-1 text-xs text-[var(--text-muted)]">Originalul rămâne nemodificat. Se creează o ciornă separată, cu referință fiscală la {invoice.formatted_number}.</p></div><Button isIconOnly variant="ghost" onPress={onClose}><X size={17} /></Button></header>
         <div className="grid gap-4 p-5">
-          <label className="text-xs font-semibold text-[var(--text-muted)]">Tip corecție
-            <select className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm" value={mode} onChange={(event) => setMode(event.target.value as "total" | "partial")}>
-              <option value="total">Stornare totală</option><option value="partial">Corecție parțială</option>
-            </select>
-          </label>
+          <div className="text-xs font-semibold text-[var(--text-muted)]">Tip corecție
+            <AppSelect name="mode" ariaLabel="Tip corecție" className="mt-1.5" value={mode} onChange={(value) => setMode(value as "total" | "partial")} options={[
+              {id: "total", label: "Stornare totală"},
+              {id: "partial", label: "Corecție parțială"},
+            ]} />
+          </div>
           {mode === "partial" ? (
             <div>
               <div className="text-xs font-semibold text-[var(--text-muted)]">Cantități de corectat</div>
               <div className="mt-2 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
-                {invoice.lines.map((line) => (
+                {invoice.lines.map((line, index) => (
                   <label key={line.id} className="flex items-center gap-3 p-3 text-sm">
                     <span className="min-w-0 flex-1 truncate">{line.description} (max. {Number(line.quantity)})</span>
-                    <input className="h-9 w-24 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-2" type="number" min="0" max={Number(line.quantity)} step="0.01" value={quantities[line.id] ?? ""} onChange={(event) => setQuantities((current) => ({...current, [line.id]: event.target.value}))} />
+                    <input name={`lines.${index}.quantity`} className="h-9 w-24 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-2" type="number" min="0" max={Number(line.quantity)} step="0.01" value={quantities[line.id] ?? ""} onChange={(event) => setQuantities((current) => ({...current, [line.id]: event.target.value}))} />
                   </label>
                 ))}
               </div>
             </div>
           ) : null}
-          <label className="text-xs font-semibold text-[var(--text-muted)]">Motiv<textarea className="mt-1.5 min-h-24 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-          {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Motiv<textarea name="reason" className="mt-1.5 min-h-24 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
         </div>
         <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={create.isPending || !reason.trim() || (mode === "partial" && !Object.values(quantities).some((value) => Number(value) > 0))} onPress={() => {
           if (window.confirm("Creezi ciorna documentului de corecție? Aceasta nu se trimite automat în SPV sau pe email.")) create.mutate();
@@ -842,18 +818,16 @@ function EmailDeliveryModal({companyId, invoice, onClose, onSaved}: {
     }),
     onSuccess: onSaved,
   });
-  const errors = send.error instanceof ApiError ? send.error.problem.errors ?? {} : {};
   const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="Trimite factura pe email">
       <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
         <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">Trimite factura pe email</h2><p className="mt-1 text-xs text-[var(--text-muted)]">PDF-ul este atașat; trimiterea în SPV nu este afectată.</p></div><Button isIconOnly variant="ghost" aria-label="Închide" onPress={onClose}><X size={17} /></Button></header>
         <div className="grid gap-4 p-5">
-          <label className="text-xs font-semibold text-[var(--text-muted)]">Destinatar<input className={`${input} mt-1.5`} type="email" value={recipient} onChange={(event) => setRecipient(event.target.value)} />{errors.recipient?.[0] ? <span className="text-[var(--danger)]">{errors.recipient[0]}</span> : null}</label>
-          <label className="text-xs font-semibold text-[var(--text-muted)]">CC (separate prin virgulă)<input className={`${input} mt-1.5`} value={cc} onChange={(event) => setCc(event.target.value)} /></label>
-          <label className="text-xs font-semibold text-[var(--text-muted)]">Subiect<input className={`${input} mt-1.5`} value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
-          <label className="text-xs font-semibold text-[var(--text-muted)]">Mesaj<textarea className="mt-1.5 min-h-28 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={message} onChange={(event) => setMessage(event.target.value)} /></label>
-          {send.isError && !Object.keys(errors).length ? <p role="alert" className="text-sm text-[var(--danger)]">Livrarea nu a putut fi pusă în coadă.</p> : null}
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Destinatar<input name="recipient" className={`${input} mt-1.5`} type="email" value={recipient} onChange={(event) => setRecipient(event.target.value)} /></label>
+          <label className="text-xs font-semibold text-[var(--text-muted)]">CC (separate prin virgulă)<input name="cc" className={`${input} mt-1.5`} value={cc} onChange={(event) => setCc(event.target.value)} /></label>
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Subiect<input name="subject" className={`${input} mt-1.5`} value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Mesaj<textarea name="message" className="mt-1.5 min-h-28 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={message} onChange={(event) => setMessage(event.target.value)} /></label>
         </div>
         <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={send.isPending || !recipient.trim() || !subject.trim()} onPress={() => {
           if (window.confirm(`Trimiți explicit factura către ${recipient.trim()}?`)) send.mutate();
@@ -903,9 +877,6 @@ function PaymentModal({companyId, invoice, payment, onClose, onSaved}: {
     ),
     onSuccess: onSaved,
   });
-  const error = save.error instanceof ApiError
-    ? save.error.problem.detail ?? Object.values(save.error.problem.errors ?? {})[0]?.[0] ?? save.error.problem.title
-    : null;
   const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
 
   return (
@@ -917,23 +888,20 @@ function PaymentModal({companyId, invoice, payment, onClose, onSaved}: {
         </header>
         <div className="grid gap-4 p-5 sm:grid-cols-2">
           <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Sumă
-            <input className={input} type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} />
+            <input name="amount_cents" className={input} type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} />
           </label>
-          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Data încasării
-            <input className={input} type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} />
-          </label>
-          <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Metodă
-            <select className={input} value={method} onChange={(event) => setMethod(event.target.value as PaymentMethod)}>
-              {Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-          </label>
+          <div className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Data încasării
+            <AppDatePicker name="paid_at" ariaLabel="Data încasării" value={paidAt} onChange={setPaidAt} />
+          </div>
+          <div className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Metodă
+            <AppSelect name="method" ariaLabel="Metodă" value={method} onChange={(value) => setMethod(value as PaymentMethod)} options={Object.entries(paymentMethodLabels).map(([value, label]) => ({id: value, label}))} />
+          </div>
           <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Referință
-            <input className={input} value={reference} onChange={(event) => setReference(event.target.value)} />
+            <input name="reference" className={input} value={reference} onChange={(event) => setReference(event.target.value)} />
           </label>
           <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)] sm:col-span-2">Notițe
-            <textarea className="min-h-20 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={notes} onChange={(event) => setNotes(event.target.value)} />
+            <textarea name="notes" className="min-h-20 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={notes} onChange={(event) => setNotes(event.target.value)} />
           </label>
-          {error ? <p role="alert" className="text-sm text-[var(--danger)] sm:col-span-2">{error}</p> : null}
         </div>
         <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4">
           <Button variant="outline" onPress={onClose}>Anulează</Button>

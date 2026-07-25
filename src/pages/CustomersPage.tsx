@@ -7,7 +7,8 @@ import {Building2, Download, Pencil, Plus, RotateCcw, Search, Trash2, X} from "l
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {ApiError, api, apiErrorMessage, downloadApiFile, listQuery} from "../lib/api";
+import {AppCheckbox, AppSelect} from "../components/FormControls";
+import {api, apiErrorMessage, downloadApiFile, listQuery} from "../lib/api";
 import type {BankAccount, Customer, Locality, State} from "../lib/types";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
@@ -167,12 +168,6 @@ export function CustomersPage() {
           <Download size={16} /> Exportă CSV
         </Button>
       </div>
-      {remove.isError || exportCustomers.isError ? (
-        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
-          {problemMessage(remove.error ?? exportCustomers.error)}
-        </p>
-      ) : null}
-
       {/* Table card */}
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
         <DataTableLoadingOverlay isLoading={customers.isFetching && !customers.isLoading} />
@@ -296,12 +291,11 @@ function formFromCustomer(customer: Customer): FormState {
   };
 }
 
-function fieldLabel(label: string, children: React.ReactNode, error?: string) {
+function fieldLabel(label: string, children: React.ReactNode) {
   return (
     <label className="flex flex-col gap-1.5">
       <span className="text-[12.5px] font-semibold text-[var(--text-muted)]">{label}</span>
       {children}
-      {error ? <span className="text-[11.5px] font-medium text-[var(--danger)]">{error}</span> : null}
     </label>
   );
 }
@@ -318,7 +312,6 @@ function AddCustomerModal({
   onSuccess: () => void;
 }) {
   const [form, setForm] = useState<FormState>(() => customer ? formFromCustomer(customer) : EMPTY_FORM);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [lookupError, setLookupError] = useState<string | null>(null);
   const detail = useQuery({
     queryKey: ["customer", companyId, customer?.id],
@@ -359,7 +352,6 @@ function AddCustomerModal({
         is_vat_payer: data.is_vat_payer,
       }));
     },
-    onError: (error) => setLookupError(problemMessage(error)),
   });
 
   const create = useMutation({
@@ -375,9 +367,6 @@ function AddCustomerModal({
       return result;
     },
     onSuccess,
-    onError: (error) => {
-      if (error instanceof ApiError && error.problem.errors) setFieldErrors(error.problem.errors);
-    },
   });
 
   function runLookup() {
@@ -390,7 +379,6 @@ function AddCustomerModal({
   }
 
   function submit() {
-    setFieldErrors({});
     create.mutate({
       name: form.name.trim(),
       email: form.email.trim() || null,
@@ -446,6 +434,7 @@ function AddCustomerModal({
             <span className="text-[12.5px] font-semibold text-[var(--text-muted)]">CUI</span>
             <div className="flex items-stretch gap-2">
               <Input
+                name="tax_id"
                 className={inputCls + " flex-1"}
                 placeholder="RO12345678"
                 value={form.cui}
@@ -456,9 +445,6 @@ function AddCustomerModal({
                 Preia ANAF
               </Button>
             </div>
-            {fieldErrors["tax_id"] ? (
-              <span className="text-[11.5px] font-medium text-[var(--danger)]">{fieldErrors["tax_id"][0]}</span>
-            ) : null}
             {lookupError ? (
               <span className="text-[11.5px] font-medium text-[var(--danger)]">{lookupError}</span>
             ) : null}
@@ -467,56 +453,53 @@ function AddCustomerModal({
           {fieldLabel(
             "Denumire",
             <Input
+              name="name"
               className={inputCls}
               placeholder="SC Exemplu SRL"
               value={form.name}
               onChange={(e) => set("name", e.target.value)}
             />,
-            fieldErrors["name"]?.[0],
           )}
 
           {fieldLabel(
             "Reg. Com.",
             <Input
+              name="registration_number"
               className={inputCls}
               placeholder="J40/1234/2020"
               value={form.registration_number}
               onChange={(e) => set("registration_number", e.target.value)}
             />,
-            fieldErrors["registration_number"]?.[0],
           )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {fieldLabel(
               "Țară",
-              <select className={inputCls} value={form.countryCode} onChange={(event) => set("countryCode", event.target.value.toUpperCase())}>
-                <option value="RO">România</option>
-                <option value="DE">Germania</option>
-                <option value="FR">Franța</option>
-                <option value="GB">Regatul Unit</option>
-                <option value="US">Statele Unite</option>
-              </select>,
+              <AppSelect name="address.country_code" ariaLabel="Țară" value={form.countryCode} onChange={(value) => set("countryCode", value.toUpperCase())} options={[
+                {id: "RO", label: "România"},
+                {id: "DE", label: "Germania"},
+                {id: "FR", label: "Franța"},
+                {id: "GB", label: "Regatul Unit"},
+                {id: "US", label: "Statele Unite"},
+              ]} />,
             )}
             {fieldLabel(
               "Limba implicită a facturii",
-              <select aria-label="Limba implicită a facturii" value={form.locale} onChange={(event) => set("locale", event.target.value as "ro" | "en")} className={inputCls}>
-                <option value="ro">Română</option>
-                <option value="en">Română + Engleză</option>
-              </select>,
+              <AppSelect name="locale" ariaLabel="Limba implicită a facturii" value={form.locale} onChange={(value) => set("locale", value as "ro" | "en")} options={[
+                {id: "ro", label: "Română"},
+                {id: "en", label: "Română + Engleză"},
+              ]} />,
             )}
             {form.countryCode === "RO" ? fieldLabel(
               "Județ",
-              <select className={inputCls} value={form.stateId} onChange={(event) => {
-                set("stateId", event.target.value);
+              <AppSelect name="address.state_id" ariaLabel="Județ" value={form.stateId} options={(states.data?.data ?? []).map((state) => ({id: state.id, label: state.name}))} onChange={(value) => {
+                set("stateId", value);
                 set("localityId", "");
-              }}>
-                <option value="">Selectează județul</option>
-                {(states.data?.data ?? []).map((state) => <option key={state.id} value={state.id}>{state.name}</option>)}
-              </select>,
-              fieldErrors["address.state_id"]?.[0],
+              }} />,
             ) : fieldLabel(
               "Stat / regiune",
               <Input
+                name="address.region_name"
                 className={inputCls}
                 value={form.regionName}
                 onChange={(e) => set("regionName", e.target.value)}
@@ -524,67 +507,54 @@ function AddCustomerModal({
             )}
             {form.countryCode === "RO" ? fieldLabel(
               "Localitate",
-              <select className={inputCls} value={form.localityId} disabled={!form.stateId || localities.isLoading} onChange={(event) => set("localityId", event.target.value)}>
-                <option value="">Selectează localitatea</option>
-                {(localities.data?.data ?? []).map((locality) => <option key={locality.id} value={locality.id}>{locality.name}</option>)}
-              </select>,
-              fieldErrors["address.locality_id"]?.[0],
+              <AppSelect name="address.locality_id" ariaLabel="Localitate" value={form.localityId} isDisabled={!form.stateId || localities.isLoading} options={(localities.data?.data ?? []).map((locality) => ({id: locality.id, label: locality.name}))} onChange={(value) => set("localityId", value)} />,
             ) : fieldLabel(
               "Localitate",
-              <Input className={inputCls} value={form.cityName} onChange={(event) => set("cityName", event.target.value)} />,
+              <Input name="address.city_name" className={inputCls} value={form.cityName} onChange={(event) => set("cityName", event.target.value)} />,
             )}
             {fieldLabel(
               "Stradă și număr",
               <Input
+                name="address.street"
                 className={inputCls}
                 placeholder="Str. Exemplu nr. 1"
                 value={form.street}
                 onChange={(e) => set("street", e.target.value)}
               />,
-              fieldErrors["address.street"]?.[0],
             )}
             {fieldLabel(
               "Detalii adresă",
-              <Input className={inputCls} placeholder="Bloc, scară, etaj" value={form.streetDetails} onChange={(e) => set("streetDetails", e.target.value)} />,
+              <Input name="address.street_details" className={inputCls} placeholder="Bloc, scară, etaj" value={form.streetDetails} onChange={(e) => set("streetDetails", e.target.value)} />,
             )}
             {fieldLabel(
               "Cod poștal",
-              <Input className={inputCls} value={form.postalCode} onChange={(e) => set("postalCode", e.target.value)} />,
+              <Input name="address.postal_code" className={inputCls} value={form.postalCode} onChange={(e) => set("postalCode", e.target.value)} />,
             )}
             {fieldLabel(
               "Email",
-              <Input className={inputCls} type="email" value={form.email} onChange={(e) => set("email", e.target.value)} />,
+              <Input name="email" className={inputCls} type="email" value={form.email} onChange={(e) => set("email", e.target.value)} />,
             )}
             {fieldLabel(
               "Telefon",
-              <Input className={inputCls} type="tel" value={form.phone} onChange={(e) => set("phone", e.target.value)} />,
+              <Input name="phone" className={inputCls} type="tel" value={form.phone} onChange={(e) => set("phone", e.target.value)} />,
             )}
           </div>
 
-          <label className="flex cursor-pointer items-center gap-2.5">
-            <input
-              type="checkbox"
-              checked={form.is_vat_payer}
-              onChange={(e) => set("is_vat_payer", e.target.checked)}
-              className="h-4 w-4 cursor-pointer accent-[var(--accent)]"
-            />
-            <span className="text-[13px] font-medium text-[var(--text)]">Plătitor de TVA</span>
-          </label>
+          <AppCheckbox name="is_vat_payer" isSelected={form.is_vat_payer} onChange={(selected) => set("is_vat_payer", selected)}>
+            Plătitor de TVA
+          </AppCheckbox>
 
           <div>
             <div className="text-[12.5px] font-semibold text-[var(--text-muted)]">Conturi ale emitentului afișate clientului</div>
             <div className="mt-2 grid gap-2">
               {(bankAccounts.data?.data ?? []).map((account) => (
-                <label key={account.id} className="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={form.bankAccountIds.includes(account.id)}
-                    onChange={(event) => set("bankAccountIds", event.target.checked
+                <AppCheckbox key={account.id} className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm" name="bank_account_ids" value={account.id} isSelected={form.bankAccountIds.includes(account.id)}
+                    onChange={(selected) => set("bankAccountIds", selected
                       ? [...form.bankAccountIds, account.id]
                       : form.bankAccountIds.filter((id) => id !== account.id))}
-                  />
+                >
                   {account.bank_name || account.scheme} · {account.iban || account.account_number}
-                </label>
+                </AppCheckbox>
               ))}
               {!bankAccounts.isLoading && (bankAccounts.data?.data ?? []).length === 0 ? <p className="text-xs text-[var(--text-muted)]">Nu există conturi bancare configurate.</p> : null}
             </div>
@@ -592,7 +562,7 @@ function AddCustomerModal({
 
           {fieldLabel(
             "Notițe interne",
-            <textarea className="min-h-20 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={form.notes} onChange={(event) => set("notes", event.target.value)} />,
+            <textarea name="notes" className="min-h-20 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={form.notes} onChange={(event) => set("notes", event.target.value)} />,
           )}
 
           {customer && (detail.data?.data.recent_invoices?.length ?? 0) > 0 ? (
@@ -610,11 +580,6 @@ function AddCustomerModal({
             </div>
           ) : null}
 
-          {create.isError && !(create.error instanceof ApiError && create.error.problem.errors) ? (
-            <div className="rounded-lg bg-[var(--danger-soft,var(--bg-muted))] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
-              {problemMessage(create.error)}
-            </div>
-          ) : null}
         </div>
 
         {/* Footer */}

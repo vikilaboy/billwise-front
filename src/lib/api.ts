@@ -1,3 +1,5 @@
+import {dispatchApiError} from "./apiErrorPresentation";
+
 export type Pagination = {
   current_page: number;
   per_page: number;
@@ -16,6 +18,22 @@ export class ApiError extends Error {
   constructor(public readonly problem: ProblemDetails) {
     super(problem.detail ?? problem.title);
   }
+}
+
+export function reportApiError(problem: ProblemDetails): ApiError {
+  dispatchApiError(problem);
+  return new ApiError(problem);
+}
+
+function networkApiError(cause: unknown): ApiError {
+  return reportApiError({
+    type: "https://api.billwise.ro/problems/network-error",
+    title: "Conexiunea cu serverul a eșuat",
+    status: 0,
+    detail: cause instanceof Error && cause.message
+      ? cause.message
+      : "Verifică conexiunea și încearcă din nou.",
+  });
 }
 
 export function apiErrorMessage(error: unknown, fallback = "Cererea nu a putut fi procesată."): string {
@@ -57,30 +75,54 @@ function expireSessionOnUnauthorized(status: number, token: string | null): void
 export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T>> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json, application/problem+json");
+  headers.set("Accept-Language", "ro");
   if (init.body) headers.set("Content-Type", "application/json");
   const token = session.token();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(`${API_URL}${path}`, {...init, headers});
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {...init, headers});
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
+    throw networkApiError(cause);
+  }
   expireSessionOnUnauthorized(response.status, token);
   if (response.status === 204) return {data: undefined as T};
-  const payload = await response.json();
-  if (!response.ok)
-    throw new ApiError({
-      title: payload.title ?? "Cererea nu a putut fi procesată",
+  let payload: Record<string, unknown>;
+  try {
+    payload = await response.json() as Record<string, unknown>;
+  } catch {
+    throw reportApiError({
+      title: response.ok ? "Răspuns invalid de la server" : "Cererea nu a putut fi procesată",
       status: response.status,
-      detail: payload.detail ?? payload.message,
-      errors: payload.errors,
-      type: payload.type,
+      detail: "Serverul nu a returnat un răspuns JSON valid.",
     });
-  return payload;
+  }
+  if (!response.ok)
+    throw reportApiError({
+      title: typeof payload.title === "string" ? payload.title : "Cererea nu a putut fi procesată",
+      status: response.status,
+      detail: typeof payload.detail === "string"
+        ? payload.detail
+        : typeof payload.message === "string" ? payload.message : undefined,
+      errors: payload.errors as Record<string, string[]> | undefined,
+      type: typeof payload.type === "string" ? payload.type : undefined,
+    });
+  return payload as ApiEnvelope<T>;
 }
 
 export async function downloadApiFile(path: string, fallbackName: string): Promise<void> {
-  const headers = new Headers({Accept: "*/*"});
+  const headers = new Headers({Accept: "*/*", "Accept-Language": "ro"});
   const token = session.token();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${API_URL}${path}`, {headers});
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {headers});
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
+    throw networkApiError(cause);
+  }
   expireSessionOnUnauthorized(response.status, token);
   if (!response.ok) {
     let problem: ProblemDetails = {title: "Fișierul nu a putut fi descărcat", status: response.status};
@@ -89,7 +131,7 @@ export async function downloadApiFile(path: string, fallbackName: string): Promi
     } catch {
       // A non-JSON upstream error still becomes a consistent client error.
     }
-    throw new ApiError(problem);
+    throw reportApiError(problem);
   }
 
   const disposition = response.headers.get("Content-Disposition") ?? "";

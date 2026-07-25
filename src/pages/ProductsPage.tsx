@@ -5,7 +5,8 @@ import {Package, Pencil, Plus, RotateCcw, Search, Trash2, X} from "lucide-react"
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {api, apiErrorMessage, ApiError, listQuery} from "../lib/api";
+import {AppCheckbox, AppSelect} from "../components/FormControls";
+import {api, listQuery} from "../lib/api";
 import {money} from "../lib/format";
 import type {Currency, Product, VatCategory, VatProfile} from "../lib/types";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
@@ -75,12 +76,6 @@ export function ProductsPage() {
         </div>
         <Button variant="primary" onPress={() => setEditing(null)}><Plus size={16} /> Adaugă produs sau serviciu</Button>
       </div>
-      {remove.isError ? (
-        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
-          {apiErrorMessage(remove.error, "Produsul nu a putut fi șters.")}
-        </p>
-      ) : null}
-
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
         <DataTableLoadingOverlay isLoading={products.isFetching && !products.isLoading} />
         {products.isLoading ? <div className="flex justify-center gap-2 py-20"><Spinner size="sm" /> Se încarcă…</div>
@@ -146,29 +141,25 @@ function ProductModal({companyId, product, onClose, onSaved}: {companyId: string
     }),
     onSuccess: onSaved,
   });
-  const errors = save.error instanceof ApiError ? save.error.problem.errors ?? {} : {};
   const set = <K extends keyof ProductForm>(key: K, value: ProductForm[K]) => setForm((current) => ({...current, [key]: value}));
-  const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true" aria-label={product ? "Editează produs" : "Produs nou"}>
       <div className="w-full max-w-2xl rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
         <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><h2 className="font-semibold">{product ? "Editează produsul" : "Produs sau serviciu nou"}</h2><Button isIconOnly variant="ghost" onPress={onClose}><X size={17} /></Button></header>
         <div className="grid gap-4 p-5 sm:grid-cols-2">
-          <Field label="Tip"><select className={input} value={form.type} onChange={(e) => set("type", e.target.value as ProductForm["type"])}><option value="service">Serviciu</option><option value="product">Produs</option></select></Field>
-          <Field label="Denumire" error={errors.name?.[0]}><Input value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
-          <Field label="Descriere" className="sm:col-span-2"><Input value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
-          <Field label="Unitate"><Input value={form.unit} onChange={(e) => set("unit", e.target.value)} /></Field>
-          <Field label="Cod UM"><Input value={form.unit_code} onChange={(e) => set("unit_code", e.target.value.toUpperCase())} /></Field>
-          <Field label="Preț unitar"><Input type="number" value={form.unit_price} onChange={(e) => set("unit_price", e.target.value)} /></Field>
-          <Field label="Monedă"><select className={input} value={form.currency} onChange={(e) => set("currency", e.target.value)}>{(currencies.data?.data ?? []).filter((currency) => currency.is_active).map((currency) => <option key={currency.id} value={currency.code}>{currency.code} — {currency.name}</option>)}</select></Field>
-          <Field label="Profil TVA"><select className={input} value={form.vat_profile_id} onChange={(e) => {
-            const profile = (vatProfiles.data?.data ?? []).find((item) => item.id === e.target.value);
+          <Field label="Tip"><AppSelect name="type" ariaLabel="Tip" value={form.type} onChange={(value) => set("type", value as ProductForm["type"])} options={[{id: "service", label: "Serviciu"}, {id: "product", label: "Produs"}]} /></Field>
+          <Field label="Denumire"><Input name="name" value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
+          <Field label="Descriere" className="sm:col-span-2"><Input name="description" value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
+          <Field label="Unitate"><Input name="unit" value={form.unit} onChange={(e) => set("unit", e.target.value)} /></Field>
+          <Field label="Cod UM"><Input name="unit_code" value={form.unit_code} onChange={(e) => set("unit_code", e.target.value.toUpperCase())} /></Field>
+          <Field label="Preț unitar"><Input name="unit_price_cents" type="number" value={form.unit_price} onChange={(e) => set("unit_price", e.target.value)} /></Field>
+          <Field label="Monedă"><AppSelect name="currency" ariaLabel="Monedă" value={form.currency} onChange={(value) => set("currency", value)} options={(currencies.data?.data ?? []).filter((currency) => currency.is_active).map((currency) => ({id: currency.code, label: `${currency.code} — ${currency.name}`}))} /></Field>
+          <Field label="Profil TVA"><AppSelect name="vat_profile_id" apiFields={["vat_rate", "vat_category", "vat_exemption_code", "vat_exemption_reason"]} ariaLabel="Profil TVA" value={form.vat_profile_id} onChange={(value) => {
+            const profile = (vatProfiles.data?.data ?? []).find((item) => item.id === value);
             if (!profile) return;
             setForm((current) => ({...current, vat_profile_id: profile.id, vat_rate: profile.rate, vat_category: profile.vat_category, vat_exemption_code: profile.vat_exemption_code ?? "", vat_exemption_reason: profile.vat_exemption_reason ?? ""}));
-          }}><option value="">Selectează</option>{(vatProfiles.data?.data ?? []).filter((profile) => profile.is_active).map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {Number(profile.rate)}%</option>)}</select></Field>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.is_active} onChange={(e) => set("is_active", e.target.checked)} /> Activ</label>
-          {save.isError && !Object.keys(errors).length ? <p role="alert" className="text-sm text-[var(--danger)]">Datele nu au putut fi salvate.</p> : null}
+          }} options={(vatProfiles.data?.data ?? []).filter((profile) => profile.is_active).map((profile) => ({id: profile.id, label: `${profile.name} · ${Number(profile.rate)}%`}))} /></Field>
+          <AppCheckbox name="is_active" isSelected={form.is_active} onChange={(selected) => set("is_active", selected)}>Activ</AppCheckbox>
         </div>
         <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={!form.name.trim() || !form.vat_profile_id || save.isPending} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null} Salvează</Button></footer>
       </div>
@@ -176,6 +167,6 @@ function ProductModal({companyId, product, onClose, onSaved}: {companyId: string
   );
 }
 
-function Field({label, error, className, children}: {label: string; error?: string; className?: string; children: React.ReactNode}) {
-  return <label className={`flex flex-col gap-1.5 ${className ?? ""}`}><span className="text-xs font-semibold text-[var(--text-muted)]">{label}</span>{children}{error ? <span className="text-xs text-[var(--danger)]">{error}</span> : null}</label>;
+function Field({label, className, children}: {label: string; className?: string; children: React.ReactNode}) {
+  return <label className={`flex flex-col gap-1.5 ${className ?? ""}`}><span className="text-xs font-semibold text-[var(--text-muted)]">{label}</span>{children}</label>;
 }

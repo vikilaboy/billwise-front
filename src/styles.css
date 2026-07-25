@@ -18,3 +18,18 @@ button,input,select,textarea{font:inherit}
 ::placeholder{color:var(--faint)}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-thumb{background:var(--strong);border-radius:8px;border:3px solid transparent;background-clip:padding-box}
+
+/* API validation errors are projected globally from RFC7807 field keys. */
+[data-api-invalid="true"]{
+  border-color:var(--danger)!important;
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--danger) 18%,transparent)!important;
+}
+.select[data-api-invalid="true"] .select__trigger,
+.text-field[data-api-invalid="true"] input,
+.text-field[data-api-invalid="true"] textarea,
+.date-picker[data-api-invalid="true"] .date-field__group,
+.checkbox[data-api-invalid="true"] .checkbox__control,
+.radio-group[data-api-invalid="true"] .radio__control,
+.switch[data-api-invalid="true"] .switch__control{
+  border-color:var(--danger)!important;
+}

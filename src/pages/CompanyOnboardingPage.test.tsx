@@ -2,6 +2,7 @@ import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
+import {API_ERROR_EVENT, type ApiErrorEventDetail} from "../lib/apiErrorPresentation";
 import {CompanyOnboardingPage} from "./CompanyOnboardingPage";
 
 const envelope = (data: unknown, status = 200) =>
@@ -83,9 +84,11 @@ describe("CompanyOnboardingPage", () => {
     expect(await screen.findByDisplayValue("ACME SRL")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Str. Memorandumului 1, Cluj-Napoca")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Județ"), {target: {value: "state-cj"}});
-    await screen.findByRole("option", {name: "Cluj-Napoca"});
-    fireEvent.change(screen.getByLabelText("Localitate"), {target: {value: "locality-cluj"}});
+    fireEvent.click(screen.getByRole("button", {name: /Județ/}));
+    fireEvent.click(await screen.findByRole("option", {name: "Cluj"}));
+    await waitFor(() => expect(screen.getByRole("button", {name: /Localitate/})).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", {name: /Localitate/}));
+    fireEvent.click(await screen.findByRole("option", {name: "Cluj-Napoca"}));
     fireEvent.submit(screen.getByRole("button", {name: "Salvează firma și continuă"}).closest("form")!);
     expect(companyBody).toBeUndefined();
     fireEvent.click(screen.getByLabelText(/Confirm datele firmei/));
@@ -151,10 +154,10 @@ describe("CompanyOnboardingPage", () => {
   });
 
   it.each([
-    [422, {title: "Validation failed", status: 422, errors: {cui: ["CUI invalid."]}}, "CUI invalid."],
-    [404, {title: "Not found", status: 404}, "Nu am găsit nicio firmă pentru acest CUI."],
-    [503, {title: "Unavailable", status: 503}, "Serviciul ANAF nu este disponibil momentan."],
-  ])("afișează distinct eroarea de lookup %s", async (status, problem, expected) => {
+    [422, {title: "Validation failed", status: 422, errors: {cui: ["CUI invalid."]}}],
+    [404, {title: "Not found", status: 404}],
+    [503, {title: "Unavailable", status: 503}],
+  ])("publică global eroarea de lookup %s", async (status, problem) => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation((input: string | URL | Request) => {
@@ -182,9 +185,15 @@ describe("CompanyOnboardingPage", () => {
       </QueryClientProvider>,
     );
 
+    const apiErrorEvent = new Promise<ApiErrorEventDetail>((resolve) => {
+      window.addEventListener(API_ERROR_EVENT, (event) => {
+        resolve((event as CustomEvent<ApiErrorEventDetail>).detail);
+      }, {once: true});
+    });
     fireEvent.change(screen.getByLabelText("CUI / CIF"), {target: {value: "invalid"}});
     fireEvent.click(screen.getByRole("button", {name: /Verifică la ANAF/}));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(expected);
+    await expect(apiErrorEvent).resolves.toMatchObject({problem});
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

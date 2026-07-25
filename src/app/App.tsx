@@ -11,6 +11,7 @@ import {VerifyEmailPendingPage} from "../pages/VerifyEmailPendingPage";
 import {AccountActivationPage} from "../pages/AccountActivationPage";
 import {CompanyOnboardingPage} from "../pages/CompanyOnboardingPage";
 import {AppErrorBoundary} from "../components/AppErrorBoundary";
+import {ApiErrorToast} from "../components/ApiErrorToast";
 
 // Route-level code splitting: each page (and its heavy deps — charts, timeline,
 // data-grid) loads on navigation, keeping the initial bundle small.
@@ -38,6 +39,7 @@ const PageFallback = () => (
 export function App() {
   return (
     <AppErrorBoundary>
+      <ApiErrorToast />
       <Suspense fallback={<PageFallback />}>
         <Routes>
         <Route path="/login" element={<LoginPage />} />

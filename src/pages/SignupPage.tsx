@@ -2,11 +2,9 @@ import {FormEvent, useState} from "react";
 import {Link, Navigate, useNavigate} from "react-router";
 import {Button} from "@heroui/react";
 import {Eye, EyeOff} from "lucide-react";
-import {ApiError, api, session} from "../lib/api";
+import {api, session} from "../lib/api";
 import type {RegisterPayload} from "../lib/types";
 import {AuthLayout, authInputCls, authLabelCls} from "../components/AuthLayout";
-
-type Errors = Record<string, string[]>;
 
 export function SignupPage() {
   const navigate = useNavigate();
@@ -17,21 +15,17 @@ export function SignupPage() {
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
-  const [errors, setErrors] = useState<Errors>({});
-  const [general, setGeneral] = useState("");
+  const [passwordMismatch, setPasswordMismatch] = useState(false);
   const [loading, setLoading] = useState(false);
 
   if (session.token()) return <Navigate to="/dashboard" replace />;
 
-  const fieldError = (key: string) => errors[key]?.[0];
-
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setErrors({});
-    setGeneral("");
+    setPasswordMismatch(false);
     if (password !== confirm) {
-      setErrors({password: ["Parolele nu coincid."]});
+      setPasswordMismatch(true);
       setLoading(false);
       return;
     }
@@ -47,20 +41,12 @@ export function SignupPage() {
         }),
       });
       navigate(`/verifica-email?email=${encodeURIComponent(r.data.email)}`, {replace: true});
-    } catch (c) {
-      if (c instanceof ApiError) {
-        setErrors(c.problem.errors ?? {});
-        if (!c.problem.errors) setGeneral(c.message);
-      } else {
-        setGeneral("Nu ne-am putut conecta la server.");
-      }
+    } catch {
+      // The API client presents the error globally.
     } finally {
       setLoading(false);
     }
   };
-
-  const err = (key: string) =>
-    fieldError(key) ? <div className="mt-1 text-[12px] text-[var(--danger)]">{fieldError(key)}</div> : null;
 
   return (
     <AuthLayout>
@@ -72,19 +58,20 @@ export function SignupPage() {
           <label htmlFor="signup-name" className={authLabelCls}>Nume</label>
           <input
             id="signup-name"
+            name="name"
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Andrei Popescu"
             className={authInputCls}
           />
-          {err("name")}
         </div>
 
         <div>
           <label htmlFor="signup-email" className={authLabelCls}>Email</label>
           <input
             id="signup-email"
+            name="email"
             type="email"
             required
             value={email}
@@ -92,13 +79,13 @@ export function SignupPage() {
             placeholder="nume@firma.ro"
             className={authInputCls}
           />
-          {err("email")}
         </div>
 
         <div className="mt-3.5">
           <label htmlFor="signup-phone" className={authLabelCls}>Telefon</label>
           <input
             id="signup-phone"
+            name="phone"
             type="tel"
             required
             value={phone}
@@ -106,7 +93,6 @@ export function SignupPage() {
             placeholder="+40 712 345 678"
             className={authInputCls}
           />
-          {err("phone")}
         </div>
 
         <div className="mt-3.5">
@@ -114,6 +100,7 @@ export function SignupPage() {
           <div className="relative">
             <input
               id="signup-password"
+              name="password"
               type={showPassword ? "text" : "password"}
               required
               minLength={8}
@@ -132,7 +119,7 @@ export function SignupPage() {
             </button>
           </div>
           <p className="mt-1 text-xs text-[var(--text-muted)]">Minimum 8 caractere.</p>
-          {err("password")}
+          {passwordMismatch ? <div className="mt-1 text-[12px] text-[var(--danger)]">Parolele nu coincid.</div> : null}
         </div>
 
         <div className="mb-5 mt-3.5">
@@ -140,6 +127,7 @@ export function SignupPage() {
           <div className="relative">
             <input
               id="signup-password-confirmation"
+              name="password_confirmation"
               type={showConfirmation ? "text" : "password"}
               required
               minLength={8}
@@ -157,14 +145,8 @@ export function SignupPage() {
               {showConfirmation ? <EyeOff size={17} /> : <Eye size={17} />}
             </button>
           </div>
-          {err("password_confirmation")}
         </div>
 
-        {general && (
-          <div className="mb-4 text-[13px] font-medium text-[var(--danger)]" role="alert">
-            {general}
-          </div>
-        )}
 
         <Button type="submit" variant="primary" fullWidth isPending={loading}>
           Creează contul

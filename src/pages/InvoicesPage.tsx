@@ -8,7 +8,8 @@ import {Copy, Download, FileText, Pencil, Plus, RotateCcw, Search, Send, Trash2}
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {api, apiErrorMessage, downloadApiFile, listQuery} from "../lib/api";
+import {AppCheckbox} from "../components/FormControls";
+import {api, downloadApiFile, listQuery} from "../lib/api";
 import type {Invoice} from "../lib/types";
 import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
@@ -128,16 +129,17 @@ export function InvoicesPage() {
         header: "",
         minWidth: 48,
         cell: (invoice) => invoice.status === "draft" ? (
-          <input
-            type="checkbox"
-            aria-label={`Selectează ${invoice.formatted_number}`}
-            checked={selectedDrafts.has(invoice.id)}
-            onChange={(event) => setSelectedDrafts((current) => {
+          <AppCheckbox
+            name="selected_drafts"
+            value={invoice.id}
+            ariaLabel={`Selectează ${invoice.formatted_number}`}
+            isSelected={selectedDrafts.has(invoice.id)}
+            onChange={(selected) => setSelectedDrafts((current) => {
               const next = new Set(current);
-              if (event.target.checked) next.add(invoice.id); else next.delete(invoice.id);
+              if (selected) next.add(invoice.id); else next.delete(invoice.id);
               return next;
             })}
-          />
+          ><span className="sr-only">{`Selectează ${invoice.formatted_number}`}</span></AppCheckbox>
         ) : null,
       },
       {
@@ -295,12 +297,6 @@ export function InvoicesPage() {
           </p>
         ) : null}
       </div>
-      {action.isError || exportInvoices.isError ? (
-        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
-          {apiErrorMessage(action.error ?? exportInvoices.error, "Operația asupra facturilor a eșuat.")}
-        </p>
-      ) : null}
-
       {/* Table card */}
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
         <DataTableLoadingOverlay isLoading={invoices.isFetching && !invoices.isLoading} />

@@ -3,7 +3,8 @@ import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Spinner} from "@heroui/react";
 import {Building2, CheckCircle2, Search} from "lucide-react";
 import {useNavigate} from "react-router";
-import {ApiError, api, listQuery} from "../lib/api";
+import {AppCheckbox, AppSelect} from "../components/FormControls";
+import {api, listQuery} from "../lib/api";
 import {suggestAnafAddress} from "../lib/anafAddress";
 import type {CompanyProfile, FiscalEntity, Locality, State, User} from "../lib/types";
 
@@ -138,27 +139,6 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
     },
   });
 
-  const lookupError =
-    lookup.error instanceof ApiError
-      ? lookup.error.problem.status === 422
-        ? lookup.error.problem.errors?.cui?.[0] ?? "CUI-ul introdus nu este valid."
-        : lookup.error.problem.status === 404
-          ? "Nu am găsit nicio firmă pentru acest CUI."
-          : lookup.error.problem.status >= 500
-            ? "Serviciul ANAF nu este disponibil momentan. Încearcă din nou."
-            : lookup.error.message
-      : lookup.error
-        ? "Nu am putut interoga registrul ANAF."
-        : "";
-
-  const fieldErrors = create.error instanceof ApiError ? create.error.problem.errors ?? {} : {};
-  const createError =
-    create.error instanceof ApiError && !create.error.problem.errors
-      ? create.error.message
-      : create.error && !(create.error instanceof ApiError)
-        ? "Firma nu a putut fi salvată."
-        : "";
-
   const update = <K extends keyof CompanyForm>(key: K, value: CompanyForm[K]) =>
     setForm((current) => ({...current, [key]: value}));
 
@@ -209,6 +189,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
               <div className="flex flex-col gap-3 sm:flex-row">
                 <input
                   id="onboarding-cui"
+                  name="cui"
                   required
                   value={cui}
                   onChange={(event) => setCui(event.target.value)}
@@ -219,15 +200,11 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                   <Search size={17} /> Verifică la ANAF
                 </Button>
               </div>
-              {lookupError ? (
-                <p className="mt-3 text-sm font-medium text-[var(--danger)]" role="alert">
-                  {lookupError}
-                </p>
-              ) : null}
             </form>
           ) : (
             <form onSubmit={submitCompany}>
               <div
+                data-api-fields="tax_id"
                 className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
                   fiscal.is_active
                     ? "border-[var(--success)]/30 bg-[var(--success-soft)] text-[var(--success)]"
@@ -253,14 +230,12 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                   </label>
                   <input
                     id="company-name"
+                    name="legal_name"
                     required
                     value={form.legalName}
                     onChange={(event) => update("legalName", event.target.value)}
                     className={inputClass}
                   />
-                  {fieldErrors.legal_name?.[0] ? (
-                    <p className="mt-1 text-xs text-[var(--danger)]">{fieldErrors.legal_name[0]}</p>
-                  ) : null}
                 </div>
 
                 <div>
@@ -269,6 +244,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                   </label>
                   <input
                     id="registration-number"
+                    name="registration_number"
                     readOnly
                     value={form.registrationNumber}
                     className={`${inputClass} bg-[var(--bg-muted)]`}
@@ -277,41 +253,29 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
 
                 <div>
                   <span className={labelClass}>Statut TVA</span>
-                  <label className="flex h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-muted)] px-3.5 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={form.isVatPayer}
-                      disabled
-                    />
+                  <AppCheckbox className="flex h-11 items-center rounded-xl border border-[var(--border)] bg-[var(--bg-muted)] px-3.5 text-sm" name="is_vat_payer" isSelected={form.isVatPayer} isDisabled onChange={() => {}}>
                     Plătitoare de TVA
-                  </label>
+                  </AppCheckbox>
                 </div>
 
                 <div>
                   <label htmlFor="state" className={labelClass}>
                     Județ
                   </label>
-                  <select
-                    id="state"
-                    required
+                  <AppSelect
+                    name="address.state_id"
+                    ariaLabel="Județ"
                     value={form.stateId}
-                    onChange={(event) =>
+                    options={(states.data?.data ?? []).map((state) => ({id: state.id, label: state.name}))}
+                    onChange={(value) =>
                       setForm((current) => ({
                         ...current,
-                        stateId: event.target.value,
+                        stateId: value,
                         localityId: "",
                         localitySearch: "",
                       }))
                     }
-                    className={inputClass}
-                  >
-                    <option value="">Selectează județul</option>
-                    {(states.data?.data ?? []).map((state) => (
-                      <option key={state.id} value={state.id}>
-                        {state.name}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   {addressSuggestions.state && addressSuggestions.state.id !== form.stateId ? (
                     <button
                       type="button"
@@ -326,9 +290,6 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                     >
                       Folosește sugestia ANAF: {addressSuggestions.state.name}
                     </button>
-                  ) : null}
-                  {fieldErrors["address.state_id"]?.[0] ? (
-                    <p className="mt-1 text-xs text-[var(--danger)]">{fieldErrors["address.state_id"][0]}</p>
                   ) : null}
                 </div>
 
@@ -354,21 +315,14 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                     Localitate
                   </label>
                   <div className="relative">
-                    <select
-                      id="locality"
-                      required
-                      disabled={!form.stateId || localities.isLoading}
+                    <AppSelect
+                      name="address.locality_id"
+                      ariaLabel="Localitate"
+                      isDisabled={!form.stateId || localities.isLoading}
                       value={form.localityId}
-                      onChange={(event) => update("localityId", event.target.value)}
-                      className={inputClass}
-                    >
-                      <option value="">Selectează localitatea confirmată</option>
-                      {(localities.data?.data ?? []).map((locality) => (
-                        <option key={locality.id} value={locality.id}>
-                          {locality.name}
-                        </option>
-                      ))}
-                    </select>
+                      options={(localities.data?.data ?? []).map((locality) => ({id: locality.id, label: locality.name}))}
+                      onChange={(value) => update("localityId", value)}
+                    />
                     {localities.isLoading ? (
                       <Spinner size="sm" className="absolute right-3 top-3" />
                     ) : null}
@@ -382,9 +336,6 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                       Folosește sugestia ANAF: {addressSuggestions.locality.name}
                     </button>
                   ) : null}
-                  {fieldErrors["address.locality_id"]?.[0] ? (
-                    <p className="mt-1 text-xs text-[var(--danger)]">{fieldErrors["address.locality_id"][0]}</p>
-                  ) : null}
                 </div>
 
                 <div className="sm:col-span-2">
@@ -393,6 +344,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                   </label>
                   <input
                     id="street"
+                    name="address.street"
                     required
                     value={form.street}
                     onChange={(event) => update("street", event.target.value)}
@@ -401,9 +353,6 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                   <p className="mt-1.5 text-xs text-[var(--text-muted)]">
                     Adresa ANAF este precompletată ca text; confirmă separat județul și localitatea.
                   </p>
-                  {fieldErrors["address.street"]?.[0] ? (
-                    <p className="mt-1 text-xs text-[var(--danger)]">{fieldErrors["address.street"][0]}</p>
-                  ) : null}
                 </div>
 
                 <div>
@@ -412,6 +361,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                   </label>
                   <input
                     id="postal-code"
+                    name="address.postal_code"
                     value={form.postalCode}
                     onChange={(event) => update("postalCode", event.target.value)}
                     className={inputClass}
@@ -433,6 +383,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                   </label>
                   <input
                     id="company-email"
+                    name="email"
                     type="email"
                     value={form.email}
                     onChange={(event) => update("email", event.target.value)}
@@ -446,6 +397,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                   </label>
                   <input
                     id="company-phone"
+                    name="phone"
                     type="tel"
                     value={form.phone}
                     onChange={(event) => update("phone", event.target.value)}
@@ -454,30 +406,14 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                 </div>
               </div>
 
-              <label className="mt-5 flex items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg-subtle)] p-4 text-sm">
-                <input
-                  type="checkbox"
-                  required
-                  className="mt-0.5"
-                  checked={form.confirmed}
-                  onChange={(event) => update("confirmed", event.target.checked)}
-                />
+              <AppCheckbox className="mt-5 rounded-xl border border-[var(--border)] bg-[var(--bg-subtle)] p-4 text-sm" name="confirmed" isSelected={form.confirmed} onChange={(selected) => update("confirmed", selected)}>
                 <span>
                   <span className="block font-semibold">Confirm datele firmei și adresa structurată</span>
                   <span className="mt-0.5 block text-xs leading-5 text-[var(--text-muted)]">
                     Sugestiile sunt preluate din textul ANAF, dar alegerea județului și localității îți aparține.
                   </span>
                 </span>
-              </label>
-
-              {createError ? (
-                <p className="mt-4 text-sm font-medium text-[var(--danger)]" role="alert">
-                  {createError}
-                </p>
-              ) : null}
-              {fieldErrors.tax_id?.[0] ? (
-                <p className="mt-4 text-sm font-medium text-[var(--danger)]">{fieldErrors.tax_id[0]}</p>
-              ) : null}
+              </AppCheckbox>
 
               <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
                 <Button

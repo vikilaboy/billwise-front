@@ -2,7 +2,7 @@ import {FormEvent, useState} from "react";
 import {Link, useNavigate, useParams, useSearchParams} from "react-router";
 import {Button} from "@heroui/react";
 import {ArrowLeft} from "lucide-react";
-import {ApiError, api} from "../lib/api";
+import {api} from "../lib/api";
 import {AuthLayout, authInputCls, authLabelCls} from "../components/AuthLayout";
 
 export function ResetPasswordPage() {
@@ -13,20 +13,15 @@ export function ResetPasswordPage() {
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [errors, setErrors] = useState<Record<string, string[]>>({});
-  const [general, setGeneral] = useState("");
+  const [passwordMismatch, setPasswordMismatch] = useState(false);
   const [loading, setLoading] = useState(false);
-
-  const err = (key: string) =>
-    errors[key]?.[0] ? <div className="mt-1 text-[12px] text-[var(--danger)]">{errors[key][0]}</div> : null;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setErrors({});
-    setGeneral("");
+    setPasswordMismatch(false);
     if (password !== confirm) {
-      setErrors({password: ["Parolele nu coincid."]});
+      setPasswordMismatch(true);
       setLoading(false);
       return;
     }
@@ -36,13 +31,8 @@ export function ResetPasswordPage() {
         body: JSON.stringify({email, token, password, password_confirmation: confirm}),
       });
       navigate("/login?reset=1", {replace: true});
-    } catch (c) {
-      if (c instanceof ApiError) {
-        setErrors(c.problem.errors ?? {});
-        if (!c.problem.errors) setGeneral(c.message);
-      } else {
-        setGeneral("Nu ne-am putut conecta la server.");
-      }
+    } catch {
+      // The API client presents the error globally.
     } finally {
       setLoading(false);
     }
@@ -62,18 +52,9 @@ export function ResetPasswordPage() {
           )}
         </p>
 
-        {(errors.email || errors.token) && (
-          <div className="mb-4 rounded-[11px] bg-[var(--danger-soft)] px-3.5 py-3 text-[13px] font-medium text-[var(--danger)]">
-            {errors.email?.[0] ?? errors.token?.[0]} Cere un{" "}
-            <Link to="/recuperare-parola" className="underline">
-              link nou de resetare
-            </Link>
-            .
-          </div>
-        )}
-
         <label className={authLabelCls}>Parolă nouă</label>
         <input
+          name="password"
           type="password"
           required
           value={password}
@@ -81,11 +62,12 @@ export function ResetPasswordPage() {
           placeholder="Minim 8 caractere"
           className={authInputCls}
         />
-        {err("password")}
+        {passwordMismatch ? <div className="mt-1 text-[12px] text-[var(--danger)]">Parolele nu coincid.</div> : null}
 
         <div className="mb-5 mt-3.5">
           <label className={authLabelCls}>Confirmă parola</label>
           <input
+            name="password_confirmation"
             type="password"
             required
             value={confirm}
@@ -95,11 +77,6 @@ export function ResetPasswordPage() {
           />
         </div>
 
-        {general && (
-          <div className="mb-4 text-[13px] font-medium text-[var(--danger)]" role="alert">
-            {general}
-          </div>
-        )}
 
         <Button type="submit" variant="primary" fullWidth isPending={loading}>
           Resetează parola

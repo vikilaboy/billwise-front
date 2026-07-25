@@ -2,30 +2,24 @@ import {FormEvent, useState} from "react";
 import {Link} from "react-router";
 import {Button} from "@heroui/react";
 import {ArrowLeft, MailCheck} from "lucide-react";
-import {ApiError, api} from "../lib/api";
+import {api} from "../lib/api";
 import {AuthLayout, authInputCls, authLabelCls} from "../components/AuthLayout";
 
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError("");
     try {
       // The API does not expose this endpoint yet. Attempt it anyway so the flow
       // works automatically once it's added; degrade honestly until then.
       await api("/auth/forgot-password", {method: "POST", body: JSON.stringify({email})});
       setSent(true);
-    } catch (c) {
-      if (c instanceof ApiError && (c.problem.status === 404 || c.problem.status === 405 || c.problem.status === 501)) {
-        setError("Resetarea parolei nu este încă disponibilă. Contactează-ne pentru a-ți reseta parola.");
-      } else {
-        setError(c instanceof ApiError ? c.message : "Nu ne-am putut conecta la server.");
-      }
+    } catch {
+      // The API client presents the error globally.
     } finally {
       setLoading(false);
     }
@@ -54,6 +48,7 @@ export function ForgotPasswordPage() {
 
           <label className={authLabelCls}>Email</label>
           <input
+            name="email"
             type="email"
             required
             value={email}
@@ -62,11 +57,6 @@ export function ForgotPasswordPage() {
             className={`${authInputCls} mb-5`}
           />
 
-          {error && (
-            <div className="mb-4 text-[13px] font-medium text-[var(--danger)]" role="alert">
-              {error}
-            </div>
-          )}
 
           <Button type="submit" variant="primary" fullWidth isPending={loading}>
             Trimite linkul

@@ -2,14 +2,13 @@ import {FormEvent, useEffect, useState} from "react";
 import {Button} from "@heroui/react";
 import {Link, Navigate, useSearchParams} from "react-router";
 import {MailCheck} from "lucide-react";
-import {ApiError, api, session} from "../lib/api";
+import {api, session} from "../lib/api";
 import {AuthLayout, authInputCls, authLabelCls} from "../components/AuthLayout";
 
 export function VerifyEmailPendingPage() {
   const [params] = useSearchParams();
   const [email, setEmail] = useState(params.get("email") ?? "");
   const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [cooldown, setCooldown] = useState(0);
 
@@ -24,7 +23,6 @@ export function VerifyEmailPendingPage() {
   const resend = async (event: FormEvent) => {
     event.preventDefault();
     setLoading(true);
-    setError("");
     setMessage("");
 
     try {
@@ -34,8 +32,8 @@ export function VerifyEmailPendingPage() {
       });
       setMessage(response.data.message);
       setCooldown(60);
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : "Nu am putut retrimite emailul.");
+    } catch {
+      // The API client presents the error globally.
     } finally {
       setLoading(false);
     }
@@ -55,6 +53,7 @@ export function VerifyEmailPendingPage() {
       <form onSubmit={resend}>
         <label className={authLabelCls}>Email</label>
         <input
+          name="email"
           type="email"
           required
           value={email}
@@ -65,11 +64,6 @@ export function VerifyEmailPendingPage() {
         {message ? (
           <div className="mb-4 rounded-xl bg-[var(--success-soft)] px-3.5 py-3 text-[13px] text-[var(--success)]">
             {message}
-          </div>
-        ) : null}
-        {error ? (
-          <div className="mb-4 text-[13px] font-medium text-[var(--danger)]" role="alert">
-            {error}
           </div>
         ) : null}
 
