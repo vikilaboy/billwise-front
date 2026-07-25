@@ -266,13 +266,17 @@ export function SettingsPage() {
 
   const [form, setForm] = useState<FormState>(emptyForm);
   const [justSaved, setJustSaved] = useState(false);
+  const [archiveConfirmationOpen, setArchiveConfirmationOpen] = useState(false);
 
   // Theme is a device-local display preference.
   const [darkTheme, setDarkTheme] = useState(() => localStorage.getItem(THEME_KEY) === "dark");
 
   // Hydrate the form once the profile loads (or the active company changes).
   useEffect(() => {
-    if (profile) setForm(toForm(profile));
+    if (profile) {
+      setForm(toForm(profile));
+      setArchiveConfirmationOpen(false);
+    }
   }, [profile]);
 
   const saveMutation = useMutation({
@@ -392,7 +396,7 @@ export function SettingsPage() {
 
       <div>
       {/* Card 1 — issuer company data */}
-      <section className={`${cardClass} max-w-6xl ${activeSection === "company" ? "" : "hidden"}`}>
+      <section className={`${cardClass} max-w-5xl ${activeSection === "company" ? "" : "hidden"}`}>
         <header className="mb-5 flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
             <Building2 size={18} />
@@ -522,27 +526,63 @@ export function SettingsPage() {
             </span>
           ) : null}
         </div>
-        <div className="mt-5 border-t border-[var(--border)] pt-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-[13.5px] font-semibold">Arhivează firma</div>
-              <p className="mt-1 text-xs text-[var(--text-muted)]">
-                Doar firmele fără istoric de facturare pot fi arhivate. Recurențele active vor fi pauzate, iar firma poate fi restaurată ulterior.
-              </p>
+        <div className="mt-6 border-t border-[var(--border)] pt-5">
+          <div className="rounded-xl border border-[var(--danger)]/30 bg-[var(--danger-soft)] p-4">
+            <div className="flex items-start gap-3">
+              <CircleAlert size={18} className="mt-0.5 shrink-0 text-[var(--danger)]" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13.5px] font-bold text-[var(--danger)]">Zonă periculoasă</div>
+                <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+                  Arhivarea scoate firma din lista activă și oprește recurențele ei. Este disponibilă numai pentru firmele fără istoric de facturare și poate fi anulată ulterior prin restaurare.
+                </p>
+
+                {archiveConfirmationOpen ? (
+                  <div className="mt-4 rounded-lg border border-[var(--danger)]/30 bg-[var(--surface)] p-3">
+                    <p className="text-[12.5px] font-semibold">
+                      Confirmi arhivarea firmei „{profile.legal_name}”?
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        isDisabled={archiveMutation.isPending}
+                        onPress={() => archiveMutation.mutate()}
+                      >
+                        {archiveMutation.isPending ? <Spinner size="sm" /> : <Trash2 size={14} />}
+                        Confirmă arhivarea
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        isDisabled={archiveMutation.isPending}
+                        onPress={() => setArchiveConfirmationOpen(false)}
+                      >
+                        Renunță
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    className="mt-4"
+                    size="sm"
+                    variant="danger-soft"
+                    onPress={() => setArchiveConfirmationOpen(true)}
+                  >
+                    <Trash2 size={14} /> Arhivează firma
+                  </Button>
+                )}
+
+                {archiveMutation.isError ? (
+                  <p role="alert" className="mt-3 text-xs font-semibold text-[var(--danger)]">
+                    Firma nu a putut fi arhivată.
+                  </p>
+                ) : null}
+              </div>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              isDisabled={archiveMutation.isPending}
-              onPress={() => {
-                if (window.confirm(`Arhivezi firma „${profile.legal_name}”? Datele istorice nu vor fi șterse.`)) archiveMutation.mutate();
-              }}
-            >
-              <Trash2 size={14} /> Arhivează
-            </Button>
           </div>
+
           {archivedCompanies.length > 0 ? (
-            <div className="mt-4 border-t border-[var(--border)] pt-4">
+            <div className="mt-5 border-t border-[var(--border)] pt-5">
               <div className="text-[13px] font-semibold">Firme arhivate</div>
               <div className="mt-2 flex flex-col gap-2">
                 {archivedCompanies.map((archived) => (

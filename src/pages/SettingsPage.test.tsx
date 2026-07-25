@@ -32,6 +32,56 @@ afterEach(() => {
 });
 
 describe("SettingsPage SPV", () => {
+  it("tratează arhivarea ca acțiune periculoasă cu o confirmare explicită", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/companies/company-1") && init?.method === "DELETE") {
+        return Promise.resolve(new Response(null, {status: 204}));
+      }
+      if (url.includes("/companies/company-1")) return Promise.resolve(json(profile));
+      if (url.includes("/companies?include_archived=1")) return Promise.resolve(json([]));
+      if (url.includes("/efactura/spv/connection")) {
+        return Promise.resolve(json({
+          status: "disconnected",
+          connected: false,
+          access_token_expires_at: null,
+          reauthorization_required: false,
+          last_error_code: null,
+        }));
+      }
+      return new Promise(() => undefined);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/setari?section=company"]}>
+          <SettingsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Arhivează firma"}));
+    expect(screen.getByText(/Confirmi arhivarea firmei/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("/companies/company-1"),
+      expect.objectContaining({method: "DELETE"}),
+    );
+
+    fireEvent.click(screen.getByRole("button", {name: "Renunță"}));
+    expect(screen.queryByRole("button", {name: "Confirmă arhivarea"})).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", {name: "Arhivează firma"}));
+    fireEvent.click(screen.getByRole("button", {name: "Confirmă arhivarea"}));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/companies/company-1"),
+        expect.objectContaining({method: "DELETE"}),
+      ),
+    );
+  });
+
   it("separă setările în secțiuni compacte și păstrează selecția în navigare", async () => {
     vi.stubGlobal(
       "fetch",
