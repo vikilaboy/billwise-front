@@ -1,5 +1,5 @@
 import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
-import {fireEvent, render, screen} from "@testing-library/react";
+import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {FiscalVaultPage} from "./FiscalVaultPage";
@@ -7,14 +7,19 @@ import {FiscalVaultDetailPage} from "./FiscalVaultDetailPage";
 import {PurchaseInvoiceDetailPage} from "./PurchaseInvoiceDetailPage";
 import {PurchaseInvoicesPage, PURCHASE_INVOICE_SYNC_POLLING_MS, shouldPollPurchaseInvoices} from "./PurchaseInvoicesPage";
 
+const companyMock = vi.hoisted(() => ({
+  current: {id: "company-1", legal_name: "ACME SRL"},
+}));
+
 vi.mock("../components/AppShell", () => ({
   useCompany: () => ({
-    company: {id: "company-1", legal_name: "ACME SRL"},
+    company: companyMock.current,
     can: () => true,
   }),
 }));
 
 afterEach(() => {
+  companyMock.current = {id: "company-1", legal_name: "ACME SRL"};
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -124,6 +129,44 @@ describe("purchase invoice pages", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Conexiunea ANAF trebuie reautorizată.");
   });
 
+  it("nu transferă feedbackul sincronizării la altă firmă", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    const fetchMock = vi.fn().mockImplementation((_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return Promise.resolve(new Response(JSON.stringify({data: {queued: true}}), {status: 202, headers: {"Content-Type": "application/json"}}));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        data: [],
+        meta: {pagination: {current_page: 1, last_page: 1, per_page: 20, total: 0}},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+    const view = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><PurchaseInvoicesPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Sincronizează e-Factura"}));
+    expect(await screen.findByRole("status")).toHaveTextContent("Sincronizarea a fost pusă în coadă");
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/companies/company-1/efactura/inbox/sync"), expect.anything());
+
+    companyMock.current = {id: "company-2", legal_name: "Beta SRL"};
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><PurchaseInvoicesPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.queryByText(/Sincronizarea a fost pusă în coadă/)).not.toBeInTheDocument());
+    expect(screen.getByRole("button", {name: "Sincronizează e-Factura"})).toBeEnabled();
+  });
+
   it("afișează eroarea primită la verificarea facturii", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((_input: string | URL | Request, init?: RequestInit) => {
       if (init?.method === "PATCH") {
@@ -156,7 +199,41 @@ describe("purchase invoice pages", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Factura nu mai poate fi modificată.");
   });
 
-  it("afișează starea sigiliului MF și confirmă eliminarea legal hold", async () => {
+  it("deschide detaliul documentului direct din Seiful fiscal", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: [{
+        id: "vault-1", source: "anaf_efactura", direction: "received", document_type: "invoice", document_number: "OMV-1",
+        issue_date: "2026-07-25", supplier_name: "OMV Petrom", supplier_tax_id: "1590082", status: "imported",
+        signature_status: "preserved_not_verified", archived_at: "2026-07-25T10:00:00Z", retention_policy: "legal_general",
+        retain_until: "2032-07-01", legal_hold_at: "2026-07-25T11:00:00Z", last_verified_at: "2026-07-25T10:00:00Z",
+        integrity_status: "verified", original: {filename: "original.zip", size_bytes: 100, sha256: "abc"}, purchase_invoice_id: "invoice-1",
+      }],
+      meta: {pagination: {current_page: 1, last_page: 1, per_page: 20, total: 1}, storage: {used_bytes: 100}},
+    }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/seif-fiscal"]}>
+          <Routes>
+            <Route path="/seif-fiscal" element={<FiscalVaultPage/>}/>
+            <Route path="/seif-fiscal/:vaultItemId" element={<div>Detaliu document fiscal</div>}/>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Păstrat, neverificat")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name: "Vezi detalii OMV-1"}));
+    expect(await screen.findByText("Detaliu document fiscal")).toBeInTheDocument();
+  });
+
+  it("confirmă eliminarea legal hold înainte de actualizare", async () => {
     vi.stubGlobal("ResizeObserver", class {
       observe() {}
       unobserve() {}
@@ -181,7 +258,7 @@ describe("purchase invoice pages", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("Păstrat, neverificat")).toBeInTheDocument();
+    await screen.findByText("Păstrat, neverificat");
     fireEvent.click(screen.getByRole("button", {name: "Elimină blocajul legal"}));
     expect(window.confirm).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledTimes(1);

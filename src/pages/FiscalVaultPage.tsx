@@ -3,7 +3,8 @@ import {useMutation, useQuery} from "@tanstack/react-query";
 import {Button, Chip, Spinner} from "@heroui/react";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
-import {Archive, Download, RotateCcw, Search, Shield, ShieldOff} from "lucide-react";
+import {Archive, Download, Eye, RotateCcw, Search, Shield, ShieldOff} from "lucide-react";
+import {useNavigate} from "react-router";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
@@ -24,7 +25,7 @@ const VAULT_STATUS = {
 } as const;
 
 export function FiscalVaultPage() {
-  const {company, can} = useCompany(); const grid = useServerDataGridState({defaultSort: DEFAULT_SORT, sortColumns: ["archived_at", "issue_date", "supplier_name", "document_number"]});
+  const {company, can} = useCompany(); const navigate = useNavigate(); const grid = useServerDataGridState({defaultSort: DEFAULT_SORT, sortColumns: ["archived_at", "issue_date", "supplier_name", "document_number"]});
   const [exportFrom, setExportFrom] = useState("");
   const [exportTo, setExportTo] = useState("");
   const [exportCompanyId, setExportCompanyId] = useState<string | null>(null);
@@ -50,11 +51,11 @@ export function FiscalVaultPage() {
     {id: "status", header: "Status", minWidth: 150, cell: (item) => { const status = VAULT_STATUS[item.status]; return <Chip size="sm" variant="soft" color={status.color}><Chip.Label>{status.label}</Chip.Label></Chip>; }},
     {id: "signature_status", header: "Sigiliu MF", minWidth: 180, cell: () => <Chip size="sm" variant="soft" color="warning"><Chip.Label>Păstrat, neverificat</Chip.Label></Chip>},
     {id: "size", header: "Mărime", align: "end", minWidth: 110, cell: (item) => `${integer(Math.ceil((item.original?.size_bytes ?? 0) / 1024))} KB`},
-    {id: "actions", header: "", align: "end", minWidth: 110, cell: (item) => <div className="flex justify-end gap-1">{can("fiscal_vault.manage_retention") ? <Button isIconOnly size="sm" variant="ghost" aria-label={item.legal_hold_at ? "Elimină blocajul legal" : "Activează blocajul legal"} isDisabled={legalHold.isPending} onPress={() => {
+    {id: "actions", header: "", align: "end", minWidth: 150, cell: (item) => <div className="flex justify-end gap-1"><Button isIconOnly size="sm" variant="ghost" aria-label={`Vezi detalii ${item.document_number ?? "document ANAF"}`} onPress={() => navigate(`/seif-fiscal/${item.id}`)}><Eye size={16}/></Button>{can("fiscal_vault.manage_retention") ? <Button isIconOnly size="sm" variant="ghost" aria-label={item.legal_hold_at ? "Elimină blocajul legal" : "Activează blocajul legal"} isDisabled={legalHold.isPending} onPress={() => {
       if (item.legal_hold_at && !window.confirm("Elimini blocajul legal pentru acest document? Acțiunea va fi înregistrată în audit.")) return;
       legalHold.mutate(item);
     }}>{item.legal_hold_at ? <ShieldOff size={16}/> : <Shield size={16}/>}</Button> : null}{can("fiscal_vault.download") ? <Button isIconOnly size="sm" variant="ghost" aria-label={`Descarcă ${item.document_number ?? "documentul"}`} isDisabled={!item.original || download.isPending} onPress={() => download.mutate(item)}><Download size={16}/></Button> : null}</div>},
-  ], [can, download, legalHold]);
+  ], [can, download, legalHold, navigate]);
   if (!can("fiscal_vault.view")) return <p className="text-[var(--danger)]">Nu ai permisiunea necesară pentru Seiful fiscal.</p>;
   return <div className="flex flex-col gap-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="text-sm font-semibold">Spațiu utilizat: {integer(Math.ceil((storage?.used_bytes ?? 0) / 1024 / 1024))} MB</div><div className="text-xs text-[var(--text-muted)]">Originalele ZIP sunt read-only, cu hash SHA-256 și retenție fiscală.</div></div><div className="flex flex-wrap gap-2"><label className="flex h-10 min-w-[240px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3"><Search size={16}/><input className="w-full bg-transparent text-sm outline-none" placeholder="Caută numărul documentului…" value={grid.search} onChange={(event) => grid.setSearch(event.target.value)}/></label><Button size="sm" variant="outline" isDisabled={!grid.isDirty} onPress={grid.reset}><RotateCcw size={15}/> Resetează</Button></div></div>
     {can("fiscal_vault.export") ? <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"><AppDatePicker name="export_from" label="De la" ariaLabel="Export de la" className="min-w-[180px]" value={exportFrom} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportFrom(value);}}/><AppDatePicker name="export_to" label="Până la" ariaLabel="Export până la" className="min-w-[180px]" value={exportTo} minValue={exportFrom || undefined} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportTo(value);}}/>{exportReady ? <Button variant="primary" isPending={downloadExport.isPending} onPress={() => downloadExport.mutate()}><Download size={16}/> Descarcă exportul</Button> : <Button variant="outline" isDisabled={exportIntervalInvalid} isPending={exportBusy} onPress={() => createExport.mutate()}><Archive size={16}/> Exportă Seiful</Button>}<p className="text-xs text-[var(--text-muted)]">{exportFrom && exportTo ? "Exportă intervalul selectat; documentele fără dată apar în raportul de erori." : "Lasă ambele date goale pentru exportul integral."}</p></section> : null}
