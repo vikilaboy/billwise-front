@@ -71,6 +71,7 @@ export type Supplier = {id: string | null; name: string; tax_id: string | null; 
 export type PurchaseInvoiceLine = {id: string; position: number; description: string; quantity: string; unit_code: string | null; unit_price_cents: number; subtotal_cents: number; vat_rate: string; vat_cents: number};
 export type PurchaseInvoice = {
   id: string; document_type: "invoice" | "credit_note"; number: string; issue_date: string; due_date: string | null; currency: string;
+  referenced_invoice_number: string | null; referenced_invoice_issue_date: string | null; corrects_purchase_invoice_id: string | null;
   subtotal_cents: number; vat_cents: number; total_cents: number; import_status: string; review_status: "unreviewed" | "reviewed" | "needs_attention";
   reviewed_at: string | null; supplier: Supplier | null; vault_item_id: string; lines: PurchaseInvoiceLine[]; created_at: string | null;
 };
@@ -79,8 +80,9 @@ export type FiscalVaultItem = {
   supplier_name: string | null; supplier_tax_id: string | null; status: "archiving" | "archived" | "imported" | "needs_attention" | "storage_failed" | "unsupported"; signature_status: "preserved_not_verified";
   archived_at: string | null; retention_policy: "legal_general" | "extended"; retain_until: string | null; legal_hold_at: string | null; last_verified_at: string | null; integrity_status: "pending" | "verified" | "failed";
   original: {filename: string; size_bytes: number; sha256: string} | null; purchase_invoice_id: string | null;
+  anaf_message_id: string | null; anaf_download_id: string | null; anaf_available_at: string | null;
 };
-export type FiscalVaultExport = {id: string; status: "queued" | "processing" | "ready" | "failed"; size_bytes: number | null; sha256: string | null; expires_at: string | null};
+export type FiscalVaultExport = {id: string; status: "queued" | "processing" | "ready" | "failed"; from_date: string | null; to_date: string | null; size_bytes: number | null; sha256: string | null; expires_at: string | null};
 
 export type State = {
   id: string;
@@ -414,6 +416,10 @@ export type SpvConnection = {
   access_token_expires_at: string | null;
   reauthorization_required: boolean;
   last_error_code: string | null;
+  inbox_enabled_at: string | null;
+  inbox_cursor_at: string | null;
+  inbox_last_synced_at: string | null;
+  inbox_last_error_code: string | null;
 };
 
 export type SpvAuthorize = {

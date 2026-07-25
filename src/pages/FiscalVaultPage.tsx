@@ -1,4 +1,4 @@
-import {useMemo} from "react";
+import {useMemo, useState} from "react";
 import {useMutation, useQuery} from "@tanstack/react-query";
 import {Button, Chip, Spinner} from "@heroui/react";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
@@ -7,6 +7,7 @@ import {Archive, Download, RotateCcw, Search, Shield, ShieldOff} from "lucide-re
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
+import {AppDatePicker} from "../components/FormControls";
 import {api, apiErrorMessage, downloadApiFile, listQuery} from "../lib/api";
 import {date, integer} from "../lib/format";
 import type {FiscalVaultExport, FiscalVaultItem} from "../lib/types";
@@ -24,15 +25,22 @@ const VAULT_STATUS = {
 
 export function FiscalVaultPage() {
   const {company, can} = useCompany(); const grid = useServerDataGridState({defaultSort: DEFAULT_SORT, sortColumns: ["archived_at", "issue_date", "supplier_name", "document_number"]});
+  const [exportFrom, setExportFrom] = useState("");
+  const [exportTo, setExportTo] = useState("");
+  const [exportCompanyId, setExportCompanyId] = useState<string | null>(null);
+  const exportIntervalInvalid = (exportFrom === "") !== (exportTo === "") || Boolean(exportFrom && exportTo && exportFrom > exportTo);
   const items = useQuery({queryKey: ["fiscal-vault", company?.id, grid.page, grid.debouncedSearch, grid.apiSort], enabled: Boolean(company?.id && can("fiscal_vault.view")), placeholderData: (previous) => previous, queryFn: () => api<FiscalVaultItem[]>(`/companies/${company!.id}/vault${listQuery({page: grid.page, perPage: 20, sort: grid.apiSort, filter: grid.debouncedSearch ? {document_number: {contains: grid.debouncedSearch}} : {}})}`)});
   const download = useMutation({mutationFn: (item: FiscalVaultItem) => downloadApiFile(`/companies/${company!.id}/vault/${item.id}/download`, item.original?.filename ?? "document-anaf.zip")});
-  const createExport = useMutation({mutationFn: () => api<FiscalVaultExport>(`/companies/${company!.id}/vault-exports`, {method: "POST"})});
-  const exportStatus = useQuery({queryKey: ["fiscal-vault-export", company?.id, createExport.data?.data.id], enabled: Boolean(company?.id && createExport.data?.data.id), refetchInterval: (query) => query.state.data?.data.status === "ready" || query.state.data?.data.status === "failed" ? false : 2500, queryFn: () => api<FiscalVaultExport>(`/companies/${company!.id}/vault-exports/${createExport.data!.data.id}`)});
+  const createExport = useMutation({mutationFn: () => api<FiscalVaultExport>(`/companies/${company!.id}/vault-exports`, {method: "POST", body: JSON.stringify(exportFrom && exportTo ? {from_date: exportFrom, to_date: exportTo} : {})}), onMutate: () => setExportCompanyId(company!.id)});
+  const exportStatus = useQuery({queryKey: ["fiscal-vault-export", company?.id, createExport.data?.data.id], enabled: Boolean(company?.id && exportCompanyId === company.id && createExport.data?.data.id), refetchInterval: (query) => query.state.data?.data.status === "ready" || query.state.data?.data.status === "failed" ? false : 2500, queryFn: () => api<FiscalVaultExport>(`/companies/${company!.id}/vault-exports/${createExport.data!.data.id}`)});
   const downloadExport = useMutation({mutationFn: () => downloadApiFile(`/companies/${company!.id}/vault-exports/${createExport.data!.data.id}/download`, "seif-fiscal.zip")});
   const legalHold = useMutation({
     mutationFn: (item: FiscalVaultItem) => api<FiscalVaultItem>(`/companies/${company!.id}/vault/${item.id}/retention`, {method: "PATCH", body: JSON.stringify({legal_hold: !item.legal_hold_at})}),
     onSuccess: () => items.refetch(),
   });
+  const exportBusy = createExport.isPending || exportStatus.data?.data.status === "queued" || exportStatus.data?.data.status === "processing";
+  const exportReady = exportCompanyId === company?.id && exportStatus.data?.data.status === "ready";
+  const resetPreparedExport = () => { createExport.reset(); setExportCompanyId(null); };
   const rows = items.data?.data ?? []; const storage = items.data?.meta?.storage as {used_bytes?: number; disk?: string} | undefined;
   const columns = useMemo<DataGridColumn<FiscalVaultItem>[]>(() => [
     {id: "document_number", header: "Document", accessorKey: "document_number", allowsSorting: true, minWidth: 170, cellClassName: "font-semibold", cell: (item) => item.document_number ?? "Document ANAF"},
@@ -48,7 +56,8 @@ export function FiscalVaultPage() {
     }}>{item.legal_hold_at ? <ShieldOff size={16}/> : <Shield size={16}/>}</Button> : null}{can("fiscal_vault.download") ? <Button isIconOnly size="sm" variant="ghost" aria-label={`Descarcă ${item.document_number ?? "documentul"}`} isDisabled={!item.original || download.isPending} onPress={() => download.mutate(item)}><Download size={16}/></Button> : null}</div>},
   ], [can, download, legalHold]);
   if (!can("fiscal_vault.view")) return <p className="text-[var(--danger)]">Nu ai permisiunea necesară pentru Seiful fiscal.</p>;
-  return <div className="flex flex-col gap-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="text-sm font-semibold">Spațiu utilizat: {integer(Math.ceil((storage?.used_bytes ?? 0) / 1024 / 1024))} MB</div><div className="text-xs text-[var(--text-muted)]">Originalele ZIP sunt read-only, cu hash SHA-256 și retenție fiscală.</div></div><div className="flex flex-wrap gap-2"><label className="flex h-10 min-w-[240px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3"><Search size={16}/><input className="w-full bg-transparent text-sm outline-none" placeholder="Caută numărul documentului…" value={grid.search} onChange={(event) => grid.setSearch(event.target.value)}/></label><Button size="sm" variant="outline" isDisabled={!grid.isDirty} onPress={grid.reset}><RotateCcw size={15}/> Resetează</Button>{can("fiscal_vault.export") ? exportStatus.data?.data.status === "ready" ? <Button variant="primary" isPending={downloadExport.isPending} onPress={() => downloadExport.mutate()}><Download size={16}/> Descarcă exportul</Button> : <Button variant="outline" isPending={createExport.isPending || exportStatus.data?.data.status === "queued" || exportStatus.data?.data.status === "processing"} onPress={() => createExport.mutate()}><Archive size={16}/> Exportă Seiful</Button> : null}</div></div>
+  return <div className="flex flex-col gap-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="text-sm font-semibold">Spațiu utilizat: {integer(Math.ceil((storage?.used_bytes ?? 0) / 1024 / 1024))} MB</div><div className="text-xs text-[var(--text-muted)]">Originalele ZIP sunt read-only, cu hash SHA-256 și retenție fiscală.</div></div><div className="flex flex-wrap gap-2"><label className="flex h-10 min-w-[240px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3"><Search size={16}/><input className="w-full bg-transparent text-sm outline-none" placeholder="Caută numărul documentului…" value={grid.search} onChange={(event) => grid.setSearch(event.target.value)}/></label><Button size="sm" variant="outline" isDisabled={!grid.isDirty} onPress={grid.reset}><RotateCcw size={15}/> Resetează</Button></div></div>
+    {can("fiscal_vault.export") ? <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"><AppDatePicker name="export_from" label="De la" ariaLabel="Export de la" className="min-w-[180px]" value={exportFrom} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportFrom(value);}}/><AppDatePicker name="export_to" label="Până la" ariaLabel="Export până la" className="min-w-[180px]" value={exportTo} minValue={exportFrom || undefined} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportTo(value);}}/>{exportReady ? <Button variant="primary" isPending={downloadExport.isPending} onPress={() => downloadExport.mutate()}><Download size={16}/> Descarcă exportul</Button> : <Button variant="outline" isDisabled={exportIntervalInvalid} isPending={exportBusy} onPress={() => createExport.mutate()}><Archive size={16}/> Exportă Seiful</Button>}<p className="text-xs text-[var(--text-muted)]">{exportFrom && exportTo ? "Exportă intervalul selectat; documentele fără dată apar în raportul de erori." : "Lasă ambele date goale pentru exportul integral."}</p></section> : null}
     {createExport.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(createExport.error, "Exportul nu a putut fi pornit.")}</p> : null}
     {createExport.isSuccess && exportStatus.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(exportStatus.error, "Starea exportului nu a putut fi verificată.")}</p> : null}
     {exportStatus.data?.data.status === "failed" ? <p role="alert" className="text-sm text-[var(--danger)]">Exportul a eșuat. Încearcă din nou.</p> : null}

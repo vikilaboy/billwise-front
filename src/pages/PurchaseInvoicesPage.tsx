@@ -10,7 +10,7 @@ import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
 import {api, apiErrorMessage, listQuery} from "../lib/api";
 import {date, money} from "../lib/format";
-import type {PurchaseInvoice} from "../lib/types";
+import type {PurchaseInvoice, SpvConnection} from "../lib/types";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
 type Filter = "toate" | "nevalidate" | "validate" | "atentie";
@@ -25,7 +25,8 @@ export function PurchaseInvoicesPage() {
   const grid = useServerDataGridState<Filter>({defaultSort: DEFAULT_SORT, sortColumns: ["number", "issue_date", "due_date", "total_cents"], filter: {param: "status", defaultValue: "toate", values: FILTERS.map((f) => f.key)}});
   const active = FILTERS.find((item) => item.key === (grid.filter ?? "toate"));
   const invoices = useQuery({queryKey: ["purchase-invoices", company?.id, grid.page, grid.filter, grid.debouncedSearch, grid.apiSort], enabled: Boolean(company?.id && can("purchase_invoice.view")), placeholderData: (previous) => previous, refetchInterval: () => shouldPollPurchaseInvoices(syncPollingUntil) ? 2500 : false, queryFn: () => api<PurchaseInvoice[]>(`/companies/${company!.id}/purchase-invoices${listQuery({page: grid.page, perPage: 20, sort: grid.apiSort, filter: {...(active?.value ? {review_status: active.value} : {}), ...(grid.debouncedSearch ? {search: {contains: grid.debouncedSearch}} : {})}})}`)});
-  const sync = useMutation({mutationFn: () => api<{queued: boolean}>(`/companies/${company!.id}/efactura/inbox/sync`, {method: "POST"}), onSuccess: () => {setSyncPollingUntil(Date.now() + PURCHASE_INVOICE_SYNC_POLLING_MS); void client.invalidateQueries({queryKey: ["purchase-invoices", company?.id]});}});
+  const connection = useQuery({queryKey: ["spv-connection", company?.id], enabled: Boolean(company?.id && can("purchase_invoice.view")), refetchInterval: () => shouldPollPurchaseInvoices(syncPollingUntil) ? 2500 : false, queryFn: () => api<SpvConnection>(`/efactura/spv/connection?company_profile_id=${company!.id}`)});
+  const sync = useMutation({mutationFn: () => api<{queued: boolean}>(`/companies/${company!.id}/efactura/inbox/sync`, {method: "POST"}), onSuccess: () => {setSyncPollingUntil(Date.now() + PURCHASE_INVOICE_SYNC_POLLING_MS); void client.invalidateQueries({queryKey: ["purchase-invoices", company?.id]}); void client.invalidateQueries({queryKey: ["spv-connection", company?.id]});}});
   const rows = invoices.data?.data ?? [];
   const columns = useMemo<DataGridColumn<PurchaseInvoice>[]>(() => [
     {id: "number", header: "Număr", accessorKey: "number", allowsSorting: true, minWidth: 150, cellClassName: "font-semibold"},
@@ -41,6 +42,7 @@ export function PurchaseInvoicesPage() {
       <label className="flex h-10 min-w-[240px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3"><Search size={16}/><input className="w-full bg-transparent text-sm outline-none" placeholder="Număr, furnizor sau CUI…" value={grid.search} onChange={(event) => grid.setSearch(event.target.value)}/></label>
       <Button size="sm" variant="outline" isDisabled={!grid.isDirty} onPress={grid.reset}><RotateCcw size={15}/> Resetează</Button></div>
       {!company?.archived_at && can("efactura_inbox.sync") ? <Button variant="primary" isPending={sync.isPending} onPress={() => sync.mutate()}><RefreshCw size={16}/> Sincronizează e-Factura</Button> : null}</div>
+    {connection.data?.data.inbox_last_error_code ? <p role="alert" className="text-sm text-[var(--danger)]">Ultima sincronizare ANAF a eșuat: <span className="font-mono">{connection.data.data.inbox_last_error_code}</span>.</p> : connection.data?.data.inbox_last_synced_at ? <p className="text-sm text-[var(--text-muted)]">Ultima sincronizare ANAF: {new Date(connection.data.data.inbox_last_synced_at).toLocaleString("ro-RO")}.</p> : connection.data?.data.inbox_enabled_at ? <p className="text-sm text-[var(--text-muted)]">Importul automat este activ; prima sincronizare completă este în așteptare.</p> : null}
     {sync.isSuccess ? <p role="status" className="text-sm text-[var(--success)]">Sincronizarea a fost pusă în coadă. Sunt preluate numai documentele sosite după activare.</p> : null}
     {sync.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(sync.error, "Sincronizarea e-Factura nu a putut fi pornită.")}</p> : null}
     <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]"><DataTableLoadingOverlay isLoading={invoices.isFetching && !invoices.isLoading}/>

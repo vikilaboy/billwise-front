@@ -3,6 +3,7 @@ import {fireEvent, render, screen} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {FiscalVaultPage} from "./FiscalVaultPage";
+import {FiscalVaultDetailPage} from "./FiscalVaultDetailPage";
 import {PurchaseInvoiceDetailPage} from "./PurchaseInvoiceDetailPage";
 import {PurchaseInvoicesPage, PURCHASE_INVOICE_SYNC_POLLING_MS, shouldPollPurchaseInvoices} from "./PurchaseInvoicesPage";
 
@@ -61,6 +62,36 @@ describe("purchase invoice pages", () => {
     expect(shouldPollPurchaseInvoices(pollingUntil, startedAt)).toBe(true);
     expect(shouldPollPurchaseInvoices(pollingUntil, pollingUntil - 1)).toBe(true);
     expect(shouldPollPurchaseInvoices(pollingUntil, pollingUntil)).toBe(false);
+  });
+
+  it("afișează ultima eroare de sincronizare ANAF", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/efactura/spv/connection")) {
+        return Promise.resolve(new Response(JSON.stringify({data: {
+          status: "active", connected: true, access_token_expires_at: null, reauthorization_required: false, last_error_code: null,
+          inbox_enabled_at: "2026-07-25T09:00:00Z", inbox_cursor_at: "2026-07-25T10:00:00Z",
+          inbox_last_synced_at: "2026-07-25T10:00:00Z", inbox_last_error_code: "anaf_inbox_sync_failed",
+        }}), {status: 200, headers: {"Content-Type": "application/json"}}));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        data: [],
+        meta: {pagination: {current_page: 1, last_page: 1, per_page: 20, total: 0}},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    }));
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter><PurchaseInvoicesPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("anaf_inbox_sync_failed");
   });
 
   it("afișează eroarea primită la pornirea sincronizării", async () => {
@@ -154,5 +185,29 @@ describe("purchase invoice pages", () => {
     fireEvent.click(screen.getByRole("button", {name: "Elimină blocajul legal"}));
     expect(window.confirm).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("afișează metadatele ANAF în pagina originalului", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({data: {
+      id: "vault-1", source: "anaf_efactura", direction: "received", document_type: "invoice", document_number: "OMV-1",
+      issue_date: "2026-07-25", supplier_name: "OMV Petrom", supplier_tax_id: "1590082", status: "imported",
+      signature_status: "preserved_not_verified", archived_at: "2026-07-25T10:00:00Z", retention_policy: "legal_general",
+      retain_until: "2032-07-01", legal_hold_at: null, last_verified_at: "2026-07-25T10:00:00Z",
+      integrity_status: "verified", original: {filename: "original.zip", size_bytes: 100, sha256: "abc"},
+      purchase_invoice_id: "invoice-1", anaf_message_id: "msg-1", anaf_download_id: "download-1",
+      anaf_available_at: "2026-07-25T09:30:00Z",
+    }}), {status: 200, headers: {"Content-Type": "application/json"}})));
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/seif-fiscal/vault-1"]}>
+          <Routes><Route path="/seif-fiscal/:vaultItemId" element={<FiscalVaultDetailPage/>}/></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("msg-1")).toBeInTheDocument();
+    expect(screen.getByText("download-1")).toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Descarcă originalul ANAF"})).toBeEnabled();
   });
 });
