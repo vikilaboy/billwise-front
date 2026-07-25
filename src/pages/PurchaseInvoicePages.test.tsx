@@ -167,6 +167,45 @@ describe("purchase invoice pages", () => {
     expect(screen.getByRole("button", {name: "Sincronizează e-Factura"})).toBeEnabled();
   });
 
+  it("nu afișează facturile firmei precedente cât se încarcă firma nouă", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/companies/company-2/")) return new Promise(() => {});
+      return Promise.resolve(new Response(JSON.stringify({
+        data: [{
+          id: "invoice-a", document_type: "invoice", number: "FACTURA-A", issue_date: "2026-07-25", due_date: null,
+          currency: "RON", subtotal_cents: 10000, vat_cents: 1900, total_cents: 11900, import_status: "imported",
+          review_status: "unreviewed", reviewed_at: null,
+          supplier: {id: "supplier-a", name: "Furnizor A", tax_id: "1590082", country_code: "RO", email: null, address: null},
+          vault_item_id: "vault-a", lines: [], created_at: "2026-07-25T10:00:00Z",
+        }],
+        meta: {pagination: {current_page: 1, last_page: 1, per_page: 20, total: 1}},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    }));
+    const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+    const view = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><PurchaseInvoicesPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("FACTURA-A")).toBeInTheDocument();
+    companyMock.current = {id: "company-2", legal_name: "Beta SRL"};
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><PurchaseInvoicesPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByText("FACTURA-A")).not.toBeInTheDocument();
+    expect(screen.getByText("Se încarcă…")).toBeInTheDocument();
+  });
+
   it("afișează eroarea primită la verificarea facturii", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((_input: string | URL | Request, init?: RequestInit) => {
       if (init?.method === "PATCH") {
@@ -197,6 +236,45 @@ describe("purchase invoice pages", () => {
 
     fireEvent.click(await screen.findByRole("button", {name: "Marchează verificată"}));
     expect(await screen.findByRole("alert")).toHaveTextContent("Factura nu mai poate fi modificată.");
+  });
+
+  it("păstrează rezultatul verificării asociat firmei de la pornirea acțiunii", async () => {
+    let resolveReview!: (response: Response) => void;
+    const reviewResponse = new Promise<Response>((resolve) => { resolveReview = resolve; });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "PATCH") return reviewResponse;
+      const companyId = String(input).includes("company-2") ? "B" : "A";
+      return Promise.resolve(new Response(JSON.stringify({data: {
+        id: "invoice-1", document_type: "invoice", number: `FACTURA-${companyId}`, issue_date: "2026-07-25", due_date: null,
+        currency: "RON", subtotal_cents: 10000, vat_cents: 1900, total_cents: 11900, import_status: "imported",
+        review_status: "unreviewed", reviewed_at: null,
+        supplier: {id: `supplier-${companyId}`, name: `Furnizor ${companyId}`, tax_id: "1590082", country_code: "RO", email: null, address: null},
+        vault_item_id: `vault-${companyId}`, lines: [], created_at: "2026-07-25T10:00:00Z",
+      }}), {status: 200, headers: {"Content-Type": "application/json"}}));
+    }));
+    const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+    const view = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/achizitii/invoice-1"]}>
+          <Routes><Route path="/achizitii/:id" element={<PurchaseInvoiceDetailPage/>}/></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Marchează verificată"}));
+    companyMock.current = {id: "company-2", legal_name: "Beta SRL"};
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/achizitii/invoice-1"]}>
+          <Routes><Route path="/achizitii/:id" element={<PurchaseInvoiceDetailPage/>}/></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("FACTURA-B")).toBeInTheDocument();
+    resolveReview(new Response(JSON.stringify({detail: "Eroare pentru firma A.", status: 409}), {status: 409, headers: {"Content-Type": "application/problem+json"}}));
+
+    await waitFor(() => expect(client.getMutationCache().getAll()[0]?.state.status).toBe("error"));
+    expect(screen.queryByText("Eroare pentru firma A.")).not.toBeInTheDocument();
   });
 
   it("deschide detaliul documentului direct din Seiful fiscal", async () => {
@@ -269,6 +347,44 @@ describe("purchase invoice pages", () => {
 
     await waitFor(() => expect(screen.queryByText(/Exportul cu manifest și hash-uri este în pregătire/)).not.toBeInTheDocument());
     expect(screen.getByRole("button", {name: "Exportă Seiful"})).toBeEnabled();
+  });
+
+  it("nu afișează documentele fiscale ale firmei precedente cât se încarcă firma nouă", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request) => {
+      if (String(input).includes("/companies/company-2/")) return new Promise(() => {});
+      return Promise.resolve(new Response(JSON.stringify({
+        data: [{
+          id: "vault-a", source: "anaf_efactura", direction: "received", document_type: "invoice", document_number: "SEIF-A",
+          issue_date: "2026-07-25", supplier_name: "Furnizor A", supplier_tax_id: "1590082", status: "imported",
+          signature_status: "preserved_not_verified", archived_at: "2026-07-25T10:00:00Z", retention_policy: "legal_general",
+          retain_until: "2032-07-01", legal_hold_at: null, last_verified_at: "2026-07-25T10:00:00Z",
+          integrity_status: "verified", original: {filename: "original.zip", size_bytes: 100, sha256: "abc"}, purchase_invoice_id: "invoice-a",
+        }],
+        meta: {pagination: {current_page: 1, last_page: 1, per_page: 20, total: 1}, storage: {used_bytes: 100}},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    }));
+    const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+    const view = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><FiscalVaultPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("SEIF-A")).toBeInTheDocument();
+    companyMock.current = {id: "company-2", legal_name: "Beta SRL"};
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><FiscalVaultPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByText("SEIF-A")).not.toBeInTheDocument();
+    expect(screen.getByText("Se încarcă…")).toBeInTheDocument();
   });
 
   it("confirmă eliminarea legal hold înainte de actualizare", async () => {

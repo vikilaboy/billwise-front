@@ -26,11 +26,12 @@ export function FiscalVaultDetailPage() {
     queryFn: () => api<FiscalVaultItem>(`/companies/${company!.id}/vault/${vaultItemId}`),
   });
   const download = useMutation({
-    mutationFn: (document: FiscalVaultItem) => downloadApiFile(
-      `/companies/${company!.id}/vault/${document.id}/download`,
+    mutationFn: ({companyId, document}: {companyId: string; document: FiscalVaultItem}) => downloadApiFile(
+      `/companies/${companyId}/vault/${document.id}/download`,
       document.original?.filename ?? "document-anaf.zip",
     ),
   });
+  const downloadBelongsToCurrentCompany = download.variables?.companyId === company?.id;
 
   if (!can("fiscal_vault.view")) return <p className="text-[var(--danger)]">Nu ai permisiunea necesară pentru Seiful fiscal.</p>;
   if (item.isLoading) return <div className="flex justify-center py-24"><Spinner/></div>;
@@ -40,9 +41,9 @@ export function FiscalVaultDetailPage() {
   return <div className="flex flex-col gap-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <Button variant="ghost" onPress={() => navigate("/seif-fiscal")}><ArrowLeft size={16}/> Înapoi la Seif</Button>
-      {can("fiscal_vault.download") ? <Button variant="primary" isDisabled={!document.original} isPending={download.isPending} onPress={() => download.mutate(document)}><Download size={16}/> Descarcă originalul ANAF</Button> : null}
+      {can("fiscal_vault.download") ? <Button variant="primary" isDisabled={!document.original || (download.isPending && !downloadBelongsToCurrentCompany)} isPending={download.isPending && downloadBelongsToCurrentCompany} onPress={() => company && download.mutate({companyId: company.id, document})}><Download size={16}/> Descarcă originalul ANAF</Button> : null}
     </div>
-    {download.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(download.error, "Documentul nu a putut fi descărcat.")}</p> : null}
+    {download.isError && downloadBelongsToCurrentCompany ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(download.error, "Documentul nu a putut fi descărcat.")}</p> : null}
     <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow)]">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div><p className="text-sm text-[var(--text-muted)]">Original ANAF arhivat</p><h2 className="mt-1 text-2xl font-bold">{document.document_number ?? "Document fără număr"}</h2><p className="mt-2 font-medium">{document.supplier_name ?? "Furnizor necunoscut"}</p></div>
