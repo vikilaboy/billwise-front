@@ -2,7 +2,7 @@ import {useEffect, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner, Switch} from "@heroui/react";
 import {useNavigate, useSearchParams} from "react-router";
-import {Building2, Check, Globe, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
+import {BadgePercent, Building2, Check, CircleAlert, Globe, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {AppCheckbox} from "../components/FormControls";
 import {api} from "../lib/api";
@@ -341,10 +341,11 @@ export function SettingsPage() {
   }
 
   const cardClass =
-    "self-start rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-[22px] shadow-[var(--shadow)]";
+    "min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)] sm:p-[22px]";
 
   return (
-    <div className="grid items-start gap-4 [grid-template-columns:1fr] min-[900px]:[grid-template-columns:minmax(0,3fr)_minmax(0,2fr)]">
+    <div className="space-y-4">
+      <div className="grid items-start gap-4 min-[1100px]:[grid-template-columns:minmax(0,2fr)_minmax(320px,1fr)]">
       {/* Card 1 — issuer company data */}
       <section className={cardClass}>
         <header className="mb-5 flex items-center gap-2.5">
@@ -521,9 +522,8 @@ export function SettingsPage() {
         </div>
       </section>
 
-      {/* Card 2 — preferences */}
-      <div className="flex flex-col gap-4">
-      <section className={cardClass}>
+      <aside className="flex min-w-0 flex-col gap-4">
+      <section className={`${cardClass} order-2`}>
         <header className="mb-5 flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
             <Landmark size={18} />
@@ -556,7 +556,7 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <section className={cardClass}>
+      <section className={`${cardClass} order-1`}>
         <header className="mb-4 flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
             <Link2 size={18} />
@@ -573,9 +573,10 @@ export function SettingsPage() {
           </p>
         ) : null}
         {spvFeedback === "error" ? (
-          <p role="alert" className="mb-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
-            {spvCallbackErrorMessage(spvReason)}
-          </p>
+          <div role="alert" className="mb-4 flex items-start gap-2.5 rounded-xl bg-[var(--danger-soft)] px-3.5 py-3 text-[12.5px] font-medium leading-relaxed text-[var(--danger)]">
+            <CircleAlert size={16} className="mt-0.5 shrink-0" />
+            <span>{spvCallbackErrorMessage(spvReason)}</span>
+          </div>
         ) : null}
 
         {spvQuery.isLoading ? (
@@ -617,13 +618,15 @@ export function SettingsPage() {
           }
           return (
             <div>
-              <p className="text-[12.5px] text-[var(--text-muted)]">
-                {reconnectRequired
-                  ? "Autorizarea SPV trebuie refăcută pentru această firmă."
-                  : "Firma selectată nu este conectată la ANAF SPV."}
-              </p>
+              {spvFeedback !== "error" ? (
+                <p className="text-[12.5px] text-[var(--text-muted)]">
+                  {reconnectRequired
+                    ? "Autorizarea SPV trebuie refăcută pentru această firmă."
+                    : "Firma selectată nu este conectată la ANAF SPV."}
+                </p>
+              ) : null}
               <Button
-                className="mt-4"
+                className={`${spvFeedback === "error" ? "" : "mt-4"} w-full sm:w-auto`}
                 size="sm"
                 variant="primary"
                 isDisabled={connectMutation.isPending}
@@ -637,10 +640,24 @@ export function SettingsPage() {
         })()}
 
       </section>
+      </aside>
+      </div>
 
       <section className={cardClass}>
+        <header className="mb-5 flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
+            <BadgePercent size={18} />
+          </span>
+          <div>
+            <h2 className="text-[15px] font-bold tracking-tight">Configurări fiscale</h2>
+            <p className="text-[12.5px] text-[var(--text-muted)]">Monede și cote TVA disponibile în documente</p>
+          </div>
+        </header>
+
+        <div className="grid gap-6 min-[1050px]:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)]">
+      <section className="min-w-0 min-[1050px]:border-r min-[1050px]:border-[var(--border)] min-[1050px]:pr-6">
         <header className="mb-4">
-          <h2 className="text-[15px] font-bold tracking-tight">Monede</h2>
+          <h3 className="text-[14px] font-bold tracking-tight">Monede</h3>
           <p className="text-[12.5px] text-[var(--text-muted)]">Configurare la nivelul întregului cont</p>
         </header>
         {currenciesQuery.isLoading ? <Spinner size="sm" /> : currenciesQuery.isError ? (
@@ -670,12 +687,12 @@ export function SettingsPage() {
           </div>
         )}
       </section>
-      <section className={cardClass}>
+      <section className="min-w-0 border-t border-[var(--border)] pt-6 min-[1050px]:border-t-0 min-[1050px]:pt-0">
         <header className="mb-4">
-          <h2 className="text-[15px] font-bold tracking-tight">Profiluri TVA</h2>
+          <h3 className="text-[14px] font-bold tracking-tight">Profiluri TVA</h3>
           <p className="text-[12.5px] text-[var(--text-muted)]">Cotele și tratamentele fiscale selectabile pe produse, facturi și recurențe</p>
         </header>
-        <div className="mb-4 grid grid-cols-[1fr_100px_auto] gap-2">
+        <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_100px_auto]">
           <Input name="name" aria-label="Denumire profil TVA" placeholder="TVA standard" value={newVatName} onChange={(event) => setNewVatName(event.target.value)} />
           <Input name="rate" aria-label="Cotă TVA" type="number" min="0" max="100" value={newVatRate} onChange={(event) => setNewVatRate(event.target.value)} />
           <Button variant="primary" isDisabled={!newVatName.trim() || vatProfileMutation.isPending} onPress={() => vatProfileMutation.mutate({create: true})}>Adaugă</Button>
@@ -689,7 +706,8 @@ export function SettingsPage() {
           </div>
         )}
       </section>
-      </div>
+        </div>
+      </section>
     </div>
   );
 }

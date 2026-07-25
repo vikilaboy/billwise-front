@@ -65,6 +65,8 @@ describe("SettingsPage SPV", () => {
     );
 
     expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText("Firma selectată nu este conectată la ANAF SPV.")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", {name: "Configurări fiscale"})).toBeInTheDocument();
   });
 
   it("afișează callback-ul, starea reală și deconectează numai după confirmare", async () => {
