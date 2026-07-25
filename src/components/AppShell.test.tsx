@@ -2,7 +2,7 @@ import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
 import {fireEvent, render, screen} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {AppShell, archivedCompanyLandingPath} from "./AppShell";
+import {AppShell, archivedCompanyLandingPath, canAccessArchivedCompanyPath} from "./AppShell";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -16,6 +16,91 @@ describe("AppShell onboarding guard", () => {
     expect(archivedCompanyLandingPath((permission) => permission === "fiscal_vault.view")).toBe("/seif-fiscal");
     expect(archivedCompanyLandingPath(() => false)).toBeNull();
   });
+
+  it("permite pe firma arhivată doar ruta pentru care utilizatorul are acces", () => {
+    const canViewPurchases = (permission: string) => permission === "purchase_invoice.view";
+    const canViewVault = (permission: string) => permission === "fiscal_vault.view";
+
+    expect(canAccessArchivedCompanyPath("/achizitii/invoice-1", canViewPurchases)).toBe(true);
+    expect(canAccessArchivedCompanyPath("/seif-fiscal/document-1", canViewPurchases)).toBe(false);
+    expect(canAccessArchivedCompanyPath("/seif-fiscal/document-1", canViewVault)).toBe(true);
+    expect(canAccessArchivedCompanyPath("/achizitii/invoice-1", canViewVault)).toBe(false);
+    expect(canAccessArchivedCompanyPath("/seif-fiscalizare", canViewVault)).toBe(false);
+  });
+
+  it.each([
+    {
+      permission: "purchase_invoice.view",
+      initialPath: "/seif-fiscal",
+      forbiddenContent: "Seif fiscal protejat",
+      expectedContent: "Achiziții accesibile",
+    },
+    {
+      permission: "fiscal_vault.view",
+      initialPath: "/achizitii",
+      forbiddenContent: "Achiziții protejate",
+      expectedContent: "Seif fiscal accesibil",
+    },
+  ])(
+    "redirecționează deep-link-ul fără permisiune pentru o firmă arhivată ($permission)",
+    async ({permission, initialPath, forbiddenContent, expectedContent}) => {
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        },
+      );
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockImplementation((input: string | URL | Request) => {
+          const url = String(input);
+          const data = url.includes("/companies")
+            ? [{
+                id: "company-archived",
+                legal_name: "ACME Arhivat SRL",
+                tax_id: "12345674",
+                archived_at: "2026-07-25T10:00:00Z",
+              }]
+            : url.includes("/notifications")
+              ? {items: [], unread_count: 0}
+              : {
+                  id: "user-1",
+                  name: "Andrei",
+                  email: "andrei@example.test",
+                  phone: null,
+                  email_verified_at: "2026-07-24T10:00:00Z",
+                  tenant: {id: "tenant-1", name: "ACME", slug: "acme"},
+                  roles: ["accountant"],
+                  permissions: [permission],
+                };
+
+          return Promise.resolve(new Response(JSON.stringify({data}), {
+            status: 200,
+            headers: {"Content-Type": "application/json"},
+          }));
+        }),
+      );
+
+      const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={[initialPath]}>
+            <Routes>
+              <Route element={<AppShell />}>
+                <Route path="/achizitii" element={<div>{permission === "purchase_invoice.view" ? expectedContent : forbiddenContent}</div>} />
+                <Route path="/seif-fiscal" element={<div>{permission === "fiscal_vault.view" ? expectedContent : forbiddenContent}</div>} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+
+      expect(await screen.findByText(expectedContent)).toBeInTheDocument();
+      expect(screen.queryByText(forbiddenContent)).not.toBeInTheDocument();
+    },
+  );
 
   it("redirecționează obligatoriu spre onboarding când utilizatorul nu are firme", async () => {
     vi.stubGlobal(

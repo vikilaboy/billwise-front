@@ -62,6 +62,16 @@ export const archivedCompanyLandingPath = (can: (permission: string) => boolean)
   if (can("purchase_invoice.view")) return "/achizitii";
   return null;
 };
+export const canAccessArchivedCompanyPath = (
+  pathname: string,
+  can: (permission: string) => boolean,
+): boolean => {
+  const matchesRoute = (route: string) => pathname === route || pathname.startsWith(`${route}/`);
+
+  if (matchesRoute("/seif-fiscal")) return can("fiscal_vault.view");
+  if (matchesRoute("/achizitii")) return can("purchase_invoice.view");
+  return false;
+};
 
 function initials(name?: string | null): string {
   if (!name) return "BW";
@@ -109,6 +119,7 @@ export function AppShell() {
   const can = (permission: string) => !hasConfiguredAccess || Boolean(user?.permissions.includes(permission));
   const archivedCompany = Boolean(company?.archived_at);
   const archivedLanding = archivedCompanyLandingPath(can);
+  const archivedPathAllowed = canAccessArchivedCompanyPath(location.pathname, can);
   const visibleNavigation = NAV.filter((item) => (!item.permission || can(item.permission))
     && (!archivedCompany || ["/achizitii", "/seif-fiscal"].includes(item.to)));
   const [title, subtitle] = pageMeta(location.pathname);
@@ -136,9 +147,9 @@ export function AppShell() {
   }, [activeId, company?.id]);
 
   useEffect(() => {
-    if (!archivedCompany || !archivedLanding || ["/achizitii", "/seif-fiscal"].some((path) => location.pathname.startsWith(path))) return;
+    if (!archivedCompany || !archivedLanding || archivedPathAllowed) return;
     navigate(archivedLanding, {replace: true});
-  }, [archivedCompany, archivedLanding, location.pathname, navigate]);
+  }, [archivedCompany, archivedLanding, archivedPathAllowed, navigate]);
 
   const selectCompany = (id: string) => {
     setActiveId(id);
