@@ -117,7 +117,8 @@ describe("SettingsPage SPV", () => {
 
     await waitFor(() => expect(fiscalTab).toHaveAttribute("aria-pressed", "true"));
     expect(companyTab).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("heading", {name: "Configurări fiscale"})).toBeInTheDocument();
+    expect(screen.getByRole("heading", {name: "Monede"})).toBeInTheDocument();
+    expect(screen.getByRole("heading", {name: "Profiluri TVA"})).toBeInTheDocument();
   });
 
   it.each([
@@ -154,7 +155,7 @@ describe("SettingsPage SPV", () => {
 
     expect(await screen.findByText(message)).toBeInTheDocument();
     expect(screen.queryByText("Firma selectată nu este conectată la ANAF SPV.")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", {name: "Configurări fiscale"})).toBeInTheDocument();
+    expect(screen.getByRole("heading", {name: "Monede"})).toBeInTheDocument();
   });
 
   it("afișează callback-ul, starea reală și deconectează numai după confirmare", async () => {

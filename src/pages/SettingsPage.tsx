@@ -2,7 +2,7 @@ import {useEffect, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner, Switch} from "@heroui/react";
 import {useNavigate, useSearchParams} from "react-router";
-import {BadgePercent, Building2, Check, CircleAlert, Globe, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
+import {BadgePercent, Building2, Check, CircleAlert, Coins, Globe, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {AppCheckbox} from "../components/FormControls";
 import {api} from "../lib/api";
@@ -396,7 +396,7 @@ export function SettingsPage() {
 
       <div>
       {/* Card 1 — issuer company data */}
-      <section className={`${cardClass} max-w-5xl ${activeSection === "company" ? "" : "hidden"}`}>
+      <section className={`${cardClass} max-w-3xl ${activeSection === "company" ? "" : "hidden"}`}>
         <header className="mb-5 flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
             <Building2 size={18} />
@@ -728,23 +728,18 @@ export function SettingsPage() {
       </aside>
       </div>
 
-      <section className={`${cardClass} ${activeSection === "fiscal" ? "" : "hidden"}`}>
+      <div className={`max-w-3xl space-y-4 ${activeSection === "fiscal" ? "" : "hidden"}`}>
+      <section className={cardClass}>
         <header className="mb-5 flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
-            <BadgePercent size={18} />
+            <Coins size={18} />
           </span>
           <div>
-            <h2 className="text-[15px] font-bold tracking-tight">Configurări fiscale</h2>
-            <p className="text-[12.5px] text-[var(--text-muted)]">Monede și cote TVA disponibile în documente</p>
+            <h2 className="text-[15px] font-bold tracking-tight">Monede</h2>
+            <p className="text-[12.5px] text-[var(--text-muted)]">Configurare la nivelul întregului cont</p>
           </div>
         </header>
 
-        <div className="grid gap-6 min-[1050px]:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)]">
-      <section className="min-w-0 min-[1050px]:border-r min-[1050px]:border-[var(--border)] min-[1050px]:pr-6">
-        <header className="mb-4">
-          <h3 className="text-[14px] font-bold tracking-tight">Monede</h3>
-          <p className="text-[12.5px] text-[var(--text-muted)]">Configurare la nivelul întregului cont</p>
-        </header>
         {currenciesQuery.isLoading ? <Spinner size="sm" /> : currenciesQuery.isError ? (
           <p className="text-sm text-[var(--danger)]">Monedele nu au putut fi încărcate.</p>
         ) : (
@@ -772,10 +767,16 @@ export function SettingsPage() {
           </div>
         )}
       </section>
-      <section className="min-w-0 border-t border-[var(--border)] pt-6 min-[1050px]:border-t-0 min-[1050px]:pt-0">
-        <header className="mb-4">
-          <h3 className="text-[14px] font-bold tracking-tight">Profiluri TVA</h3>
+
+      <section className={cardClass}>
+        <header className="mb-5 flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
+            <BadgePercent size={18} />
+          </span>
+          <div>
+          <h2 className="text-[15px] font-bold tracking-tight">Profiluri TVA</h2>
           <p className="text-[12.5px] text-[var(--text-muted)]">Cotele și tratamentele fiscale selectabile pe produse, facturi și recurențe</p>
+          </div>
         </header>
         <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_100px_auto]">
           <Input name="name" aria-label="Denumire profil TVA" placeholder="TVA standard" value={newVatName} onChange={(event) => setNewVatName(event.target.value)} />
@@ -791,8 +792,7 @@ export function SettingsPage() {
           </div>
         )}
       </section>
-        </div>
-      </section>
+      </div>
     </div>
   );
 }
