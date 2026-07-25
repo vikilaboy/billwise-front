@@ -2,8 +2,9 @@ import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {FiscalVaultPage, isCurrentExportDownload} from "./FiscalVaultPage";
-import {FiscalVaultDetailPage} from "./FiscalVaultDetailPage";
+import type {FiscalVaultItem} from "../lib/types";
+import {FiscalVaultPage, fiscalVaultExportRangeError, isCurrentExportDownload} from "./FiscalVaultPage";
+import {FiscalVaultDetailPage, isCurrentVaultDownload} from "./FiscalVaultDetailPage";
 import {PurchaseInvoiceDetailPage} from "./PurchaseInvoiceDetailPage";
 import {PurchaseInvoicesPage, PURCHASE_INVOICE_SYNC_POLLING_MS, shouldPollPurchaseInvoices} from "./PurchaseInvoicesPage";
 
@@ -356,6 +357,22 @@ describe("purchase invoice pages", () => {
     expect(isCurrentExportDownload(previousDownload, "company-1", "export-2")).toBe(false);
     expect(isCurrentExportDownload(previousDownload, "company-2", "export-1")).toBe(false);
     expect(isCurrentExportDownload(undefined, undefined, undefined)).toBe(false);
+  });
+
+  it("limitează exportul Seifului la un interval explicit de maximum 366 zile", () => {
+    expect(fiscalVaultExportRangeError("", "")).toBe("Selectează ambele date pentru export.");
+    expect(fiscalVaultExportRangeError("2024-01-01", "2024-12-31")).toBeNull();
+    expect(fiscalVaultExportRangeError("2024-01-01", "2025-01-01")).toBe("Intervalul nu poate depăși 366 zile.");
+    expect(fiscalVaultExportRangeError("2026-07-02", "2026-07-01")).toBe("Data de sfârșit trebuie să fie după data de început.");
+  });
+
+  it("asociază feedbackul descărcării originalului cu documentul curent", () => {
+    const document = {id: "vault-1"} as FiscalVaultItem;
+    const variables = {companyId: "company-1", document};
+
+    expect(isCurrentVaultDownload(variables, "company-1", "vault-1")).toBe(true);
+    expect(isCurrentVaultDownload(variables, "company-1", "vault-2")).toBe(false);
+    expect(isCurrentVaultDownload(variables, "company-2", "vault-1")).toBe(false);
   });
 
   it("nu afișează documentele fiscale ale firmei precedente cât se încarcă firma nouă", async () => {

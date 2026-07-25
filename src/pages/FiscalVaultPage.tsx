@@ -15,6 +15,8 @@ import type {FiscalVaultExport, FiscalVaultItem} from "../lib/types";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
 const DEFAULT_SORT: DataGridSortDescriptor = {column: "archived_at", direction: "descending"};
+export const FISCAL_VAULT_MAX_EXPORT_DAYS = 366;
+const DAY_MS = 86_400_000;
 const VAULT_STATUS = {
   archiving: {color: "warning", label: "În curs de arhivare"},
   archived: {color: "default", label: "Arhivat"},
@@ -36,16 +38,37 @@ export function isCurrentExportDownload(
     && variables.exportId === exportId;
 }
 
+function dateInputValue(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+export function fiscalVaultExportRangeError(from: string, to: string): string | null {
+  if (!from || !to) return "Selectează ambele date pentru export.";
+  const intervalDays = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1;
+  if (intervalDays < 1) return "Data de sfârșit trebuie să fie după data de început.";
+  if (intervalDays > FISCAL_VAULT_MAX_EXPORT_DAYS) return `Intervalul nu poate depăși ${FISCAL_VAULT_MAX_EXPORT_DAYS} zile.`;
+  return null;
+}
+
 export function FiscalVaultPage() {
   const {company, can} = useCompany(); const navigate = useNavigate(); const client = useQueryClient(); const grid = useServerDataGridState({defaultSort: DEFAULT_SORT, sortColumns: ["archived_at", "issue_date", "supplier_name", "document_number"]});
-  const [exportFrom, setExportFrom] = useState("");
-  const [exportTo, setExportTo] = useState("");
+  const [exportFrom, setExportFrom] = useState(() => `${new Date().getFullYear()}-01-01`);
+  const [exportTo, setExportTo] = useState(() => dateInputValue(new Date()));
   const [exportCompanyId, setExportCompanyId] = useState<string | null>(null);
-  const exportIntervalInvalid = (exportFrom === "") !== (exportTo === "") || Boolean(exportFrom && exportTo && exportFrom > exportTo);
+  const exportIntervalError = fiscalVaultExportRangeError(exportFrom, exportTo);
   const items = useQuery({queryKey: ["fiscal-vault", company?.id, grid.page, grid.debouncedSearch, grid.apiSort], enabled: Boolean(company?.id && can("fiscal_vault.view")), placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === company?.id ? previous : undefined, queryFn: () => api<FiscalVaultItem[]>(`/companies/${company!.id}/vault${listQuery({page: grid.page, perPage: 20, sort: grid.apiSort, filter: grid.debouncedSearch ? {document_number: {contains: grid.debouncedSearch}} : {}})}`)});
   const download = useMutation({mutationFn: ({companyId, item}: {companyId: string; item: FiscalVaultItem}) => downloadApiFile(`/companies/${companyId}/vault/${item.id}/download`, item.original?.filename ?? "document-anaf.zip")});
   const createExport = useMutation({
-    mutationFn: ({companyId, from, to}: {companyId: string; from: string; to: string}) => api<FiscalVaultExport>(`/companies/${companyId}/vault-exports`, {method: "POST", body: JSON.stringify(from && to ? {from_date: from, to_date: to} : {})}),
+    mutationFn: ({companyId, from, to}: {companyId: string; from: string; to: string}) => api<FiscalVaultExport>(`/companies/${companyId}/vault-exports`, {method: "POST", body: JSON.stringify({from_date: from, to_date: to})}),
     onMutate: ({companyId}) => setExportCompanyId(companyId),
   });
   const exportStatus = useQuery({queryKey: ["fiscal-vault-export", exportCompanyId, createExport.data?.data.id], enabled: Boolean(company?.id && exportCompanyId === company.id && createExport.data?.data.id), refetchInterval: (query) => query.state.data?.data.status === "ready" || query.state.data?.data.status === "failed" ? false : 2500, queryFn: () => api<FiscalVaultExport>(`/companies/${exportCompanyId}/vault-exports/${createExport.data!.data.id}`)});
@@ -81,7 +104,7 @@ export function FiscalVaultPage() {
   ], [can, company, download, downloadBelongsToCurrentCompany, legalHold, legalHoldBelongsToCurrentCompany, navigate]);
   if (!can("fiscal_vault.view")) return <p className="text-[var(--danger)]">Nu ai permisiunea necesară pentru Seiful fiscal.</p>;
   return <div className="flex flex-col gap-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="text-sm font-semibold">Spațiu utilizat: {integer(Math.ceil((storage?.used_bytes ?? 0) / 1024 / 1024))} MB</div><div className="text-xs text-[var(--text-muted)]">Originalele ZIP sunt read-only, cu hash SHA-256 și retenție fiscală.</div></div><div className="flex flex-wrap gap-2"><label className="flex h-10 min-w-[240px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3"><Search size={16}/><input className="w-full bg-transparent text-sm outline-none" placeholder="Caută numărul documentului…" value={grid.search} onChange={(event) => grid.setSearch(event.target.value)}/></label><Button size="sm" variant="outline" isDisabled={!grid.isDirty} onPress={grid.reset}><RotateCcw size={15}/> Resetează</Button></div></div>
-    {can("fiscal_vault.export") ? <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"><AppDatePicker name="export_from" label="De la" ariaLabel="Export de la" className="min-w-[180px]" value={exportFrom} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportFrom(value);}}/><AppDatePicker name="export_to" label="Până la" ariaLabel="Export până la" className="min-w-[180px]" value={exportTo} minValue={exportFrom || undefined} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportTo(value);}}/>{exportReady ? <Button variant="primary" isPending={downloadExport.isPending && exportDownloadBelongsToCurrentExport} onPress={() => company && createExport.data?.data.id && downloadExport.mutate({companyId: company.id, exportId: createExport.data.data.id})}><Download size={16}/> Descarcă exportul</Button> : <Button variant="outline" isDisabled={exportIntervalInvalid} isPending={exportBusy} onPress={() => company && createExport.mutate({companyId: company.id, from: exportFrom, to: exportTo})}><Archive size={16}/> Exportă Seiful</Button>}<p className="text-xs text-[var(--text-muted)]">{exportFrom && exportTo ? "Exportă intervalul selectat; documentele fără dată apar în raportul de erori." : "Lasă ambele date goale pentru exportul integral."}</p></section> : null}
+    {can("fiscal_vault.export") ? <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"><AppDatePicker name="export_from" label="De la" ariaLabel="Export de la" className="min-w-[180px]" value={exportFrom} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportFrom(value);}}/><AppDatePicker name="export_to" label="Până la" ariaLabel="Export până la" className="min-w-[180px]" value={exportTo} minValue={exportFrom || undefined} maxValue={exportFrom ? addDays(exportFrom, FISCAL_VAULT_MAX_EXPORT_DAYS - 1) : undefined} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportTo(value);}}/>{exportReady ? <Button variant="primary" isPending={downloadExport.isPending && exportDownloadBelongsToCurrentExport} onPress={() => company && createExport.data?.data.id && downloadExport.mutate({companyId: company.id, exportId: createExport.data.data.id})}><Download size={16}/> Descarcă exportul</Button> : <Button variant="outline" isDisabled={exportIntervalError !== null} isPending={exportBusy} onPress={() => company && createExport.mutate({companyId: company.id, from: exportFrom, to: exportTo})}><Archive size={16}/> Exportă Seiful</Button>}<p className={`text-xs ${exportIntervalError ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{exportIntervalError ?? `Exportă doar intervalul selectat, maximum ${FISCAL_VAULT_MAX_EXPORT_DAYS} zile; documentele fără data emiterii folosesc data arhivării și apar în raportul de erori.`}</p></section> : null}
     {exportBelongsToCurrentCompany && createExport.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(createExport.error, "Exportul nu a putut fi pornit.")}</p> : null}
     {exportBelongsToCurrentCompany && createExport.isSuccess && exportStatus.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(exportStatus.error, "Starea exportului nu a putut fi verificată.")}</p> : null}
     {exportBelongsToCurrentCompany && exportStatus.data?.data.status === "failed" ? <p role="alert" className="text-sm text-[var(--danger)]">Exportul a eșuat. Încearcă din nou.</p> : null}
