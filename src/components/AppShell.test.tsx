@@ -165,4 +165,57 @@ describe("AppShell onboarding guard", () => {
     expect(localStorage.getItem("billwise_active_company_id")).toBeNull();
     expect(client.getQueryData(["sensitive"])).toBeUndefined();
   });
+
+  it("ascunde modulele pentru care utilizatorul configurat nu are permisiuni", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = String(input);
+        const data = url.includes("/companies")
+          ? [{id: "company-1", legal_name: "ACME SRL", tax_id: "12345674"}]
+          : url.includes("/notifications")
+            ? {items: [], unread_count: 0}
+            : {
+                id: "user-1",
+                name: "Andrei",
+                email: "andrei@example.test",
+                phone: null,
+                email_verified_at: "2026-07-24T10:00:00Z",
+                tenant: {id: "tenant-1", name: "ACME", slug: "acme"},
+                roles: ["accountant"],
+                permissions: ["purchase_invoice.view"],
+              };
+
+        return Promise.resolve(new Response(JSON.stringify({data}), {
+          status: 200,
+          headers: {"Content-Type": "application/json"},
+        }));
+      }),
+    );
+
+    const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/dashboard"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/dashboard" element={<div>Dashboard protejat</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Dashboard protejat");
+    expect(screen.getByText("Facturi furnizori")).toBeInTheDocument();
+    expect(screen.queryByText("Seif fiscal")).not.toBeInTheDocument();
+  });
 });

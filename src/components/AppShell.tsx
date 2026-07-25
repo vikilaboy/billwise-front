@@ -25,13 +25,13 @@ import {
 import {api, AUTH_EXPIRED_EVENT, session} from "../lib/api";
 import type {ActivityNotificationFeed, CompanyProfile, User} from "../lib/types";
 
-type NavItem = {to: string; label: string; icon: typeof FileText; group: string; badge?: number};
+type NavItem = {to: string; label: string; icon: typeof FileText; group: string; badge?: number; permission?: string};
 
 const NAV: NavItem[] = [
   {to: "/dashboard", label: "Dashboard", icon: CircleGauge, group: "Principal"},
   {to: "/facturi", label: "Facturi", icon: FileText, group: "Principal"},
-  {to: "/achizitii", label: "Facturi furnizori", icon: ShoppingCart, group: "Principal"},
-  {to: "/seif-fiscal", label: "Seif fiscal", icon: Archive, group: "Principal"},
+  {to: "/achizitii", label: "Facturi furnizori", icon: ShoppingCart, group: "Principal", permission: "purchase_invoice.view"},
+  {to: "/seif-fiscal", label: "Seif fiscal", icon: Archive, group: "Principal", permission: "fiscal_vault.view"},
   {to: "/recurente", label: "Facturi recurente", icon: Repeat, group: "Principal"},
   {to: "/clienti", label: "Clienți", icon: Users, group: "Date firmă"},
   {to: "/produse", label: "Produse și servicii", icon: Package, group: "Date firmă"},
@@ -54,8 +54,8 @@ const META: Record<string, [string, string]> = {
 };
 
 // Current tenant company shared with every page (invoices/customers are scoped to it).
-type ShellContext = {company?: CompanyProfile};
-const CompanyContext = createContext<ShellContext>({});
+type ShellContext = {company?: CompanyProfile; user?: User; can: (permission: string) => boolean};
+const CompanyContext = createContext<ShellContext>({can: () => false});
 export const useCompany = () => useContext(CompanyContext);
 
 function initials(name?: string | null): string {
@@ -99,6 +99,10 @@ export function AppShell() {
 
   const list = companies.data?.data ?? [];
   const company = list.find((c) => c.id === activeId) ?? list[0];
+  const user = me.data?.data;
+  const hasConfiguredAccess = Boolean((user?.roles.length ?? 0) > 0 || (user?.permissions.length ?? 0) > 0);
+  const can = (permission: string) => !hasConfiguredAccess || Boolean(user?.permissions.includes(permission));
+  const visibleNavigation = NAV.filter((item) => !item.permission || can(item.permission));
   const [title, subtitle] = pageMeta(location.pathname);
 
   useEffect(() => {
@@ -142,9 +146,9 @@ export function AppShell() {
     }
   };
 
-  const groups = [...new Set(NAV.map((n) => n.group))];
+  const groups = [...new Set(visibleNavigation.map((n) => n.group))];
 
-  if (companies.isLoading) {
+  if (companies.isLoading || me.isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center gap-2.5 bg-[var(--bg-subtle)] text-sm text-[var(--text-muted)]">
         <Spinner size="sm" /> Se verifică firmele contului…
@@ -152,7 +156,7 @@ export function AppShell() {
     );
   }
 
-  if (companies.isError) {
+  if (companies.isError || me.isError) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[var(--bg-subtle)] px-6 text-center">
         <p className="text-sm font-medium text-[var(--danger)]">Firmele contului nu au putut fi încărcate.</p>
@@ -169,7 +173,7 @@ export function AppShell() {
     }
 
     return (
-      <CompanyContext.Provider value={{company: undefined}}>
+      <CompanyContext.Provider value={{company: undefined, user, can}}>
         <Outlet />
       </CompanyContext.Provider>
     );
@@ -180,7 +184,7 @@ export function AppShell() {
   }
 
   return (
-    <CompanyContext.Provider value={{company}}>
+    <CompanyContext.Provider value={{company, user, can}}>
       <Sidebar.Provider collapsible="offcanvas" navigate={(href) => navigate(href)}>
         <Sidebar>
           <Sidebar.Header className="gap-3">
@@ -242,7 +246,7 @@ export function AppShell() {
               <Sidebar.Group key={group}>
                 <Sidebar.GroupLabel>{group}</Sidebar.GroupLabel>
                 <Sidebar.Menu aria-label={group}>
-                  {NAV.filter((n) => n.group === group).map(({to, label, icon: Icon, badge}) => (
+                  {visibleNavigation.filter((n) => n.group === group).map(({to, label, icon: Icon, badge}) => (
                     <Sidebar.MenuItem key={to} href={to} isCurrent={location.pathname.startsWith(to)}>
                       <Sidebar.MenuIcon>
                         <Icon size={18} />
