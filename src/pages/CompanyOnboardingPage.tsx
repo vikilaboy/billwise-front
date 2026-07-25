@@ -4,7 +4,7 @@ import {Button, Spinner} from "@heroui/react";
 import {Building2, CheckCircle2, Search} from "lucide-react";
 import {useNavigate} from "react-router";
 import {AppCheckbox, AppSelect} from "../components/FormControls";
-import {api, listQuery} from "../lib/api";
+import {api, apiErrorMessage, listQuery} from "../lib/api";
 import {suggestAnafAddress} from "../lib/anafAddress";
 import type {CompanyProfile, FiscalEntity, Locality, State, User} from "../lib/types";
 
@@ -46,6 +46,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
   const [cui, setCui] = useState("");
   const [fiscal, setFiscal] = useState<FiscalEntity | null>(null);
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
+  const [lookupError, setLookupError] = useState<string | null>(null);
   const [form, setForm] = useState<CompanyForm>(emptyForm);
 
   const me = useQuery({queryKey: ["me"], queryFn: () => api<User>("/me")});
@@ -98,6 +99,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
   const lookup = useMutation({
     mutationFn: () => api<FiscalEntity>(`/fiscal/lookup?cui=${encodeURIComponent(cui)}`),
     onSuccess: ({data}) => {
+      setLookupError(null);
       setFiscal(data);
       setCheckedAt(new Date());
       setForm((current) => ({
@@ -110,6 +112,9 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
         phone: current.phone || me.data?.data.phone || "",
         confirmed: false,
       }));
+    },
+    onError: (error) => {
+      setLookupError(apiErrorMessage(error, "Registrul ANAF nu este disponibil momentan."));
     },
   });
 
@@ -200,6 +205,30 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                   <Search size={17} /> Verifică la ANAF
                 </Button>
               </div>
+              {lookupError ? (
+                <div className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">
+                  <p>{lookupError}</p>
+                  <Button
+                    className="mt-2"
+                    size="sm"
+                    variant="outline"
+                    onPress={() => {
+                      setFiscal({
+                        cui: cui.trim().replace(/^RO/i, ""),
+                        name: "",
+                        is_vat_payer: false,
+                        registration_number: null,
+                        address: null,
+                        is_active: true,
+                      });
+                      setCheckedAt(null);
+                      setForm((current) => ({...current, confirmed: false}));
+                    }}
+                  >
+                    Continuă cu introducerea manuală
+                  </Button>
+                </div>
+              ) : null}
             </form>
           ) : (
             <form onSubmit={submitCompany}>

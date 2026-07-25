@@ -114,6 +114,7 @@ export function SettingsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [spvFeedback] = useState(() => searchParams.get("spv"));
+  const [spvReason] = useState(() => searchParams.get("reason"));
 
   const profileQuery = useQuery({
     queryKey: ["company", company?.id],
@@ -219,6 +220,7 @@ export function SettingsPage() {
     if (!spvFeedback) return;
     const next = new URLSearchParams(searchParams);
     next.delete("spv");
+    next.delete("reason");
     setSearchParams(next, {replace: true});
     void queryClient.invalidateQueries({queryKey: ["spv-connection", company?.id]});
   }, [company?.id, queryClient, searchParams, setSearchParams, spvFeedback]);
@@ -547,7 +549,13 @@ export function SettingsPage() {
         ) : null}
         {spvFeedback === "error" ? (
           <p role="alert" className="mb-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
-            Conectarea SPV nu a reușit. Încearcă din nou.
+            {spvReason === "denied"
+              ? "Autorizarea ANAF a fost anulată."
+              : spvReason === "invalid_state" || spvReason === "invalid_callback"
+                ? "Sesiunea de conectare a expirat. Pornește din nou conectarea."
+                : spvReason === "anaf_service_unavailable" || spvReason === "anaf_token_unavailable"
+                  ? "ANAF nu a putut finaliza conectarea. Încearcă din nou."
+                  : "Conectarea SPV nu a reușit. Încearcă din nou."}
           </p>
         ) : null}
 
@@ -560,15 +568,19 @@ export function SettingsPage() {
           </div>
         ) : (() => {
           const connection = spvQuery.data?.data;
-          const expired = Boolean(connection?.expires_at && new Date(connection.expires_at) <= new Date());
-          if (connection?.connected && !expired) {
+          const reconnectRequired = connection?.status === "reconnect_required";
+          if (connection?.connected) {
             return (
               <div>
                 <div className="flex items-center gap-2 text-[13.5px] font-semibold text-[var(--success)]">
                   <Check size={16} /> Conectat
                 </div>
                 <p className="mt-1 text-[12px] text-[var(--text-muted)]">
-                  {connection.expires_at ? `Token valabil până la ${new Date(connection.expires_at).toLocaleString("ro-RO")}.` : "Conexiune activă."}
+                  {connection.status === "refreshable"
+                    ? "Access tokenul va fi reînnoit automat la următoarea transmitere."
+                    : connection.access_token_expires_at
+                      ? `Token valabil până la ${new Date(connection.access_token_expires_at).toLocaleString("ro-RO")}.`
+                      : "Conexiune activă."}
                 </p>
                 <Button
                   className="mt-4"
@@ -587,7 +599,9 @@ export function SettingsPage() {
           return (
             <div>
               <p className="text-[12.5px] text-[var(--text-muted)]">
-                {expired ? "Tokenul SPV a expirat. Reconectează firma pentru a continua." : "Firma selectată nu este conectată la ANAF SPV."}
+                {reconnectRequired
+                  ? "Autorizarea SPV trebuie refăcută pentru această firmă."
+                  : "Firma selectată nu este conectată la ANAF SPV."}
               </p>
               <Button
                 className="mt-4"
@@ -597,7 +611,7 @@ export function SettingsPage() {
                 onPress={() => connectMutation.mutate()}
               >
                 {connectMutation.isPending ? <Spinner size="sm" /> : <Link2 size={14} />}
-                {expired ? "Reconectează" : "Conectează SPV"}
+                {reconnectRequired ? "Reconectează" : "Conectează SPV"}
               </Button>
             </div>
           );

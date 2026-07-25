@@ -78,6 +78,7 @@ function buildSteps(invoice: Invoice, latest: EfacturaSubmission | undefined): S
     latest?.status === "accepted"
       ? "done"
       : latest?.status === "rejected" || latest?.status === "failed"
+        || latest?.status === "delivery_unknown"
         ? "error"
         : "pending";
   const validated: Step = {
@@ -130,7 +131,7 @@ export function InvoiceDetailPage() {
     enabled: Boolean(company?.id && id),
     refetchInterval: (query) => {
       const latestSubmission = query.state.data?.data?.[0];
-      return latestSubmission && ["queued", "sent", "processing"].includes(latestSubmission.status) ? 5000 : false;
+      return latestSubmission && ["queued", "sending", "sent", "processing"].includes(latestSubmission.status) ? 5000 : false;
     },
   });
   const paymentsQuery = useQuery({
@@ -191,6 +192,29 @@ export function InvoiceDetailPage() {
       submittingRef.current = false;
     },
   });
+  const retryUnknownMutation = useMutation({
+    mutationFn: (submissionId: string) =>
+      api<EfacturaSubmission>(
+        `/companies/${company!.id}/invoices/${id}/efactura/submissions/${submissionId}/retry-unknown`,
+        {
+          method: "POST",
+          body: JSON.stringify({confirmed_absent_in_spv: true}),
+        },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "submissions"]});
+    },
+  });
+  const syncSubmissionMutation = useMutation({
+    mutationFn: (submissionId: string) =>
+      api<EfacturaSubmission>(
+        `/companies/${company!.id}/invoices/${id}/efactura/submissions/${submissionId}/sync`,
+        {method: "POST"},
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "submissions"]});
+    },
+  });
   const lifecycleMutation = useMutation({
     mutationFn: async (action: "issue" | "cancel" | "delete" | "duplicate") => {
       if (action === "delete") {
@@ -249,7 +273,7 @@ export function InvoiceDetailPage() {
   const payments = paymentsQuery.data?.data ?? [];
   const isDraft = invoice.status === "draft";
   const formattedNumber = invoice.formatted_number;
-  const hasBlockingSubmission = Boolean(latest && ["queued", "sent", "processing", "accepted"].includes(latest.status));
+  const hasBlockingSubmission = Boolean(latest && ["queued", "sending", "sent", "processing", "accepted", "delivery_unknown"].includes(latest.status));
   const eligibilityMessages = {
     invoice_not_issued: "Factura trebuie emisă înainte de trimiterea în SPV.",
     customer_address_missing: "Completează adresa clientului înainte de trimitere.",
@@ -633,7 +657,9 @@ export function InvoiceDetailPage() {
 
                 {latest?.error ? (
                   <p role="alert" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12px] text-[var(--danger)]">
-                    {latest.error}
+                    {latest.status === "delivery_unknown"
+                      ? "ANAF poate să fi primit factura, dar Billwise nu a primit răspunsul. Verifică factura în SPV înainte de retransmitere."
+                      : latest.error}
                   </p>
                 ) : null}
 
@@ -651,6 +677,31 @@ export function InvoiceDetailPage() {
                     >
                       {submitMutation.isPending ? <Spinner size="sm" /> : <Send size={14} />}
                       Trimite în SPV
+                    </Button>
+                  ) : null}
+                  {latest?.status === "delivery_unknown" ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      isDisabled={retryUnknownMutation.isPending}
+                      onPress={() => {
+                        if (!window.confirm("Ai verificat în SPV și confirmi că factura NU a fost primită de ANAF? Retransmiterea fără această verificare poate crea un duplicat.")) return;
+                        retryUnknownMutation.mutate(latest.id);
+                      }}
+                    >
+                      {retryUnknownMutation.isPending ? <Spinner size="sm" /> : <RefreshCw size={14} />}
+                      Confirmă absența și retransmite
+                    </Button>
+                  ) : null}
+                  {latest && ["sent", "processing"].includes(latest.status) && latest.upload_index ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      isDisabled={syncSubmissionMutation.isPending}
+                      onPress={() => syncSubmissionMutation.mutate(latest.id)}
+                    >
+                      {syncSubmissionMutation.isPending ? <Spinner size="sm" /> : <RefreshCw size={14} />}
+                      Verifică acum în ANAF
                     </Button>
                   ) : null}
                   {invoice.efactura_eligibility.eligible ? (

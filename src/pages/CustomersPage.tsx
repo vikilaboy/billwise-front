@@ -352,6 +352,9 @@ function AddCustomerModal({
         is_vat_payer: data.is_vat_payer,
       }));
     },
+    onError: (error) => {
+      setLookupError(apiErrorMessage(error, "Registrul ANAF nu este disponibil. Poți completa datele manual."));
+    },
   });
 
   const create = useMutation({

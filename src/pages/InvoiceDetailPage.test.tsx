@@ -65,8 +65,11 @@ describe("InvoiceDetailPage SPV", () => {
           upload_index: null,
           download_id: null,
           error: null,
+          last_error_code: null,
           has_confirmation: false,
-          next_poll_after: "2099-01-01T00:00:00Z",
+          next_poll_at: "2099-01-01T00:00:00Z",
+          last_polled_at: null,
+          poll_attempts: 0,
           submitted_at: null,
           created_at: "2026-07-24T10:00:00Z",
         }];
@@ -125,5 +128,46 @@ describe("InvoiceDetailPage SPV", () => {
 
     expect(await screen.findByText("INV-0002")).toBeInTheDocument();
     expect(screen.queryByRole("button", {name: "Duplică"})).not.toBeInTheDocument();
+  });
+
+  it("permite verificarea manuală a unei trimiteri aflate în procesare", async () => {
+    const submission = {
+      id: "submission-1",
+      status: "processing",
+      upload_index: "4001",
+      download_id: null,
+      error: null,
+      last_error_code: null,
+      has_confirmation: false,
+      next_poll_at: "2099-01-01T00:00:00Z",
+      last_polled_at: null,
+      poll_attempts: 2,
+      submitted_at: "2026-07-24T10:00:00Z",
+      created_at: "2026-07-24T10:00:00Z",
+    };
+    let syncCount = 0;
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/invoices/invoice-1")) return Promise.resolve(json(invoice));
+      if (url.endsWith("/submissions/submission-1/sync") && init?.method === "POST") {
+        syncCount += 1;
+        return Promise.resolve(json(submission, 202));
+      }
+      if (url.endsWith("/payments") || url.endsWith("/deliveries")) return Promise.resolve(json([]));
+      if (url.endsWith("/efactura/submissions")) return Promise.resolve(json([submission]));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/facturi/invoice-1"]}>
+          <Routes><Route path="/facturi/:id" element={<InvoiceDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Verifică acum în ANAF"}));
+    await waitFor(() => expect(syncCount).toBe(1));
   });
 });

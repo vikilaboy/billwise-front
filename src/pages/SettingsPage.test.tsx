@@ -40,7 +40,13 @@ describe("SettingsPage SPV", () => {
         return Promise.resolve(new Response(null, {status: 204}));
       }
       if (url.includes("/efactura/spv/connection")) {
-        return Promise.resolve(json({connected: true, expires_at: "2099-07-24T10:00:00Z"}));
+        return Promise.resolve(json({
+          status: "active",
+          connected: true,
+          access_token_expires_at: "2099-07-24T10:00:00Z",
+          reauthorization_required: false,
+          last_error_code: null,
+        }));
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -67,14 +73,20 @@ describe("SettingsPage SPV", () => {
     );
   });
 
-  it("arată distinct tokenul expirat și oferă reconectarea", async () => {
+  it("arată tokenul expirat ca refreshable fără a cere reconectarea", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation((input: string | URL | Request) => {
         const url = String(input);
         if (url.includes("/companies/company-1")) return Promise.resolve(json(profile));
         if (url.includes("/efactura/spv/connection")) {
-          return Promise.resolve(json({connected: true, expires_at: "2020-01-01T00:00:00Z"}));
+          return Promise.resolve(json({
+            status: "refreshable",
+            connected: true,
+            access_token_expires_at: "2020-01-01T00:00:00Z",
+            reauthorization_required: false,
+            last_error_code: null,
+          }));
         }
         return new Promise(() => undefined);
       }),
@@ -86,7 +98,7 @@ describe("SettingsPage SPV", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText(/Tokenul SPV a expirat/)).toBeInTheDocument();
-    expect(screen.getByRole("button", {name: "Reconectează"})).toBeInTheDocument();
+    expect(await screen.findByText(/va fi reînnoit automat/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "Reconectează"})).not.toBeInTheDocument();
   });
 });

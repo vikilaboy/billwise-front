@@ -68,18 +68,22 @@ export const statusTone: Record<DisplayStatus, "default" | "success" | "warning"
 
 export const spvStatusLabels: Record<SpvSubmissionStatus, string> = {
   queued: "În coadă",
+  sending: "Se transmite",
   sent: "Trimisă",
   processing: "În procesare",
   accepted: "Acceptată",
   rejected: "Respinsă",
   failed: "Eșuată",
+  delivery_unknown: "Livrare neconfirmată",
 };
 
 export const spvStatusTone: Record<SpvSubmissionStatus, "default" | "success" | "warning" | "danger"> = {
   queued: "default",
+  sending: "warning",
   sent: "warning",
   processing: "warning",
   accepted: "success",
   rejected: "danger",
   failed: "danger",
+  delivery_unknown: "danger",
 };

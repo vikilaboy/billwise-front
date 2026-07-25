@@ -370,11 +370,13 @@ export type ActivityNotificationFeed = {
 
 export type SpvSubmissionStatus =
   | "queued"
+  | "sending"
   | "sent"
   | "processing"
   | "accepted"
   | "rejected"
-  | "failed";
+  | "failed"
+  | "delivery_unknown";
 
 export type EfacturaSubmission = {
   id: string;
@@ -382,15 +384,21 @@ export type EfacturaSubmission = {
   upload_index: string | null;
   download_id: string | null;
   error: string | null;
+  last_error_code: string | null;
   has_confirmation: boolean;
-  next_poll_after: string | null;
+  next_poll_at: string | null;
+  last_polled_at: string | null;
+  poll_attempts: number;
   submitted_at: string | null;
   created_at: string | null;
 };
 
 export type SpvConnection = {
+  status: "disconnected" | "active" | "refreshable" | "reconnect_required";
   connected: boolean;
-  expires_at: string | null;
+  access_token_expires_at: string | null;
+  reauthorization_required: boolean;
+  last_error_code: string | null;
 };
 
 export type SpvAuthorize = {
