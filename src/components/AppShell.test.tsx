@@ -2,7 +2,7 @@ import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
 import {fireEvent, render, screen} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {AppShell, archivedCompanyLandingPath, canAccessArchivedCompanyPath} from "./AppShell";
+import {AppShell, archivedCompanyLandingPath, canAccessArchivedCompanyPath, selectableCompanies} from "./AppShell";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -26,6 +26,17 @@ describe("AppShell onboarding guard", () => {
     expect(canAccessArchivedCompanyPath("/seif-fiscal/document-1", canViewVault)).toBe(true);
     expect(canAccessArchivedCompanyPath("/achizitii/invoice-1", canViewVault)).toBe(false);
     expect(canAccessArchivedCompanyPath("/seif-fiscalizare", canViewVault)).toBe(false);
+  });
+
+  it("exclude din selector firmele arhivate când utilizatorul nu are acces la modulele lor", () => {
+    const companies = [
+      {id: "active", legal_name: "Activă SRL", tax_id: "12345674", archived_at: null},
+      {id: "archived", legal_name: "Arhivată SRL", tax_id: "1590082", archived_at: "2026-07-25T10:00:00Z"},
+    ] as Parameters<typeof selectableCompanies>[0];
+
+    expect(selectableCompanies(companies, () => false).map((company) => company.id)).toEqual(["active"]);
+    expect(selectableCompanies(companies, (permission) => permission === "fiscal_vault.view").map((company) => company.id))
+      .toEqual(["active", "archived"]);
   });
 
   it.each([

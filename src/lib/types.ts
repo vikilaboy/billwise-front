@@ -67,7 +67,7 @@ export type FiscalEntity = {
   is_active: boolean;
 };
 
-export type Supplier = {id: string; name: string; tax_id: string | null; country_code: string; email: string | null; address: string | null};
+export type Supplier = {id: string | null; name: string; tax_id: string | null; country_code: string; email: string | null; address: string | null};
 export type PurchaseInvoiceLine = {id: string; position: number; description: string; quantity: string; unit_code: string | null; unit_price_cents: number; subtotal_cents: number; vat_rate: string; vat_cents: number};
 export type PurchaseInvoice = {
   id: string; document_type: "invoice" | "credit_note"; number: string; issue_date: string; due_date: string | null; currency: string;

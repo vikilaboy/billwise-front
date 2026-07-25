@@ -62,6 +62,14 @@ export const archivedCompanyLandingPath = (can: (permission: string) => boolean)
   if (can("purchase_invoice.view")) return "/achizitii";
   return null;
 };
+export const selectableCompanies = (
+  companies: CompanyProfile[],
+  can: (permission: string) => boolean,
+): CompanyProfile[] => {
+  const canAccessArchivedCompanies = archivedCompanyLandingPath(can) !== null;
+
+  return companies.filter((company) => !company.archived_at || canAccessArchivedCompanies);
+};
 export const canAccessArchivedCompanyPath = (
   pathname: string,
   can: (permission: string) => boolean,
@@ -112,11 +120,12 @@ export function AppShell() {
     onSuccess: () => queryClient.invalidateQueries({queryKey: ["notifications"]}),
   });
 
-  const list = companies.data?.data ?? [];
-  const company = list.find((c) => c.id === activeId) ?? list.find((c) => !c.archived_at) ?? list[0];
   const user = me.data?.data;
   const hasConfiguredAccess = Boolean((user?.roles.length ?? 0) > 0 || (user?.permissions.length ?? 0) > 0);
   const can = (permission: string) => !hasConfiguredAccess || Boolean(user?.permissions.includes(permission));
+  const allCompanies = companies.data?.data ?? [];
+  const list = selectableCompanies(allCompanies, can);
+  const company = list.find((c) => c.id === activeId) ?? list.find((c) => !c.archived_at) ?? list[0];
   const archivedCompany = Boolean(company?.archived_at);
   const archivedLanding = archivedCompanyLandingPath(can);
   const archivedPathAllowed = canAccessArchivedCompanyPath(location.pathname, can);
@@ -192,7 +201,7 @@ export function AppShell() {
     );
   }
 
-  if (list.length === 0) {
+  if (allCompanies.length === 0) {
     if (location.pathname !== "/onboarding/firma") {
       return <Navigate to="/onboarding/firma" replace />;
     }
@@ -201,6 +210,16 @@ export function AppShell() {
       <CompanyContext.Provider value={{company: undefined, user, can}}>
         <Outlet />
       </CompanyContext.Provider>
+    );
+  }
+
+  if (list.length === 0) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-subtle)] px-6 text-center">
+        <p className="max-w-lg text-sm text-[var(--danger)]">
+          Nu ai acces la modulele disponibile pentru firmele arhivate ale acestui cont.
+        </p>
+      </div>
     );
   }
 
