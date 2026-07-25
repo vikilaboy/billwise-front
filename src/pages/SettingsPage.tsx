@@ -32,6 +32,27 @@ const SETTINGS_SECTIONS: Array<{id: SettingsSection; label: string}> = [
   {id: "fiscal", label: "Fiscalitate"},
   {id: "preferences", label: "Preferințe"},
 ];
+const CURRENCY_FLAGS: Record<string, {emoji: string; label: string}> = {
+  AUD: {emoji: "🇦🇺", label: "Australiei"},
+  BGN: {emoji: "🇧🇬", label: "Bulgariei"},
+  CAD: {emoji: "🇨🇦", label: "Canadei"},
+  CHF: {emoji: "🇨🇭", label: "Elveției"},
+  CNY: {emoji: "🇨🇳", label: "Chinei"},
+  CZK: {emoji: "🇨🇿", label: "Cehiei"},
+  DKK: {emoji: "🇩🇰", label: "Danemarcei"},
+  EUR: {emoji: "🇪🇺", label: "Uniunii Europene"},
+  GBP: {emoji: "🇬🇧", label: "Regatului Unit"},
+  HUF: {emoji: "🇭🇺", label: "Ungariei"},
+  JPY: {emoji: "🇯🇵", label: "Japoniei"},
+  MDL: {emoji: "🇲🇩", label: "Republicii Moldova"},
+  NOK: {emoji: "🇳🇴", label: "Norvegiei"},
+  PLN: {emoji: "🇵🇱", label: "Poloniei"},
+  RON: {emoji: "🇷🇴", label: "României"},
+  SEK: {emoji: "🇸🇪", label: "Suediei"},
+  TRY: {emoji: "🇹🇷", label: "Turciei"},
+  UAH: {emoji: "🇺🇦", label: "Ucrainei"},
+  USD: {emoji: "🇺🇸", label: "Statelor Unite"},
+};
 
 function emptyForm(): FormState {
   return {
@@ -69,6 +90,13 @@ function addressSummary(a: Address | null): string {
     a.country_code,
   ].filter(Boolean);
   return parts.length ? parts.join(", ") : "Adresă fără localizare completă";
+}
+
+function currencyFlag(code: string): {emoji: string; label: string} {
+  return CURRENCY_FLAGS[code.toUpperCase()] ?? {
+    emoji: "🌐",
+    label: `simbol internațional pentru ${code.toUpperCase()}`,
+  };
 }
 
 // Reusable HeroUI Switch (compound) wired to a boolean value.
@@ -744,26 +772,40 @@ export function SettingsPage() {
           <p className="text-sm text-[var(--danger)]">Monedele nu au putut fi încărcate.</p>
         ) : (
           <div className="divide-y divide-[var(--border)]">
-            {(currenciesQuery.data?.data ?? []).map((currency) => (
-              <div key={currency.id} className="py-3 first:pt-0">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[13.5px] font-semibold">{currency.code} · {currency.name}</div>
-                    <div className="text-[11.5px] text-[var(--text-muted)]">
+            {(currenciesQuery.data?.data ?? []).map((currency) => {
+              const flag = currencyFlag(currency.code);
+
+              return (
+              <div key={currency.id} className="py-4 first:pt-0 last:pb-0">
+                <div className="grid grid-cols-[42px_minmax(0,1fr)_auto] items-start gap-3 sm:gap-4">
+                  <span
+                    role="img"
+                    aria-label={flag.emoji === "🌐" ? flag.label : `Steagul ${flag.label}`}
+                    className="grid h-[42px] w-[42px] place-items-center rounded-xl border border-[var(--border)] bg-[var(--bg-muted)] text-[22px] shadow-sm"
+                  >
+                    {flag.emoji}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="text-[13.5px] font-bold">{currency.code}</span>
+                      <span className="text-[13.5px] font-semibold text-[var(--text-muted)]">{currency.name}</span>
+                    </div>
+                    <div className="mt-0.5 text-[11.5px] text-[var(--text-muted)]">
                       {currency.is_local ? "Monedă locală" : currency.latest_rate ? `Ultimul curs: ${exchangeRate(currency.latest_rate.rate)} · ${currency.latest_rate.day}` : "Fără curs disponibil"}
                     </div>
+                    {!currency.is_local ? (
+                      <AppCheckbox className="mt-3 text-xs text-[var(--text-muted)]" name={`currencies.${currency.id}.auto_update`} isSelected={currency.auto_update} isDisabled={currencyMutation.isPending} onChange={(selected) => currencyMutation.mutate({...currency, auto_update: selected})}>
+                        Actualizare automată BNR
+                      </AppCheckbox>
+                    ) : null}
                   </div>
-                  <AppCheckbox name={`currencies.${currency.id}.is_active`} isSelected={currency.is_active} isDisabled={currencyMutation.isPending || currency.is_local} onChange={(selected) => currencyMutation.mutate({...currency, is_active: selected})}>
+                  <AppCheckbox className="mt-1 shrink-0" name={`currencies.${currency.id}.is_active`} isSelected={currency.is_active} isDisabled={currencyMutation.isPending || currency.is_local} onChange={(selected) => currencyMutation.mutate({...currency, is_active: selected})}>
                     Activă
                   </AppCheckbox>
                 </div>
-                {!currency.is_local ? (
-                  <AppCheckbox className="mt-2 text-xs text-[var(--text-muted)]" name={`currencies.${currency.id}.auto_update`} isSelected={currency.auto_update} isDisabled={currencyMutation.isPending} onChange={(selected) => currencyMutation.mutate({...currency, auto_update: selected})}>
-                    Actualizare automată BNR
-                  </AppCheckbox>
-                ) : null}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

@@ -32,6 +32,65 @@ afterEach(() => {
 });
 
 describe("SettingsPage SPV", () => {
+  it("afișează monedele aerisit, cu steaguri accesibile și controlul Activă separat", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/companies/company-1/vat-profiles")) return Promise.resolve(json([]));
+        if (url.includes("/companies/company-1")) return Promise.resolve(json(profile));
+        if (url.includes("/companies?include_archived=1")) return Promise.resolve(json([]));
+        if (url.includes("/settings/currencies")) {
+          return Promise.resolve(json([
+            {
+              id: "currency-eur",
+              code: "EUR",
+              name: "Euro",
+              symbol: "€",
+              auto_update: true,
+              is_local: false,
+              is_active: true,
+              latest_rate: {day: "2026-07-24", rate: "5.2348", source: "bnr"},
+            },
+            {
+              id: "currency-ron",
+              code: "RON",
+              name: "Leu românesc",
+              symbol: "lei",
+              auto_update: false,
+              is_local: true,
+              is_active: true,
+              latest_rate: null,
+            },
+          ]));
+        }
+        if (url.includes("/efactura/spv/connection")) {
+          return Promise.resolve(json({
+            status: "disconnected",
+            connected: false,
+            access_token_expires_at: null,
+            reauthorization_required: false,
+            last_error_code: null,
+          }));
+        }
+        return new Promise(() => undefined);
+      }),
+    );
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/setari?section=fiscal"]}>
+          <SettingsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("img", {name: "Steagul Uniunii Europene"})).toHaveTextContent("🇪🇺");
+    expect(screen.getByRole("img", {name: "Steagul României"})).toHaveTextContent("🇷🇴");
+    expect(screen.getAllByRole("checkbox", {name: "Activă"})).toHaveLength(2);
+    expect(screen.getByRole("checkbox", {name: "Actualizare automată BNR"})).toBeInTheDocument();
+  });
+
   it("tratează arhivarea ca acțiune periculoasă cu o confirmare explicită", async () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
