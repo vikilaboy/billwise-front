@@ -32,6 +32,61 @@ afterEach(() => {
 });
 
 describe("SettingsPage SPV", () => {
+  it("deschide jurnalul ANAF la cerere și afișează doar evenimentele sigure", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/companies/company-1/vat-profiles")) return Promise.resolve(json([]));
+      if (url.includes("/companies/company-1")) return Promise.resolve(json(profile));
+      if (url.includes("/companies?include_archived=1")) return Promise.resolve(json([]));
+      if (url.includes("/settings/currencies")) return Promise.resolve(json([]));
+      if (url.includes("/efactura/spv/events")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          data: [{
+            id: "event-1",
+            type: "authorization_denied",
+            severity: "warning",
+            title: "Autorizare ANAF respinsă",
+            message: "ANAF a respins autorizarea sau procesul a fost anulat.",
+            error_code: "access_denied",
+            actor: {id: "user-1", name: "Victor Niculae"},
+            created_at: "2026-07-25T10:30:00Z",
+          }],
+          meta: {pagination: {current_page: 1, per_page: 10, total: 1, last_page: 1}},
+        }), {status: 200, headers: {"Content-Type": "application/json"}}));
+      }
+      if (url.includes("/efactura/spv/connection")) {
+        return Promise.resolve(json({
+          status: "disconnected",
+          connected: false,
+          access_token_expires_at: null,
+          reauthorization_required: false,
+          last_error_code: null,
+        }));
+      }
+      return new Promise(() => undefined);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/setari?section=fiscal"]}>
+          <SettingsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Vezi istoricul"}));
+
+    expect(await screen.findByRole("heading", {name: "Istoric conexiune ANAF"})).toBeInTheDocument();
+    expect(await screen.findByText("Autorizare ANAF respinsă")).toBeInTheDocument();
+    expect(screen.getByText("Inițiat de Victor Niculae")).toBeInTheDocument();
+    expect(screen.getByText("access_denied")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/efactura/spv/events?company_profile_id=company-1&_page=1&_per_page=10"),
+      expect.any(Object),
+    );
+  });
+
   it("afișează monedele aerisit, cu steaguri accesibile și controlul Activă separat", async () => {
     vi.stubGlobal(
       "fetch",

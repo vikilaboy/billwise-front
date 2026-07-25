@@ -405,6 +405,27 @@ export type SpvAuthorize = {
   authorize_url: string;
 };
 
+export type SpvConnectionEvent = {
+  id: string;
+  type:
+    | "authorization_started"
+    | "authorization_denied"
+    | "authorization_failed"
+    | "connected"
+    | "token_refreshed"
+    | "reauthorization_required"
+    | "disconnected";
+  severity: "info" | "success" | "warning" | "error";
+  title: string;
+  message: string;
+  error_code: string | null;
+  actor: {
+    id: string;
+    name: string;
+  } | null;
+  created_at: string;
+};
+
 export type Currency = {
   id: string;
   code: string;

@@ -1,12 +1,12 @@
 import {useEffect, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
-import {Button, Input, Spinner, Switch} from "@heroui/react";
+import {Button, Input, Modal, Pagination, Spinner, Switch} from "@heroui/react";
 import {useNavigate, useSearchParams} from "react-router";
-import {BadgePercent, Building2, Check, CircleAlert, Coins, Globe, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
+import {BadgePercent, Building2, Check, CircleAlert, Clock3, Coins, Globe, History, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {AppCheckbox} from "../components/FormControls";
 import {api} from "../lib/api";
-import type {Address, CompanyProfile, Currency, SpvAuthorize, SpvConnection, VatProfile} from "../lib/types";
+import type {Address, CompanyProfile, Currency, SpvAuthorize, SpvConnection, SpvConnectionEvent, VatProfile} from "../lib/types";
 import {exchangeRate} from "../lib/format";
 
 // Editable shape mirrors PUT /companies/{companyProfile} (UpdateCompanyProfileRequest).
@@ -168,6 +168,19 @@ function spvCallbackErrorMessage(reason: string | null): string {
   }
 }
 
+function spvEventTone(severity: SpvConnectionEvent["severity"]): string {
+  switch (severity) {
+    case "success":
+      return "bg-[var(--success-soft)] text-[var(--success)]";
+    case "warning":
+      return "bg-amber-500/10 text-amber-600 dark:text-amber-400";
+    case "error":
+      return "bg-[var(--danger-soft)] text-[var(--danger)]";
+    default:
+      return "bg-[var(--bg-muted)] text-[var(--text-muted)]";
+  }
+}
+
 export function SettingsPage() {
   const {company} = useCompany();
   const queryClient = useQueryClient();
@@ -198,6 +211,15 @@ export function SettingsPage() {
     queryKey: ["spv-connection", company?.id],
     queryFn: () => api<SpvConnection>(`/efactura/spv/connection?company_profile_id=${company!.id}`),
     enabled: Boolean(company?.id),
+  });
+  const [spvHistoryOpen, setSpvHistoryOpen] = useState(false);
+  const [spvHistoryPage, setSpvHistoryPage] = useState(1);
+  const spvHistoryQuery = useQuery({
+    queryKey: ["spv-events", company?.id, spvHistoryPage],
+    queryFn: () => api<SpvConnectionEvent[]>(
+      `/efactura/spv/events?company_profile_id=${company!.id}&_page=${spvHistoryPage}&_per_page=10`,
+    ),
+    enabled: Boolean(company?.id) && spvHistoryOpen,
   });
   const currenciesQuery = useQuery({
     queryKey: ["currencies"],
@@ -261,7 +283,10 @@ export function SettingsPage() {
       api<void>(`/efactura/spv/connection?company_profile_id=${company!.id}`, {
         method: "DELETE",
       }),
-    onSuccess: () => queryClient.invalidateQueries({queryKey: ["spv-connection", company?.id]}),
+    onSuccess: () => Promise.all([
+      queryClient.invalidateQueries({queryKey: ["spv-connection", company?.id]}),
+      queryClient.invalidateQueries({queryKey: ["spv-events", company?.id]}),
+    ]),
   });
   const archiveMutation = useMutation({
     mutationFn: () => api<void>(`/companies/${company!.id}`, {method: "DELETE"}),
@@ -306,6 +331,16 @@ export function SettingsPage() {
       setArchiveConfirmationOpen(false);
     }
   }, [profile]);
+
+  useEffect(() => {
+    setSpvHistoryOpen(false);
+    setSpvHistoryPage(1);
+  }, [company?.id]);
+
+  function openSpvHistory() {
+    setSpvHistoryPage(1);
+    setSpvHistoryOpen(true);
+  }
 
   const saveMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
@@ -715,17 +750,21 @@ export function SettingsPage() {
                       ? `Token valabil până la ${new Date(connection.access_token_expires_at).toLocaleString("ro-RO")}.`
                       : "Conexiune activă."}
                 </p>
-                <Button
-                  className="mt-4"
-                  size="sm"
-                  variant="outline"
-                  isDisabled={disconnectMutation.isPending}
-                  onPress={() => {
-                    if (window.confirm("Deconectezi firma selectată de la ANAF SPV?")) disconnectMutation.mutate();
-                  }}
-                >
-                  <Link2Off size={14} /> Deconectează
-                </Button>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onPress={openSpvHistory}>
+                    <History size={14} /> Vezi istoricul
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    isDisabled={disconnectMutation.isPending}
+                    onPress={() => {
+                      if (window.confirm("Deconectezi firma selectată de la ANAF SPV?")) disconnectMutation.mutate();
+                    }}
+                  >
+                    <Link2Off size={14} /> Deconectează
+                  </Button>
+                </div>
               </div>
             );
           }
@@ -738,16 +777,21 @@ export function SettingsPage() {
                     : "Firma selectată nu este conectată la ANAF SPV."}
                 </p>
               ) : null}
-              <Button
-                className={`${spvFeedback === "error" ? "" : "mt-4"} w-full sm:w-auto`}
-                size="sm"
-                variant="primary"
-                isDisabled={connectMutation.isPending}
-                onPress={() => connectMutation.mutate()}
-              >
-                {connectMutation.isPending ? <Spinner size="sm" /> : <Link2 size={14} />}
-                {reconnectRequired ? "Reconectează" : "Conectează SPV"}
-              </Button>
+              <div className={`${spvFeedback === "error" ? "" : "mt-4"} flex flex-wrap gap-2`}>
+                <Button
+                  className="w-full sm:w-auto"
+                  size="sm"
+                  variant="primary"
+                  isDisabled={connectMutation.isPending}
+                  onPress={() => connectMutation.mutate()}
+                >
+                  {connectMutation.isPending ? <Spinner size="sm" /> : <Link2 size={14} />}
+                  {reconnectRequired ? "Reconectează" : "Conectează SPV"}
+                </Button>
+                <Button size="sm" variant="outline" onPress={openSpvHistory}>
+                  <History size={14} /> Vezi istoricul
+                </Button>
+              </div>
             </div>
           );
         })()}
@@ -755,6 +799,107 @@ export function SettingsPage() {
       </section>
       </aside>
       </div>
+
+      <Modal.Backdrop isOpen={spvHistoryOpen} onOpenChange={setSpvHistoryOpen} variant="blur">
+        <Modal.Container size="lg" scroll="inside">
+          <Modal.Dialog>
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Icon className="bg-[var(--bg-muted)] text-[var(--accent)]">
+                <History size={19} />
+              </Modal.Icon>
+              <div>
+                <Modal.Heading>Istoric conexiune ANAF</Modal.Heading>
+                <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                  Evenimentele de conectare pentru firma selectată
+                </p>
+              </div>
+            </Modal.Header>
+            <Modal.Body>
+              {spvHistoryQuery.isLoading ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-sm text-[var(--text-muted)]">
+                  <Spinner size="sm" /> Se încarcă istoricul…
+                </div>
+              ) : spvHistoryQuery.isError ? (
+                <div className="rounded-xl bg-[var(--danger-soft)] p-4 text-sm text-[var(--danger)]">
+                  Istoricul conexiunii nu a putut fi încărcat.
+                  <Button className="mt-3" size="sm" variant="outline" onPress={() => spvHistoryQuery.refetch()}>
+                    <RefreshCw size={14} /> Reîncearcă
+                  </Button>
+                </div>
+              ) : (spvHistoryQuery.data?.data ?? []).length === 0 ? (
+                <div className="py-12 text-center">
+                  <History size={24} className="mx-auto text-[var(--text-faint)]" />
+                  <p className="mt-3 text-sm font-semibold">Nu există evenimente înregistrate</p>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    Activitatea nouă va apărea aici după activarea jurnalului.
+                  </p>
+                </div>
+              ) : (
+                <ol className="space-y-0">
+                  {(spvHistoryQuery.data?.data ?? []).map((event, index, events) => (
+                    <li key={event.id} className="grid grid-cols-[32px_minmax(0,1fr)] gap-3">
+                      <div className="flex flex-col items-center">
+                        <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${spvEventTone(event.severity)}`}>
+                          {event.severity === "success" ? <Check size={15} /> : event.severity === "error" ? <CircleAlert size={15} /> : <Clock3 size={15} />}
+                        </span>
+                        {index < events.length - 1 ? <span className="h-full w-px bg-[var(--border)]" /> : null}
+                      </div>
+                      <div className="pb-5">
+                        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                          <div className="text-[13.5px] font-bold">{event.title}</div>
+                          <time className="whitespace-nowrap text-[11.5px] text-[var(--text-muted)]" dateTime={event.created_at}>
+                            {new Date(event.created_at).toLocaleString("ro-RO")}
+                          </time>
+                        </div>
+                        <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--text-muted)]">{event.message}</p>
+                        {event.actor ? (
+                          <p className="mt-1.5 text-[11.5px] text-[var(--text-faint)]">Inițiat de {event.actor.name}</p>
+                        ) : null}
+                        {event.error_code ? (
+                          <span className="mt-2 inline-flex rounded-md bg-[var(--bg-muted)] px-2 py-1 font-mono text-[10.5px] text-[var(--text-muted)]">
+                            {event.error_code}
+                          </span>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </Modal.Body>
+            <Modal.Footer className="justify-between">
+              {(spvHistoryQuery.data?.meta?.pagination?.last_page ?? 1) > 1 ? (
+                <Pagination size="sm">
+                  <Pagination.Summary>
+                    Pagina {spvHistoryQuery.data?.meta?.pagination?.current_page} din {spvHistoryQuery.data?.meta?.pagination?.last_page}
+                  </Pagination.Summary>
+                  <Pagination.Content>
+                    <Pagination.Item>
+                      <Pagination.Previous
+                        isDisabled={spvHistoryPage === 1}
+                        onPress={() => setSpvHistoryPage((page) => Math.max(1, page - 1))}
+                      >
+                        <Pagination.PreviousIcon />
+                        <span>Înapoi</span>
+                      </Pagination.Previous>
+                    </Pagination.Item>
+                    <Pagination.Item>
+                      <Pagination.Next
+                        isDisabled={spvHistoryPage === spvHistoryQuery.data?.meta?.pagination?.last_page}
+                        onPress={() => setSpvHistoryPage((page) => page + 1)}
+                      >
+                        <span>Înainte</span>
+                        <Pagination.NextIcon />
+                      </Pagination.Next>
+                    </Pagination.Item>
+                  </Pagination.Content>
+                </Pagination>
+              ) : <span />}
+              <Button slot="close" variant="outline">Închide</Button>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
 
       <div className={`max-w-3xl space-y-4 ${activeSection === "fiscal" ? "" : "hidden"}`}>
       <section className={cardClass}>
