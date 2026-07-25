@@ -24,7 +24,14 @@ type FormState = {
   street: string;
 };
 
+type SettingsSection = "company" | "fiscal" | "preferences";
+
 const THEME_KEY = "billwise_theme";
+const SETTINGS_SECTIONS: Array<{id: SettingsSection; label: string}> = [
+  {id: "company", label: "Firmă"},
+  {id: "fiscal", label: "Fiscalitate"},
+  {id: "preferences", label: "Preferințe"},
+];
 
 function emptyForm(): FormState {
   return {
@@ -140,6 +147,12 @@ export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [spvFeedback] = useState(() => searchParams.get("spv"));
   const [spvReason] = useState(() => searchParams.get("reason"));
+  const requestedSection = searchParams.get("section");
+  const activeSection: SettingsSection = SETTINGS_SECTIONS.some(({id}) => id === requestedSection)
+    ? requestedSection as SettingsSection
+    : spvFeedback
+      ? "fiscal"
+      : "company";
 
   const profileQuery = useQuery({
     queryKey: ["company", company?.id],
@@ -246,6 +259,7 @@ export function SettingsPage() {
     const next = new URLSearchParams(searchParams);
     next.delete("spv");
     next.delete("reason");
+    if (!next.has("section")) next.set("section", "fiscal");
     setSearchParams(next, {replace: true});
     void queryClient.invalidateQueries({queryKey: ["spv-connection", company?.id]});
   }, [company?.id, queryClient, searchParams, setSearchParams, spvFeedback]);
@@ -284,6 +298,12 @@ export function SettingsPage() {
     setDarkTheme(checked);
     document.documentElement.classList.toggle("dark", checked);
     localStorage.setItem(THEME_KEY, checked ? "dark" : "light");
+  }
+
+  function selectSection(section: SettingsSection) {
+    const next = new URLSearchParams(searchParams);
+    next.set("section", section);
+    setSearchParams(next, {replace: true});
   }
 
   function handleSave() {
@@ -345,9 +365,34 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="grid items-start gap-4 min-[1100px]:[grid-template-columns:minmax(0,2fr)_minmax(320px,1fr)]">
+      <nav
+        aria-label="Secțiuni setări"
+        className="inline-flex max-w-full gap-1 overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[var(--shadow)]"
+      >
+        {SETTINGS_SECTIONS.map((section) => {
+          const isActive = activeSection === section.id;
+
+          return (
+            <button
+              key={section.id}
+              type="button"
+              aria-pressed={isActive}
+              className={`rounded-lg px-4 py-2 text-[13px] font-semibold transition-colors ${
+                isActive
+                  ? "bg-[var(--accent)] text-white shadow-sm"
+                  : "text-[var(--text-muted)] hover:bg-[var(--bg-muted)] hover:text-[var(--text)]"
+              }`}
+              onClick={() => selectSection(section.id)}
+            >
+              {section.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div>
       {/* Card 1 — issuer company data */}
-      <section className={cardClass}>
+      <section className={`${cardClass} max-w-6xl ${activeSection === "company" ? "" : "hidden"}`}>
         <header className="mb-5 flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
             <Building2 size={18} />
@@ -522,8 +567,8 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <aside className="flex min-w-0 flex-col gap-4">
-      <section className={`${cardClass} order-2`}>
+      <aside>
+      <section className={`${cardClass} max-w-3xl ${activeSection === "preferences" ? "" : "hidden"}`}>
         <header className="mb-5 flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
             <Landmark size={18} />
@@ -556,7 +601,7 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <section className={`${cardClass} order-1`}>
+      <section className={`${cardClass} max-w-3xl ${activeSection === "fiscal" ? "" : "hidden"}`}>
         <header className="mb-4 flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
             <Link2 size={18} />
@@ -643,7 +688,7 @@ export function SettingsPage() {
       </aside>
       </div>
 
-      <section className={cardClass}>
+      <section className={`${cardClass} ${activeSection === "fiscal" ? "" : "hidden"}`}>
         <header className="mb-5 flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[var(--bg-muted)] text-[var(--accent)]">
             <BadgePercent size={18} />

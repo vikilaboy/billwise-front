@@ -32,6 +32,44 @@ afterEach(() => {
 });
 
 describe("SettingsPage SPV", () => {
+  it("separă setările în secțiuni compacte și păstrează selecția în navigare", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/companies/company-1")) return Promise.resolve(json(profile));
+        if (url.includes("/efactura/spv/connection")) {
+          return Promise.resolve(json({
+            status: "disconnected",
+            connected: false,
+            access_token_expires_at: null,
+            reauthorization_required: false,
+            last_error_code: null,
+          }));
+        }
+        return new Promise(() => undefined);
+      }),
+    );
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/setari"]}>
+          <SettingsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const companyTab = await screen.findByRole("button", {name: "Firmă"});
+    const fiscalTab = screen.getByRole("button", {name: "Fiscalitate"});
+    expect(companyTab).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(fiscalTab);
+
+    await waitFor(() => expect(fiscalTab).toHaveAttribute("aria-pressed", "true"));
+    expect(companyTab).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("heading", {name: "Configurări fiscale"})).toBeInTheDocument();
+  });
+
   it.each([
     ["access_denied", "ANAF a respins autorizarea sau aceasta a fost anulată. Verifică certificatul digital și drepturile SPV."],
     ["unauthorized_client", "Aplicația Billwise nu este autorizată de ANAF pentru acest serviciu. Contactează suportul Billwise."],
