@@ -67,6 +67,20 @@ export type FiscalEntity = {
   is_active: boolean;
 };
 
+export type Supplier = {id: string; name: string; tax_id: string | null; country_code: string; email: string | null; address: string | null};
+export type PurchaseInvoiceLine = {id: string; position: number; description: string; quantity: string; unit_code: string | null; unit_price_cents: number; subtotal_cents: number; vat_rate: string; vat_cents: number};
+export type PurchaseInvoice = {
+  id: string; document_type: "invoice" | "credit_note"; number: string; issue_date: string; due_date: string | null; currency: string;
+  subtotal_cents: number; vat_cents: number; total_cents: number; import_status: string; review_status: "unreviewed" | "reviewed" | "needs_attention";
+  reviewed_at: string | null; supplier: Supplier | null; vault_item_id: string; lines: PurchaseInvoiceLine[]; created_at: string | null;
+};
+export type FiscalVaultItem = {
+  id: string; source: string; direction: "received"; document_type: string | null; document_number: string | null; issue_date: string | null;
+  supplier_name: string | null; supplier_tax_id: string | null; status: string; signature_status: string; archived_at: string; retain_until: string | null;
+  original: {filename: string; size_bytes: number; sha256: string} | null; purchase_invoice_id: string | null;
+};
+export type FiscalVaultExport = {id: string; status: "queued" | "processing" | "ready" | "failed"; size_bytes: number | null; sha256: string | null; expires_at: string | null};
+
 export type State = {
   id: string;
   country_code: string;

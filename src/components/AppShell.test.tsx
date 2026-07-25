@@ -156,6 +156,8 @@ describe("AppShell onboarding guard", () => {
     );
 
     await screen.findByText("Dashboard protejat");
+    expect(screen.getByText("Facturi furnizori")).toBeInTheDocument();
+    expect(screen.getByText("Seif fiscal")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {name: "Deconectare"}));
 
     expect(await screen.findByText("Sesiune închisă")).toBeInTheDocument();

@@ -10,6 +10,8 @@ import {
   CircleGauge,
   CreditCard,
   FileText,
+  Archive,
+  ShoppingCart,
   Hash,
   LogOut,
   Moon,
@@ -28,6 +30,8 @@ type NavItem = {to: string; label: string; icon: typeof FileText; group: string;
 const NAV: NavItem[] = [
   {to: "/dashboard", label: "Dashboard", icon: CircleGauge, group: "Principal"},
   {to: "/facturi", label: "Facturi", icon: FileText, group: "Principal"},
+  {to: "/achizitii", label: "Facturi furnizori", icon: ShoppingCart, group: "Principal"},
+  {to: "/seif-fiscal", label: "Seif fiscal", icon: Archive, group: "Principal"},
   {to: "/recurente", label: "Facturi recurente", icon: Repeat, group: "Principal"},
   {to: "/clienti", label: "Clienți", icon: Users, group: "Date firmă"},
   {to: "/produse", label: "Produse și servicii", icon: Package, group: "Date firmă"},
@@ -39,6 +43,8 @@ const NAV: NavItem[] = [
 const META: Record<string, [string, string]> = {
   "/dashboard": ["Dashboard", "Sumarul activității firmei tale"],
   "/facturi": ["Facturi", "Toate documentele emise"],
+  "/achizitii": ["Facturi furnizori", "Documente primite automat din ANAF e-Factura"],
+  "/seif-fiscal": ["Seif fiscal", "Originalele ANAF păstrate în spațiul privat al firmei"],
   "/recurente": ["Facturi recurente", "Generare controlată de ciorne"],
   "/clienti": ["Clienți", "Firmele cu care lucrezi"],
   "/produse": ["Produse și servicii", "Catalogul firmei selectate"],
