@@ -24,6 +24,18 @@ const VAULT_STATUS = {
   unsupported: {color: "default", label: "Format nesuportat"},
 } as const;
 
+export function isCurrentExportDownload(
+  variables: {companyId: string; exportId: string} | undefined,
+  companyId: string | undefined,
+  exportId: string | undefined,
+): boolean {
+  return variables !== undefined
+    && companyId !== undefined
+    && exportId !== undefined
+    && variables.companyId === companyId
+    && variables.exportId === exportId;
+}
+
 export function FiscalVaultPage() {
   const {company, can} = useCompany(); const navigate = useNavigate(); const client = useQueryClient(); const grid = useServerDataGridState({defaultSort: DEFAULT_SORT, sortColumns: ["archived_at", "issue_date", "supplier_name", "document_number"]});
   const [exportFrom, setExportFrom] = useState("");
@@ -45,6 +57,11 @@ export function FiscalVaultPage() {
   const downloadBelongsToCurrentCompany = download.variables?.companyId === company?.id;
   const legalHoldBelongsToCurrentCompany = legalHold.variables?.companyId === company?.id;
   const exportBelongsToCurrentCompany = exportCompanyId === company?.id;
+  const exportDownloadBelongsToCurrentExport = isCurrentExportDownload(
+    downloadExport.variables,
+    company?.id,
+    createExport.data?.data.id,
+  );
   const exportBusy = exportBelongsToCurrentCompany && (createExport.isPending || exportStatus.data?.data.status === "queued" || exportStatus.data?.data.status === "processing");
   const exportReady = exportBelongsToCurrentCompany && exportStatus.data?.data.status === "ready";
   const resetPreparedExport = () => { createExport.reset(); setExportCompanyId(null); };
@@ -64,14 +81,14 @@ export function FiscalVaultPage() {
   ], [can, company, download, downloadBelongsToCurrentCompany, legalHold, legalHoldBelongsToCurrentCompany, navigate]);
   if (!can("fiscal_vault.view")) return <p className="text-[var(--danger)]">Nu ai permisiunea necesară pentru Seiful fiscal.</p>;
   return <div className="flex flex-col gap-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="text-sm font-semibold">Spațiu utilizat: {integer(Math.ceil((storage?.used_bytes ?? 0) / 1024 / 1024))} MB</div><div className="text-xs text-[var(--text-muted)]">Originalele ZIP sunt read-only, cu hash SHA-256 și retenție fiscală.</div></div><div className="flex flex-wrap gap-2"><label className="flex h-10 min-w-[240px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3"><Search size={16}/><input className="w-full bg-transparent text-sm outline-none" placeholder="Caută numărul documentului…" value={grid.search} onChange={(event) => grid.setSearch(event.target.value)}/></label><Button size="sm" variant="outline" isDisabled={!grid.isDirty} onPress={grid.reset}><RotateCcw size={15}/> Resetează</Button></div></div>
-    {can("fiscal_vault.export") ? <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"><AppDatePicker name="export_from" label="De la" ariaLabel="Export de la" className="min-w-[180px]" value={exportFrom} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportFrom(value);}}/><AppDatePicker name="export_to" label="Până la" ariaLabel="Export până la" className="min-w-[180px]" value={exportTo} minValue={exportFrom || undefined} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportTo(value);}}/>{exportReady ? <Button variant="primary" isPending={downloadExport.isPending} onPress={() => company && createExport.data?.data.id && downloadExport.mutate({companyId: company.id, exportId: createExport.data.data.id})}><Download size={16}/> Descarcă exportul</Button> : <Button variant="outline" isDisabled={exportIntervalInvalid} isPending={exportBusy} onPress={() => company && createExport.mutate({companyId: company.id, from: exportFrom, to: exportTo})}><Archive size={16}/> Exportă Seiful</Button>}<p className="text-xs text-[var(--text-muted)]">{exportFrom && exportTo ? "Exportă intervalul selectat; documentele fără dată apar în raportul de erori." : "Lasă ambele date goale pentru exportul integral."}</p></section> : null}
+    {can("fiscal_vault.export") ? <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"><AppDatePicker name="export_from" label="De la" ariaLabel="Export de la" className="min-w-[180px]" value={exportFrom} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportFrom(value);}}/><AppDatePicker name="export_to" label="Până la" ariaLabel="Export până la" className="min-w-[180px]" value={exportTo} minValue={exportFrom || undefined} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportTo(value);}}/>{exportReady ? <Button variant="primary" isPending={downloadExport.isPending && exportDownloadBelongsToCurrentExport} onPress={() => company && createExport.data?.data.id && downloadExport.mutate({companyId: company.id, exportId: createExport.data.data.id})}><Download size={16}/> Descarcă exportul</Button> : <Button variant="outline" isDisabled={exportIntervalInvalid} isPending={exportBusy} onPress={() => company && createExport.mutate({companyId: company.id, from: exportFrom, to: exportTo})}><Archive size={16}/> Exportă Seiful</Button>}<p className="text-xs text-[var(--text-muted)]">{exportFrom && exportTo ? "Exportă intervalul selectat; documentele fără dată apar în raportul de erori." : "Lasă ambele date goale pentru exportul integral."}</p></section> : null}
     {exportBelongsToCurrentCompany && createExport.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(createExport.error, "Exportul nu a putut fi pornit.")}</p> : null}
     {exportBelongsToCurrentCompany && createExport.isSuccess && exportStatus.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(exportStatus.error, "Starea exportului nu a putut fi verificată.")}</p> : null}
     {exportBelongsToCurrentCompany && exportStatus.data?.data.status === "failed" ? <p role="alert" className="text-sm text-[var(--danger)]">Exportul a eșuat. Încearcă din nou.</p> : null}
     {exportBelongsToCurrentCompany && createExport.isSuccess && !exportStatus.isError && exportStatus.data?.data.status !== "ready" && exportStatus.data?.data.status !== "failed" ? <p role="status" className="text-sm text-[var(--text-muted)]">Exportul cu manifest și hash-uri este în pregătire.</p> : null}
     {download.isError && downloadBelongsToCurrentCompany ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(download.error, "Documentul nu a putut fi descărcat.")}</p> : null}
     {legalHold.isError && legalHoldBelongsToCurrentCompany ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(legalHold.error, "Politica de retenție nu a putut fi actualizată.")}</p> : null}
-    {exportBelongsToCurrentCompany && downloadExport.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(downloadExport.error, "Exportul nu a putut fi descărcat.")}</p> : null}
+    {exportDownloadBelongsToCurrentExport && downloadExport.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(downloadExport.error, "Exportul nu a putut fi descărcat.")}</p> : null}
     <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]"><DataTableLoadingOverlay isLoading={items.isFetching && !items.isLoading}/>{items.isLoading ? <div className="flex justify-center gap-2 py-24"><Spinner size="sm"/> Se încarcă…</div> : items.isError ? <EmptyState className="py-16"><EmptyState.Header><EmptyState.Media variant="icon"><Archive size={22}/></EmptyState.Media><EmptyState.Title>Seiful nu a putut fi încărcat</EmptyState.Title><EmptyState.Description>{apiErrorMessage(items.error, "Încearcă din nou în câteva momente.")}</EmptyState.Description></EmptyState.Header></EmptyState> : rows.length === 0 ? <EmptyState className="py-16"><EmptyState.Header><EmptyState.Media variant="icon"><Archive size={22}/></EmptyState.Media><EmptyState.Title>Seiful este gol</EmptyState.Title><EmptyState.Description>Primele documente vor fi salvate automat după sincronizarea e-Factura.</EmptyState.Description></EmptyState.Header></EmptyState> : <DataGrid aria-label="Seif fiscal" className="w-full" contentClassName="min-w-[1100px]" columns={columns} data={rows} getRowId={(row) => row.id} sortDescriptor={grid.sort} onSortChange={grid.setSort}/>}<DataTablePagination pagination={items.data?.meta?.pagination} onPageChange={grid.setPage}/></div>
   </div>;
 }

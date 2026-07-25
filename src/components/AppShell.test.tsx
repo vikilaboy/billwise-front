@@ -199,6 +199,69 @@ describe("AppShell onboarding guard", () => {
     expect(localStorage.getItem("billwise_active_company_id")).toBeNull();
   });
 
+  it("reîncearcă încărcarea profilului când cererea /me a eșuat", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    let meRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/companies")) {
+          return Promise.resolve(new Response(JSON.stringify({
+            data: [{id: "company-1", legal_name: "ACME SRL", tax_id: "12345674"}],
+          }), {status: 200, headers: {"Content-Type": "application/json"}}));
+        }
+        if (url.endsWith("/me")) {
+          meRequests += 1;
+          if (meRequests === 1) {
+            return Promise.resolve(new Response(JSON.stringify({
+              title: "Profil indisponibil",
+              status: 503,
+            }), {status: 503, headers: {"Content-Type": "application/problem+json"}}));
+          }
+          return Promise.resolve(new Response(JSON.stringify({data: {
+            id: "user-1",
+            name: "Andrei",
+            email: "andrei@example.test",
+            phone: null,
+            email_verified_at: "2026-07-24T10:00:00Z",
+            tenant: {id: "tenant-1", name: "ACME", slug: "acme"},
+            roles: [],
+            permissions: [],
+          }}), {status: 200, headers: {"Content-Type": "application/json"}}));
+        }
+
+        return Promise.resolve(new Response(JSON.stringify({
+          data: {items: [], unread_count: 0},
+        }), {status: 200, headers: {"Content-Type": "application/json"}}));
+      }),
+    );
+    const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/dashboard"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/dashboard" element={<div>Dashboard recuperat</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Încearcă din nou"}));
+
+    expect(await screen.findByText("Dashboard recuperat")).toBeInTheDocument();
+    expect(meRequests).toBe(2);
+  });
+
   it("curăță toate datele de sesiune și cache-ul la logout", async () => {
     vi.stubGlobal(
       "ResizeObserver",

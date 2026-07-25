@@ -194,7 +194,10 @@ export function AppShell() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[var(--bg-subtle)] px-6 text-center">
         <p className="text-sm font-medium text-[var(--danger)]">Firmele contului nu au putut fi încărcate.</p>
-        <Button variant="outline" onPress={() => companies.refetch()}>
+        <Button variant="outline" onPress={() => {
+          if (companies.isError) void companies.refetch();
+          if (me.isError) void me.refetch();
+        }}>
           Încearcă din nou
         </Button>
       </div>

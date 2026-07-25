@@ -2,7 +2,7 @@ import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {FiscalVaultPage} from "./FiscalVaultPage";
+import {FiscalVaultPage, isCurrentExportDownload} from "./FiscalVaultPage";
 import {FiscalVaultDetailPage} from "./FiscalVaultDetailPage";
 import {PurchaseInvoiceDetailPage} from "./PurchaseInvoiceDetailPage";
 import {PurchaseInvoicesPage, PURCHASE_INVOICE_SYNC_POLLING_MS, shouldPollPurchaseInvoices} from "./PurchaseInvoicesPage";
@@ -347,6 +347,15 @@ describe("purchase invoice pages", () => {
 
     await waitFor(() => expect(screen.queryByText(/Exportul cu manifest și hash-uri este în pregătire/)).not.toBeInTheDocument());
     expect(screen.getByRole("button", {name: "Exportă Seiful"})).toBeEnabled();
+  });
+
+  it("nu transferă eroarea descărcării la următorul export al aceleiași firme", () => {
+    const previousDownload = {companyId: "company-1", exportId: "export-1"};
+
+    expect(isCurrentExportDownload(previousDownload, "company-1", "export-1")).toBe(true);
+    expect(isCurrentExportDownload(previousDownload, "company-1", "export-2")).toBe(false);
+    expect(isCurrentExportDownload(previousDownload, "company-2", "export-1")).toBe(false);
+    expect(isCurrentExportDownload(undefined, undefined, undefined)).toBe(false);
   });
 
   it("nu afișează documentele fiscale ale firmei precedente cât se încarcă firma nouă", async () => {
