@@ -76,7 +76,8 @@ export type PurchaseInvoice = {
 };
 export type FiscalVaultItem = {
   id: string; source: string; direction: "received"; document_type: string | null; document_number: string | null; issue_date: string | null;
-  supplier_name: string | null; supplier_tax_id: string | null; status: "archived" | "imported" | "needs_attention" | "storage_failed" | "unsupported"; signature_status: string; archived_at: string; retain_until: string | null;
+  supplier_name: string | null; supplier_tax_id: string | null; status: "archiving" | "archived" | "imported" | "needs_attention" | "storage_failed" | "unsupported"; signature_status: string;
+  archived_at: string | null; retention_policy: "legal_general" | "extended"; retain_until: string | null; legal_hold_at: string | null; last_verified_at: string | null; integrity_status: "pending" | "verified" | "failed";
   original: {filename: string; size_bytes: number; sha256: string} | null; purchase_invoice_id: string | null;
 };
 export type FiscalVaultExport = {id: string; status: "queued" | "processing" | "ready" | "failed"; size_bytes: number | null; sha256: string | null; expires_at: string | null};

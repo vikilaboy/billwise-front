@@ -82,7 +82,7 @@ export function AppShell() {
   const [activeId, setActiveId] = useState<string | null>(() => localStorage.getItem("billwise_active_company_id"));
 
   const me = useQuery({queryKey: ["me"], queryFn: () => api<User>("/me")});
-  const companies = useQuery({queryKey: ["companies"], queryFn: () => api<CompanyProfile[]>("/companies")});
+  const companies = useQuery({queryKey: ["companies"], queryFn: () => api<CompanyProfile[]>("/companies?include_archived=1")});
   const notifications = useQuery({
     queryKey: ["notifications"],
     queryFn: () => api<ActivityNotificationFeed>("/notifications"),
@@ -98,11 +98,13 @@ export function AppShell() {
   });
 
   const list = companies.data?.data ?? [];
-  const company = list.find((c) => c.id === activeId) ?? list[0];
+  const company = list.find((c) => c.id === activeId) ?? list.find((c) => !c.archived_at) ?? list[0];
   const user = me.data?.data;
   const hasConfiguredAccess = Boolean((user?.roles.length ?? 0) > 0 || (user?.permissions.length ?? 0) > 0);
   const can = (permission: string) => !hasConfiguredAccess || Boolean(user?.permissions.includes(permission));
-  const visibleNavigation = NAV.filter((item) => !item.permission || can(item.permission));
+  const archivedCompany = Boolean(company?.archived_at);
+  const visibleNavigation = NAV.filter((item) => (!item.permission || can(item.permission))
+    && (!archivedCompany || ["/achizitii", "/seif-fiscal"].includes(item.to)));
   const [title, subtitle] = pageMeta(location.pathname);
 
   useEffect(() => {
@@ -127,9 +129,15 @@ export function AppShell() {
     if (activeId !== company.id) setActiveId(company.id);
   }, [activeId, company?.id]);
 
+  useEffect(() => {
+    if (!archivedCompany || ["/achizitii", "/seif-fiscal"].some((path) => location.pathname.startsWith(path))) return;
+    navigate("/seif-fiscal", {replace: true});
+  }, [archivedCompany, location.pathname, navigate]);
+
   const selectCompany = (id: string) => {
     setActiveId(id);
     localStorage.setItem("billwise_active_company_id", id);
+    if (list.find((item) => item.id === id)?.archived_at) navigate("/seif-fiscal");
     void queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] !== "me" && query.queryKey[0] !== "companies",
     });
@@ -222,7 +230,7 @@ export function AppShell() {
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[13px] font-semibold">{c.legal_name}</span>
-                          <span className="block text-[11px] tabular-nums text-[var(--text-muted)]">{c.tax_id}</span>
+                          <span className="block text-[11px] tabular-nums text-[var(--text-muted)]">{c.tax_id}{c.archived_at ? " · Arhivată" : ""}</span>
                         </span>
                         {c.id === company?.id && <Check size={16} className="shrink-0 text-[var(--accent)]" />}
                       </div>
@@ -236,9 +244,9 @@ export function AppShell() {
               <Plus size={16} /> Adaugă firmă
             </Button>
 
-            <Button variant="primary" fullWidth onPress={() => navigate("/facturi/noi")}>
+            {!archivedCompany ? <Button variant="primary" fullWidth onPress={() => navigate("/facturi/noi")}>
               <Plus size={17} /> Emite factură
-            </Button>
+            </Button> : null}
           </Sidebar.Header>
 
           <Sidebar.Content>
