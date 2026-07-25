@@ -233,6 +233,44 @@ describe("purchase invoice pages", () => {
     expect(await screen.findByText("Detaliu document fiscal")).toBeInTheDocument();
   });
 
+  it("nu transferă feedbackul exportului Seifului la altă firmă", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return Promise.resolve(new Response(JSON.stringify({
+          data: {id: "export-1", status: "queued", from_date: null, to_date: null, size_bytes: null, sha256: null, expires_at: null},
+        }), {status: 202, headers: {"Content-Type": "application/json"}}));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        data: [],
+        meta: {pagination: {current_page: 1, last_page: 1, per_page: 20, total: 0}, storage: {used_bytes: 0}},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    }));
+    const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+    const view = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><FiscalVaultPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Exportă Seiful"}));
+    expect(await screen.findByRole("status")).toHaveTextContent("Exportul cu manifest și hash-uri este în pregătire.");
+
+    companyMock.current = {id: "company-2", legal_name: "Beta SRL"};
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><FiscalVaultPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.queryByText(/Exportul cu manifest și hash-uri este în pregătire/)).not.toBeInTheDocument());
+    expect(screen.getByRole("button", {name: "Exportă Seiful"})).toBeEnabled();
+  });
+
   it("confirmă eliminarea legal hold înainte de actualizare", async () => {
     vi.stubGlobal("ResizeObserver", class {
       observe() {}
