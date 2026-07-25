@@ -32,6 +32,41 @@ afterEach(() => {
 });
 
 describe("SettingsPage SPV", () => {
+  it.each([
+    ["access_denied", "ANAF a respins autorizarea sau aceasta a fost anulată. Verifică certificatul digital și drepturile SPV."],
+    ["unauthorized_client", "Aplicația Billwise nu este autorizată de ANAF pentru acest serviciu. Contactează suportul Billwise."],
+    ["invalid_request", "ANAF nu a acceptat cererea de autorizare. Contactează suportul Billwise."],
+    ["anaf_temporarily_unavailable", "Serviciul de autorizare ANAF este temporar indisponibil. Încearcă din nou."],
+  ])("afișează motivul callback-ului ANAF %s", async (reason, message) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/companies/company-1")) return Promise.resolve(json(profile));
+        if (url.includes("/efactura/spv/connection")) {
+          return Promise.resolve(json({
+            status: "disconnected",
+            connected: false,
+            access_token_expires_at: null,
+            reauthorization_required: false,
+            last_error_code: null,
+          }));
+        }
+        return new Promise(() => undefined);
+      }),
+    );
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={[`/setari?spv=error&reason=${reason}`]}>
+          <SettingsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+  });
+
   it("afișează callback-ul, starea reală și deconectează numai după confirmare", async () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);

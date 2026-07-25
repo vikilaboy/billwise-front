@@ -108,6 +108,31 @@ function Field({
   );
 }
 
+function spvCallbackErrorMessage(reason: string | null): string {
+  switch (reason) {
+    case "access_denied":
+    case "denied":
+      return "ANAF a respins autorizarea sau aceasta a fost anulată. Verifică certificatul digital și drepturile SPV.";
+    case "unauthorized_client":
+    case "anaf_reauthorization_required":
+      return "Aplicația Billwise nu este autorizată de ANAF pentru acest serviciu. Contactează suportul Billwise.";
+    case "invalid_request":
+    case "invalid_scope":
+    case "unsupported_response_type":
+      return "ANAF nu a acceptat cererea de autorizare. Contactează suportul Billwise.";
+    case "anaf_temporarily_unavailable":
+      return "Serviciul de autorizare ANAF este temporar indisponibil. Încearcă din nou.";
+    case "invalid_state":
+    case "invalid_callback":
+      return "Sesiunea de conectare a expirat. Pornește din nou conectarea.";
+    case "anaf_service_unavailable":
+    case "anaf_token_unavailable":
+      return "ANAF nu a putut finaliza conectarea. Încearcă din nou.";
+    default:
+      return "Conectarea SPV nu a reușit. Încearcă din nou.";
+  }
+}
+
 export function SettingsPage() {
   const {company} = useCompany();
   const queryClient = useQueryClient();
@@ -549,13 +574,7 @@ export function SettingsPage() {
         ) : null}
         {spvFeedback === "error" ? (
           <p role="alert" className="mb-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12.5px] font-medium text-[var(--danger)]">
-            {spvReason === "denied"
-              ? "Autorizarea ANAF a fost anulată."
-              : spvReason === "invalid_state" || spvReason === "invalid_callback"
-                ? "Sesiunea de conectare a expirat. Pornește din nou conectarea."
-                : spvReason === "anaf_service_unavailable" || spvReason === "anaf_token_unavailable"
-                  ? "ANAF nu a putut finaliza conectarea. Încearcă din nou."
-                  : "Conectarea SPV nu a reușit. Încearcă din nou."}
+            {spvCallbackErrorMessage(spvReason)}
           </p>
         ) : null}
 
