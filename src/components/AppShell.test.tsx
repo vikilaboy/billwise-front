@@ -2,7 +2,7 @@ import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
 import {fireEvent, render, screen} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {AppShell} from "./AppShell";
+import {AppShell, archivedCompanyLandingPath} from "./AppShell";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -11,6 +11,12 @@ afterEach(() => {
 });
 
 describe("AppShell onboarding guard", () => {
+  it("alege o destinație accesibilă pentru firmele arhivate", () => {
+    expect(archivedCompanyLandingPath((permission) => permission === "purchase_invoice.view")).toBe("/achizitii");
+    expect(archivedCompanyLandingPath((permission) => permission === "fiscal_vault.view")).toBe("/seif-fiscal");
+    expect(archivedCompanyLandingPath(() => false)).toBeNull();
+  });
+
   it("redirecționează obligatoriu spre onboarding când utilizatorul nu are firme", async () => {
     vi.stubGlobal(
       "fetch",

@@ -8,7 +8,7 @@ import {RefreshCw, RotateCcw, Search, ShoppingCart} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {api, listQuery} from "../lib/api";
+import {api, apiErrorMessage, listQuery} from "../lib/api";
 import {date, money} from "../lib/format";
 import type {PurchaseInvoice} from "../lib/types";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
@@ -42,6 +42,7 @@ export function PurchaseInvoicesPage() {
       <Button size="sm" variant="outline" isDisabled={!grid.isDirty} onPress={grid.reset}><RotateCcw size={15}/> Resetează</Button></div>
       {!company?.archived_at && can("efactura_inbox.sync") ? <Button variant="primary" isPending={sync.isPending} onPress={() => sync.mutate()}><RefreshCw size={16}/> Sincronizează e-Factura</Button> : null}</div>
     {sync.isSuccess ? <p role="status" className="text-sm text-[var(--success)]">Sincronizarea a fost pusă în coadă. Sunt preluate numai documentele sosite după activare.</p> : null}
+    {sync.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(sync.error, "Sincronizarea e-Factura nu a putut fi pornită.")}</p> : null}
     <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]"><DataTableLoadingOverlay isLoading={invoices.isFetching && !invoices.isLoading}/>
       {invoices.isLoading ? <div className="flex justify-center gap-2 py-24"><Spinner size="sm"/> Se încarcă…</div> : invoices.isError ? <div className="py-24 text-center text-[var(--danger)]">Facturile nu au putut fi încărcate.</div> : rows.length === 0 ? <EmptyState className="py-16"><EmptyState.Header><EmptyState.Media variant="icon"><ShoppingCart size={22}/></EmptyState.Media><EmptyState.Title>Nicio factură primită</EmptyState.Title><EmptyState.Description>Documentele noi vor apărea automat după sincronizarea cu ANAF.</EmptyState.Description></EmptyState.Header></EmptyState> : <DataGrid aria-label="Facturi furnizori" className="w-full" contentClassName="min-w-[900px]" columns={columns} data={rows} getRowId={(row) => row.id} sortDescriptor={grid.sort} onSortChange={grid.setSort} onRowAction={(key) => navigate(`/achizitii/${String(key)}`)}/>}<DataTablePagination pagination={invoices.data?.meta?.pagination} onPageChange={grid.setPage}/></div>
   </div>;

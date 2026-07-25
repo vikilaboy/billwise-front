@@ -57,6 +57,11 @@ const META: Record<string, [string, string]> = {
 type ShellContext = {company?: CompanyProfile; user?: User; can: (permission: string) => boolean};
 const CompanyContext = createContext<ShellContext>({can: () => false});
 export const useCompany = () => useContext(CompanyContext);
+export const archivedCompanyLandingPath = (can: (permission: string) => boolean): string | null => {
+  if (can("fiscal_vault.view")) return "/seif-fiscal";
+  if (can("purchase_invoice.view")) return "/achizitii";
+  return null;
+};
 
 function initials(name?: string | null): string {
   if (!name) return "BW";
@@ -103,6 +108,7 @@ export function AppShell() {
   const hasConfiguredAccess = Boolean((user?.roles.length ?? 0) > 0 || (user?.permissions.length ?? 0) > 0);
   const can = (permission: string) => !hasConfiguredAccess || Boolean(user?.permissions.includes(permission));
   const archivedCompany = Boolean(company?.archived_at);
+  const archivedLanding = archivedCompanyLandingPath(can);
   const visibleNavigation = NAV.filter((item) => (!item.permission || can(item.permission))
     && (!archivedCompany || ["/achizitii", "/seif-fiscal"].includes(item.to)));
   const [title, subtitle] = pageMeta(location.pathname);
@@ -130,14 +136,14 @@ export function AppShell() {
   }, [activeId, company?.id]);
 
   useEffect(() => {
-    if (!archivedCompany || ["/achizitii", "/seif-fiscal"].some((path) => location.pathname.startsWith(path))) return;
-    navigate("/seif-fiscal", {replace: true});
-  }, [archivedCompany, location.pathname, navigate]);
+    if (!archivedCompany || !archivedLanding || ["/achizitii", "/seif-fiscal"].some((path) => location.pathname.startsWith(path))) return;
+    navigate(archivedLanding, {replace: true});
+  }, [archivedCompany, archivedLanding, location.pathname, navigate]);
 
   const selectCompany = (id: string) => {
     setActiveId(id);
     localStorage.setItem("billwise_active_company_id", id);
-    if (list.find((item) => item.id === id)?.archived_at) navigate("/seif-fiscal");
+    if (list.find((item) => item.id === id)?.archived_at && archivedLanding) navigate(archivedLanding);
     void queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] !== "me" && query.queryKey[0] !== "companies",
     });

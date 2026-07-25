@@ -4,7 +4,7 @@ import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {FiscalVaultPage} from "./FiscalVaultPage";
 import {PurchaseInvoiceDetailPage} from "./PurchaseInvoiceDetailPage";
-import {PURCHASE_INVOICE_SYNC_POLLING_MS, shouldPollPurchaseInvoices} from "./PurchaseInvoicesPage";
+import {PurchaseInvoicesPage, PURCHASE_INVOICE_SYNC_POLLING_MS, shouldPollPurchaseInvoices} from "./PurchaseInvoicesPage";
 
 vi.mock("../components/AppShell", () => ({
   useCompany: () => ({
@@ -61,6 +61,68 @@ describe("purchase invoice pages", () => {
     expect(shouldPollPurchaseInvoices(pollingUntil, startedAt)).toBe(true);
     expect(shouldPollPurchaseInvoices(pollingUntil, pollingUntil - 1)).toBe(true);
     expect(shouldPollPurchaseInvoices(pollingUntil, pollingUntil)).toBe(false);
+  });
+
+  it("afișează eroarea primită la pornirea sincronizării", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return Promise.resolve(new Response(JSON.stringify({
+          title: "Serviciu indisponibil",
+          detail: "Conexiunea ANAF trebuie reautorizată.",
+          status: 503,
+        }), {status: 503, headers: {"Content-Type": "application/problem+json"}}));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        data: [],
+        meta: {pagination: {current_page: 1, last_page: 1, per_page: 20, total: 0}},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    }));
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter><PurchaseInvoicesPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Sincronizează e-Factura"}));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Conexiunea ANAF trebuie reautorizată.");
+  });
+
+  it("afișează eroarea primită la verificarea facturii", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        return Promise.resolve(new Response(JSON.stringify({
+          title: "Conflict",
+          detail: "Factura nu mai poate fi modificată.",
+          status: 409,
+        }), {status: 409, headers: {"Content-Type": "application/problem+json"}}));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        data: {
+          id: "invoice-1", document_type: "invoice", number: "OMV-1", issue_date: "2026-07-25", due_date: null,
+          currency: "RON", subtotal_cents: 10000, vat_cents: 1900, total_cents: 11900, import_status: "imported",
+          review_status: "unreviewed", reviewed_at: null,
+          supplier: {id: "supplier-1", name: "OMV Petrom", tax_id: "1590082", country_code: "RO", email: null, address: null},
+          vault_item_id: "vault-1", lines: [], created_at: "2026-07-25T10:00:00Z",
+        },
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    }));
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/achizitii/invoice-1"]}>
+          <Routes><Route path="/achizitii/:id" element={<PurchaseInvoiceDetailPage/>}/></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Marchează verificată"}));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Factura nu mai poate fi modificată.");
   });
 
   it("afișează starea sigiliului MF și confirmă eliminarea legal hold", async () => {
