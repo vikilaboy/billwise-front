@@ -27,6 +27,10 @@ const BankAccountsPage = lazyNamed(() => import("../pages/BankAccountsPage"), "B
 const InvoiceSeriesPage = lazyNamed(() => import("../pages/InvoiceSeriesPage"), "InvoiceSeriesPage");
 const SettingsPage = lazyNamed(() => import("../pages/SettingsPage"), "SettingsPage");
 const ProductsPage = lazyNamed(() => import("../pages/ProductsPage"), "ProductsPage");
+const PurchaseInvoicesPage = lazyNamed(() => import("../pages/PurchaseInvoicesPage"), "PurchaseInvoicesPage");
+const PurchaseInvoiceDetailPage = lazyNamed(() => import("../pages/PurchaseInvoiceDetailPage"), "PurchaseInvoiceDetailPage");
+const FiscalVaultPage = lazyNamed(() => import("../pages/FiscalVaultPage"), "FiscalVaultPage");
+const FiscalVaultDetailPage = lazyNamed(() => import("../pages/FiscalVaultDetailPage"), "FiscalVaultDetailPage");
 
 const Protected = () => (session.token() ? <AppShell /> : <Navigate to="/login" replace />);
 
@@ -57,6 +61,10 @@ export function App() {
           <Route path="/facturi/noi" element={<NewInvoicePage />} />
           <Route path="/facturi/:id/editeaza" element={<NewInvoicePage />} />
           <Route path="/facturi/:id" element={<InvoiceDetailPage />} />
+          <Route path="/achizitii" element={<PurchaseInvoicesPage />} />
+          <Route path="/achizitii/:id" element={<PurchaseInvoiceDetailPage />} />
+          <Route path="/seif-fiscal" element={<FiscalVaultPage />} />
+          <Route path="/seif-fiscal/:vaultItemId" element={<FiscalVaultDetailPage />} />
           <Route path="/recurente" element={<RecurringPage />} />
           <Route path="/clienti" element={<CustomersPage />} />
           <Route path="/produse" element={<ProductsPage />} />

@@ -125,15 +125,23 @@ export async function downloadApiFile(path: string, fallbackName: string): Promi
   }
   expireSessionOnUnauthorized(response.status, token);
   if (!response.ok) {
-    let problem: ProblemDetails = {title: "Fișierul nu a putut fi descărcat", status: response.status};
-    try {
-      problem = {...problem, ...(await response.json())};
-    } catch {
-      // A non-JSON upstream error still becomes a consistent client error.
-    }
-    throw reportApiError(problem);
+    throw await downloadResponseError(response);
   }
 
+  await saveResponseBlob(response, fallbackName);
+}
+
+async function downloadResponseError(response: Response): Promise<ApiError> {
+  let problem: ProblemDetails = {title: "Fișierul nu a putut fi descărcat", status: response.status};
+  try {
+    problem = {...problem, ...(await response.json())};
+  } catch {
+    // A non-JSON upstream error still becomes a consistent client error.
+  }
+  return reportApiError(problem);
+}
+
+async function saveResponseBlob(response: Response, fallbackName: string): Promise<void> {
   const disposition = response.headers.get("Content-Disposition") ?? "";
   const match = /filename="?([^";]+)"?/i.exec(disposition);
   const filename = (match?.[1] ?? fallbackName).replace(/[\\/\r\n"]/g, "_");
@@ -145,6 +153,37 @@ export async function downloadApiFile(path: string, fallbackName: string): Promi
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+export async function downloadApiFileOrTemporaryUrl(path: string, fallbackName: string): Promise<void> {
+  const token = session.token();
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      headers: {
+        Accept: "application/json, application/octet-stream",
+        "Accept-Language": "ro",
+        ...(token ? {Authorization: `Bearer ${token}`} : {}),
+      },
+    });
+  } catch (error) {
+    throw networkApiError(error);
+  }
+  expireSessionOnUnauthorized(response.status, token);
+  if (!response.ok) {
+    throw await downloadResponseError(response);
+  }
+  if (response.headers.get("content-type")?.includes("application/json")) {
+    const payload = await response.json() as ApiEnvelope<{url: string}>;
+    const anchor = document.createElement("a");
+    anchor.href = payload.data.url;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    return;
+  }
+
+  await saveResponseBlob(response, fallbackName);
 }
 
 // Build a `?_page=…&_filter[status][eq]=…` query string from the API's `_`-prefixed controls.

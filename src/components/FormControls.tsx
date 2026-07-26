@@ -115,6 +115,7 @@ export function AppDatePicker({
   ariaLabel,
   value,
   minValue,
+  maxValue,
   className,
   isDisabled,
   onChange,
@@ -124,6 +125,7 @@ export function AppDatePicker({
   ariaLabel: string;
   value: string;
   minValue?: string;
+  maxValue?: string;
   className?: string;
   isDisabled?: boolean;
   onChange: (value: string) => void;
@@ -135,6 +137,7 @@ export function AppDatePicker({
       isDisabled={isDisabled}
       name={name}
       minValue={minValue ? parseDate(minValue) : undefined}
+      maxValue={maxValue ? parseDate(maxValue) : undefined}
       value={value ? parseDate(value) : null}
       onChange={(nextValue) => onChange(nextValue?.toString() ?? "")}
     >

@@ -10,6 +10,8 @@ import {
   CircleGauge,
   CreditCard,
   FileText,
+  Archive,
+  ShoppingCart,
   Hash,
   LogOut,
   Moon,
@@ -23,11 +25,13 @@ import {
 import {api, AUTH_EXPIRED_EVENT, session} from "../lib/api";
 import type {ActivityNotificationFeed, CompanyProfile, User} from "../lib/types";
 
-type NavItem = {to: string; label: string; icon: typeof FileText; group: string; badge?: number};
+type NavItem = {to: string; label: string; icon: typeof FileText; group: string; badge?: number; permission?: string};
 
 const NAV: NavItem[] = [
   {to: "/dashboard", label: "Dashboard", icon: CircleGauge, group: "Principal"},
   {to: "/facturi", label: "Facturi", icon: FileText, group: "Principal"},
+  {to: "/achizitii", label: "Facturi furnizori", icon: ShoppingCart, group: "Principal", permission: "purchase_invoice.view"},
+  {to: "/seif-fiscal", label: "Seif fiscal", icon: Archive, group: "Principal", permission: "fiscal_vault.view"},
   {to: "/recurente", label: "Facturi recurente", icon: Repeat, group: "Principal"},
   {to: "/clienti", label: "Clienți", icon: Users, group: "Date firmă"},
   {to: "/produse", label: "Produse și servicii", icon: Package, group: "Date firmă"},
@@ -39,6 +43,8 @@ const NAV: NavItem[] = [
 const META: Record<string, [string, string]> = {
   "/dashboard": ["Dashboard", "Sumarul activității firmei tale"],
   "/facturi": ["Facturi", "Toate documentele emise"],
+  "/achizitii": ["Facturi furnizori", "Documente primite automat din ANAF e-Factura"],
+  "/seif-fiscal": ["Seif fiscal", "Originalele ANAF păstrate în spațiul privat al firmei"],
   "/recurente": ["Facturi recurente", "Generare controlată de ciorne"],
   "/clienti": ["Clienți", "Firmele cu care lucrezi"],
   "/produse": ["Produse și servicii", "Catalogul firmei selectate"],
@@ -48,9 +54,32 @@ const META: Record<string, [string, string]> = {
 };
 
 // Current tenant company shared with every page (invoices/customers are scoped to it).
-type ShellContext = {company?: CompanyProfile};
-const CompanyContext = createContext<ShellContext>({});
+type ShellContext = {company?: CompanyProfile; user?: User; can: (permission: string) => boolean};
+const CompanyContext = createContext<ShellContext>({can: () => false});
 export const useCompany = () => useContext(CompanyContext);
+export const archivedCompanyLandingPath = (can: (permission: string) => boolean): string | null => {
+  if (can("fiscal_vault.view")) return "/seif-fiscal";
+  if (can("purchase_invoice.view")) return "/achizitii";
+  return null;
+};
+export const selectableCompanies = (
+  companies: CompanyProfile[],
+  can: (permission: string) => boolean,
+): CompanyProfile[] => {
+  const canAccessArchivedCompanies = archivedCompanyLandingPath(can) !== null;
+
+  return companies.filter((company) => !company.archived_at || canAccessArchivedCompanies);
+};
+export const canAccessArchivedCompanyPath = (
+  pathname: string,
+  can: (permission: string) => boolean,
+): boolean => {
+  const matchesRoute = (route: string) => pathname === route || pathname.startsWith(`${route}/`);
+
+  if (matchesRoute("/seif-fiscal")) return can("fiscal_vault.view");
+  if (matchesRoute("/achizitii")) return can("purchase_invoice.view");
+  return false;
+};
 
 function initials(name?: string | null): string {
   if (!name) return "BW";
@@ -76,7 +105,7 @@ export function AppShell() {
   const [activeId, setActiveId] = useState<string | null>(() => localStorage.getItem("billwise_active_company_id"));
 
   const me = useQuery({queryKey: ["me"], queryFn: () => api<User>("/me")});
-  const companies = useQuery({queryKey: ["companies"], queryFn: () => api<CompanyProfile[]>("/companies")});
+  const companies = useQuery({queryKey: ["companies"], queryFn: () => api<CompanyProfile[]>("/companies?include_archived=1")});
   const notifications = useQuery({
     queryKey: ["notifications"],
     queryFn: () => api<ActivityNotificationFeed>("/notifications"),
@@ -91,8 +120,17 @@ export function AppShell() {
     onSuccess: () => queryClient.invalidateQueries({queryKey: ["notifications"]}),
   });
 
-  const list = companies.data?.data ?? [];
-  const company = list.find((c) => c.id === activeId) ?? list[0];
+  const user = me.data?.data;
+  const hasConfiguredAccess = Boolean((user?.roles.length ?? 0) > 0 || (user?.permissions.length ?? 0) > 0);
+  const can = (permission: string) => !hasConfiguredAccess || Boolean(user?.permissions.includes(permission));
+  const allCompanies = companies.data?.data ?? [];
+  const list = selectableCompanies(allCompanies, can);
+  const company = list.find((c) => c.id === activeId) ?? list.find((c) => !c.archived_at) ?? list[0];
+  const archivedCompany = Boolean(company?.archived_at);
+  const archivedLanding = archivedCompanyLandingPath(can);
+  const archivedPathAllowed = canAccessArchivedCompanyPath(location.pathname, can);
+  const visibleNavigation = NAV.filter((item) => (!item.permission || can(item.permission))
+    && (!archivedCompany || ["/achizitii", "/seif-fiscal"].includes(item.to)));
   const [title, subtitle] = pageMeta(location.pathname);
 
   useEffect(() => {
@@ -117,9 +155,15 @@ export function AppShell() {
     if (activeId !== company.id) setActiveId(company.id);
   }, [activeId, company?.id]);
 
+  useEffect(() => {
+    if (!archivedCompany || !archivedLanding || archivedPathAllowed) return;
+    navigate(archivedLanding, {replace: true});
+  }, [archivedCompany, archivedLanding, archivedPathAllowed, navigate]);
+
   const selectCompany = (id: string) => {
     setActiveId(id);
     localStorage.setItem("billwise_active_company_id", id);
+    if (list.find((item) => item.id === id)?.archived_at && archivedLanding) navigate(archivedLanding);
     void queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] !== "me" && query.queryKey[0] !== "companies",
     });
@@ -136,9 +180,9 @@ export function AppShell() {
     }
   };
 
-  const groups = [...new Set(NAV.map((n) => n.group))];
+  const groups = [...new Set(visibleNavigation.map((n) => n.group))];
 
-  if (companies.isLoading) {
+  if (companies.isLoading || me.isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center gap-2.5 bg-[var(--bg-subtle)] text-sm text-[var(--text-muted)]">
         <Spinner size="sm" /> Se verifică firmele contului…
@@ -146,26 +190,39 @@ export function AppShell() {
     );
   }
 
-  if (companies.isError) {
+  if (companies.isError || me.isError) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[var(--bg-subtle)] px-6 text-center">
         <p className="text-sm font-medium text-[var(--danger)]">Firmele contului nu au putut fi încărcate.</p>
-        <Button variant="outline" onPress={() => companies.refetch()}>
+        <Button variant="outline" onPress={() => {
+          if (companies.isError) void companies.refetch();
+          if (me.isError) void me.refetch();
+        }}>
           Încearcă din nou
         </Button>
       </div>
     );
   }
 
-  if (list.length === 0) {
+  if (allCompanies.length === 0) {
     if (location.pathname !== "/onboarding/firma") {
       return <Navigate to="/onboarding/firma" replace />;
     }
 
     return (
-      <CompanyContext.Provider value={{company: undefined}}>
+      <CompanyContext.Provider value={{company: undefined, user, can}}>
         <Outlet />
       </CompanyContext.Provider>
+    );
+  }
+
+  if (list.length === 0) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-subtle)] px-6 text-center">
+        <p className="max-w-lg text-sm text-[var(--danger)]">
+          Nu ai acces la modulele disponibile pentru firmele arhivate ale acestui cont.
+        </p>
+      </div>
     );
   }
 
@@ -174,7 +231,7 @@ export function AppShell() {
   }
 
   return (
-    <CompanyContext.Provider value={{company}}>
+    <CompanyContext.Provider value={{company, user, can}}>
       <Sidebar.Provider collapsible="offcanvas" navigate={(href) => navigate(href)}>
         <Sidebar>
           <Sidebar.Header className="gap-3">
@@ -212,7 +269,7 @@ export function AppShell() {
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[13px] font-semibold">{c.legal_name}</span>
-                          <span className="block text-[11px] tabular-nums text-[var(--text-muted)]">{c.tax_id}</span>
+                          <span className="block text-[11px] tabular-nums text-[var(--text-muted)]">{c.tax_id}{c.archived_at ? " · Arhivată" : ""}</span>
                         </span>
                         {c.id === company?.id && <Check size={16} className="shrink-0 text-[var(--accent)]" />}
                       </div>
@@ -226,9 +283,9 @@ export function AppShell() {
               <Plus size={16} /> Adaugă firmă
             </Button>
 
-            <Button variant="primary" fullWidth onPress={() => navigate("/facturi/noi")}>
+            {!archivedCompany ? <Button variant="primary" fullWidth onPress={() => navigate("/facturi/noi")}>
               <Plus size={17} /> Emite factură
-            </Button>
+            </Button> : null}
           </Sidebar.Header>
 
           <Sidebar.Content>
@@ -236,7 +293,7 @@ export function AppShell() {
               <Sidebar.Group key={group}>
                 <Sidebar.GroupLabel>{group}</Sidebar.GroupLabel>
                 <Sidebar.Menu aria-label={group}>
-                  {NAV.filter((n) => n.group === group).map(({to, label, icon: Icon, badge}) => (
+                  {visibleNavigation.filter((n) => n.group === group).map(({to, label, icon: Icon, badge}) => (
                     <Sidebar.MenuItem key={to} href={to} isCurrent={location.pathname.startsWith(to)}>
                       <Sidebar.MenuIcon>
                         <Icon size={18} />
