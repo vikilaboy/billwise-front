@@ -1,7 +1,7 @@
 import {FormEvent, useEffect, useMemo, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Spinner} from "@heroui/react";
-import {Building2, CheckCircle2, Search} from "lucide-react";
+import {AlertTriangle, Building2, CheckCircle2, Search} from "lucide-react";
 import {useNavigate} from "react-router";
 import {AppCheckbox, AppSelect} from "../components/FormControls";
 import {api, apiErrorMessage, listQuery} from "../lib/api";
@@ -154,7 +154,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
 
   const submitCompany = (event: FormEvent) => {
     event.preventDefault();
-    if (!fiscal?.is_active || !form.confirmed) return;
+    if (!fiscal || !form.confirmed) return;
     create.mutate();
   };
 
@@ -237,14 +237,20 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                 className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
                   fiscal.is_active
                     ? "border-[var(--success)]/30 bg-[var(--success-soft)] text-[var(--success)]"
-                    : "border-[var(--danger)]/30 bg-[var(--danger-soft)] text-[var(--danger)]"
+                    : "border-amber-500/30 bg-amber-50 text-amber-800"
                 }`}
               >
                 <div className="flex items-center gap-2 font-semibold">
-                  <CheckCircle2 size={17} />
-                  {fiscal.is_active ? "Firmă activă identificată" : "Firma figurează ca inactivă"}
+                  {fiscal.is_active ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}
+                  {fiscal.is_active ? "Firmă activă identificată" : "Firma figurează ca inactivă la ANAF"}
                 </div>
                 <div className="mt-1 opacity-80">CUI {fiscal.cui}</div>
+                {!fiscal.is_active ? (
+                  <p className="mt-2 leading-5">
+                    O poți adăuga pentru importul și consultarea facturilor istorice. Verifică atent
+                    datele înainte de salvare.
+                  </p>
+                ) : null}
                 {checkedAt ? (
                   <div className="mt-1 text-xs opacity-75">
                     Verificat prin ANAF la {checkedAt.toLocaleString("ro-RO")}
@@ -439,7 +445,9 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                 <span>
                   <span className="block font-semibold">Confirm datele firmei și adresa structurată</span>
                   <span className="mt-0.5 block text-xs leading-5 text-[var(--text-muted)]">
-                    Sugestiile sunt preluate din textul ANAF, dar alegerea județului și localității îți aparține.
+                    {fiscal.is_active
+                      ? "Sugestiile sunt preluate din textul ANAF, dar alegerea județului și localității îți aparține."
+                      : "Confirm că firma este inactivă la ANAF și că o adaug pentru import sau consultare istorică. Alegerea județului și localității îmi aparține."}
                   </span>
                 </span>
               </AppCheckbox>
@@ -460,7 +468,7 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                   type="submit"
                   variant="primary"
                   isPending={create.isPending}
-                  isDisabled={!fiscal.is_active || !form.confirmed}
+                  isDisabled={!form.confirmed}
                 >
                   Salvează firma și continuă
                 </Button>

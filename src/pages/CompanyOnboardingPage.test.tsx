@@ -112,10 +112,11 @@ describe("CompanyOnboardingPage", () => {
     });
   });
 
-  it("nu permite salvarea unei firme inactive", async () => {
+  it("permite salvarea unei firme inactive după confirmarea explicită", async () => {
+    let companyBody: Record<string, unknown> | undefined;
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((input: string | URL | Request) => {
+      vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
         if (url.includes("/me")) return Promise.resolve(envelope({email: "a@test", phone: null}));
         if (url.includes("/states")) return Promise.resolve(envelope([]));
@@ -130,6 +131,10 @@ describe("CompanyOnboardingPage", () => {
               is_active: false,
             }),
           );
+        }
+        if (url.endsWith("/companies") && init?.method === "POST") {
+          companyBody = JSON.parse(String(init.body));
+          return Promise.resolve(envelope({id: "company-inactive", legal_name: "INACTIV SRL"}, 201));
         }
         throw new Error(`Unexpected request: ${url}`);
       }),
@@ -147,9 +152,21 @@ describe("CompanyOnboardingPage", () => {
     fireEvent.change(screen.getByLabelText("CUI / CIF"), {target: {value: "12345674"}});
     fireEvent.click(screen.getByRole("button", {name: /Verifică la ANAF/}));
 
-    expect(await screen.findByText("Firma figurează ca inactivă")).toBeInTheDocument();
+    expect(await screen.findByText("Firma figurează ca inactivă la ANAF")).toBeInTheDocument();
+    expect(screen.getByText(/importul și consultarea facturilor istorice/)).toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Salvează firma și continuă"})).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText(/Confirm datele firmei/));
+    const submit = screen.getByRole("button", {name: "Salvează firma și continuă"});
+    expect(submit).toBeEnabled();
+    fireEvent.submit(submit.closest("form")!);
+
     await waitFor(() =>
-      expect(screen.getByRole("button", {name: "Salvează firma și continuă"})).toBeDisabled(),
+      expect(companyBody).toMatchObject({
+        legal_name: "INACTIV SRL",
+        tax_id: "12345674",
+        is_vat_payer: false,
+      }),
     );
   });
 
