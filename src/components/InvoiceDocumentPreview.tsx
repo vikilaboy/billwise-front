@@ -10,6 +10,7 @@ const COLORS = {
   soft: "#f4f7f5",
   accent: "#16a34a",
   accentSoft: "#eaf8ef",
+  tableHeader: "#46504b",
 } as const;
 
 const LABELS = {
@@ -187,7 +188,10 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
       <div className="mt-5">
         <table className="w-full table-fixed border-collapse text-[9px] tabular-nums">
           <thead>
-            <tr className="bg-[#17211b] text-left text-[8.5px] font-bold uppercase tracking-[.03em] text-white">
+            <tr
+              className="text-left text-[8.5px] font-bold uppercase tracking-[.03em] text-white"
+              style={{background: COLORS.tableHeader}}
+            >
               <th className="w-[4%] px-1.5 py-2">#</th>
               <th className="w-[39%] px-1.5 py-2"><LabelPair name="description" bilingual={bilingual} /></th>
               <th className="w-[10%] px-1.5 py-2"><LabelPair name="unit" bilingual={bilingual} /></th>
@@ -253,7 +257,6 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
               {bilingual ? <span className="block text-[9px]" style={{color: COLORS.faint}}>{LABELS.bnrRate[1]}</span> : null}
               1 {currency} = {exchangeRate(invoice.exchange_rate)} RON
               {invoice.exchange_rate_day ? ` · ${date(invoice.exchange_rate_day)}` : ""}
-              {invoice.exchange_rate_source ? ` · ${invoice.exchange_rate_source.toUpperCase()}` : ""}
             </div>
           ) : null}
         </div>
