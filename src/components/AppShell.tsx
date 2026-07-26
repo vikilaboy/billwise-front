@@ -14,6 +14,7 @@ import {
   ShoppingCart,
   Hash,
   LogOut,
+  Menu,
   Moon,
   Package,
   Plus,
@@ -329,9 +330,107 @@ export function AppShell() {
           </Sidebar.Footer>
         </Sidebar>
 
+        <Sidebar.Mobile>
+          <Sidebar.Header className="gap-3">
+            <div className="flex items-center gap-2.5 px-1.5 pb-1">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-[var(--accent)] text-sm font-extrabold text-white">
+                B
+              </span>
+              <span className="text-[15px] font-bold tracking-tight">BillWise</span>
+            </div>
+
+            <Dropdown>
+              <Dropdown.Trigger className="flex w-full items-center gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg-subtle)] p-2.5 text-left transition-colors hover:border-[var(--border-strong)]">
+                <Avatar className="h-8 w-8 shrink-0 rounded-lg bg-[var(--text)] text-[var(--bg)]">
+                  <Avatar.Fallback className="text-[12.5px] font-bold">{initials(company?.legal_name)}</Avatar.Fallback>
+                </Avatar>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-semibold">{company?.legal_name ?? "Firma ta"}</span>
+                  <span className="block truncate text-[11px] tabular-nums text-[var(--text-muted)]">
+                    {company?.tax_id ?? "Selectează firma"}
+                  </span>
+                </span>
+                <ChevronsUpDown size={15} className="shrink-0 text-[var(--text-faint)]" />
+              </Dropdown.Trigger>
+              <Dropdown.Popover className="min-w-[248px]">
+                <Dropdown.Menu
+                  selectionMode="single"
+                  selectedKeys={company ? [company.id] : []}
+                  onAction={(key) => selectCompany(String(key))}
+                >
+                  {list.map((c) => (
+                    <Dropdown.Item key={c.id} id={String(c.id)} textValue={c.legal_name}>
+                      <div className="flex items-center gap-2.5">
+                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[var(--bg-muted)] text-[11.5px] font-bold">
+                          {initials(c.legal_name)}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-semibold">{c.legal_name}</span>
+                          <span className="block text-[11px] tabular-nums text-[var(--text-muted)]">{c.tax_id}{c.archived_at ? " · Arhivată" : ""}</span>
+                        </span>
+                        {c.id === company?.id && <Check size={16} className="shrink-0 text-[var(--accent)]" />}
+                      </div>
+                    </Dropdown.Item>
+                  ))}
+                </Dropdown.Menu>
+              </Dropdown.Popover>
+            </Dropdown>
+
+            <Button variant="outline" fullWidth onPress={() => navigate("/firme/noi")}>
+              <Plus size={16} /> Adaugă firmă
+            </Button>
+
+            {!archivedCompany ? <Button variant="primary" fullWidth onPress={() => navigate("/facturi/noi")}>
+              <Plus size={17} /> Emite factură
+            </Button> : null}
+          </Sidebar.Header>
+
+          <Sidebar.Content>
+            {groups.map((group) => (
+              <Sidebar.Group key={group}>
+                <Sidebar.GroupLabel>{group}</Sidebar.GroupLabel>
+                <Sidebar.Menu aria-label={`${group} mobil`}>
+                  {visibleNavigation.filter((n) => n.group === group).map(({to, label, icon: Icon, badge}) => (
+                    <Sidebar.MenuItem key={to} href={to} isCurrent={location.pathname.startsWith(to)}>
+                      <Sidebar.MenuIcon>
+                        <Icon size={18} />
+                      </Sidebar.MenuIcon>
+                      <Sidebar.MenuLabel>{label}</Sidebar.MenuLabel>
+                      {badge ? <Sidebar.MenuChip>{badge}</Sidebar.MenuChip> : null}
+                    </Sidebar.MenuItem>
+                  ))}
+                </Sidebar.Menu>
+              </Sidebar.Group>
+            ))}
+          </Sidebar.Content>
+
+          <Sidebar.Footer>
+            <div className="flex items-center gap-2.5 rounded-xl bg-[var(--bg-muted)] p-2.5">
+              <Avatar className="h-9 w-9 shrink-0 rounded-lg bg-[var(--accent)] text-white">
+                <Avatar.Fallback className="text-[13px] font-bold">{initials(me.data?.data.name)}</Avatar.Fallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-semibold">{me.data?.data.name ?? "Cont BillWise"}</div>
+                <div className="truncate text-[11.5px] text-[var(--text-muted)]">
+                  {company?.legal_name ?? me.data?.data.email}
+                </div>
+              </div>
+              <button
+                aria-label="Deconectare"
+                onClick={logout}
+                className="text-[var(--text-faint)] transition-colors hover:text-[var(--text)]"
+              >
+                <LogOut size={17} />
+              </button>
+            </div>
+          </Sidebar.Footer>
+        </Sidebar.Mobile>
+
         <Sidebar.Main className="flex min-h-screen flex-col bg-[var(--bg-subtle)]">
           <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-3.5 border-b border-[var(--border)] bg-[var(--bg)] px-4 sm:px-7">
-            <Sidebar.Trigger className="md:hidden" />
+            <Sidebar.Trigger aria-label="Deschide meniul" className="md:hidden">
+              <Menu size={20} />
+            </Sidebar.Trigger>
             <div className="min-w-0">
               <div className="truncate text-[16.5px] font-bold tracking-tight">{title}</div>
               <div className="truncate text-xs text-[var(--text-muted)]">{subtitle}</div>

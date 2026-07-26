@@ -3,6 +3,7 @@ import {useNavigate, useSearchParams} from "react-router";
 import {useQuery} from "@tanstack/react-query";
 import {Button, Card, Chip, Spinner} from "@heroui/react";
 import {ComposedChart} from "@heroui-pro/react/composed-chart";
+import {KPI} from "@heroui-pro/react/kpi";
 import {
   AlertTriangle,
   ArrowRight,
@@ -216,6 +217,8 @@ function MetricCard({
   value,
   detail,
   tone = "default",
+  chart,
+  visual,
   onPress,
 }: {
   icon: React.ReactNode;
@@ -223,16 +226,29 @@ function MetricCard({
   value: string;
   detail: string;
   tone?: "default" | "success" | "warning" | "danger";
+  chart?: {value: number}[];
+  visual?: React.ReactNode;
   onPress?: () => void;
 }) {
   const colors = {default: "text-[var(--text)]", success: "text-[var(--success)]", warning: "text-[var(--warning)]", danger: "text-[var(--danger)]"};
+  const chartColors = {default: "var(--accent)", success: "var(--success)", warning: "var(--warning)", danger: "var(--danger)"};
   return (
-    <button type="button" onClick={onPress} className="text-left disabled:cursor-default" disabled={!onPress}>
-      <Card className="h-full p-4 transition-colors hover:border-[var(--border-strong)]">
+    <button type="button" onClick={onPress} className="min-w-0 text-left disabled:cursor-default" disabled={!onPress}>
+      <KPI className="h-full min-h-44 overflow-hidden p-4 transition-colors hover:border-[var(--border-strong)]">
         <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-muted)]">{icon}{label}</div>
         <div className={`mt-4 text-2xl font-bold tabular-nums ${colors[tone]}`}>{value}</div>
         <div className="mt-1 text-xs text-[var(--text-muted)]">{detail}</div>
-      </Card>
+        {chart?.length ? (
+          <KPI.Chart
+            aria-label={`Evoluție ${label.toLowerCase()}`}
+            className="-mx-4 -mb-4 mt-auto pt-3"
+            color={chartColors[tone]}
+            data={chart}
+            height={54}
+            strokeWidth={2.5}
+          />
+        ) : visual ? <div className="mt-auto pt-5">{visual}</div> : null}
+      </KPI>
     </button>
   );
 }
@@ -297,6 +313,9 @@ export function DashboardPage() {
     facturat: point.invoiced_ron_cents / 100,
     incasat: point.collected_ron_cents / 100,
   })) ?? [];
+  const invoicedSparkline = chartData.map((point) => ({value: point.facturat}));
+  const collectedSparkline = chartData.map((point) => ({value: point.incasat}));
+  const overdueShare = Math.min(100, Math.max(0, overviewData?.overdue.share_percent ?? 0));
   const periodIsDirty = ["performance", "efactura", "purchases"].some((namespace) => params.has(`${namespace}_preset`))
     || Object.keys(stored).length > 0;
 
@@ -322,14 +341,49 @@ export function DashboardPage() {
       <section className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
         {performance.isLoading ? <LoadingBlock /> : performance.isError ? <QueryError error={performance.error} retry={() => void performance.refetch()} /> : (
           <>
-            <MetricCard icon={<TrendingUp size={17} />} label="Facturat" value={money(performanceData?.summary.invoiced_ron_cents)} detail={`${performanceData?.summary.issued_document_count ?? 0} documente · ${periodLabel(performanceData!.period.from, performanceData!.period.to)}`} tone="success" />
-            <MetricCard icon={<Banknote size={17} />} label="Încasat" value={money(performanceData?.summary.collected_ron_cents)} detail={`${performanceData?.summary.invoice_with_payment_count ?? 0} facturi cu încasări`} tone="success" />
+            <MetricCard icon={<TrendingUp size={17} />} label="Facturat" value={money(performanceData?.summary.invoiced_ron_cents)} detail={`${performanceData?.summary.issued_document_count ?? 0} documente · ${periodLabel(performanceData!.period.from, performanceData!.period.to)}`} tone="success" chart={invoicedSparkline} />
+            <MetricCard icon={<Banknote size={17} />} label="Încasat" value={money(performanceData?.summary.collected_ron_cents)} detail={`${performanceData?.summary.invoice_with_payment_count ?? 0} facturi cu încasări`} tone="success" chart={collectedSparkline} />
           </>
         )}
         {overview.isLoading ? <LoadingBlock /> : overview.isError ? <QueryError error={overview.error} retry={() => void overview.refetch()} /> : (
           <>
-            <MetricCard icon={<Clock size={17} />} label="De încasat acum" value={money(overviewData?.outstanding.balance_ron_cents)} detail={`${overviewData?.outstanding.invoice_count ?? 0} facturi cu sold`} tone="warning" onPress={() => navigate("/facturi?payment_status=outstanding")} />
-            <MetricCard icon={<AlertTriangle size={17} />} label="Restant acum" value={money(overviewData?.overdue.balance_ron_cents)} detail={`${overviewData?.overdue.invoice_count ?? 0} facturi · ${overviewData?.overdue.share_percent ?? 0}% din sold`} tone="danger" onPress={() => navigate("/facturi?payment_status=overdue")} />
+            <MetricCard
+              icon={<Clock size={17} />}
+              label="De încasat acum"
+              value={money(overviewData?.outstanding.balance_ron_cents)}
+              detail={`${overviewData?.outstanding.invoice_count ?? 0} facturi cu sold`}
+              tone="warning"
+              visual={(
+                <div>
+                  <div className="flex h-2 overflow-hidden rounded-full bg-[var(--bg-muted)]">
+                    <span className="bg-[var(--warning)]" style={{width: `${100 - overdueShare}%`}} />
+                    <span className="bg-[var(--danger)]" style={{width: `${overdueShare}%`}} />
+                  </div>
+                  <div className="mt-2 flex justify-between text-[10px] text-[var(--text-muted)]">
+                    <span>În termen {100 - overdueShare}%</span>
+                    <span>Restant {overdueShare}%</span>
+                  </div>
+                </div>
+              )}
+              onPress={() => navigate("/facturi?payment_status=outstanding")}
+            />
+            <MetricCard
+              icon={<AlertTriangle size={17} />}
+              label="Restant acum"
+              value={money(overviewData?.overdue.balance_ron_cents)}
+              detail={`${overviewData?.overdue.invoice_count ?? 0} facturi · ${overdueShare}% din sold`}
+              tone="danger"
+              visual={(
+                <div>
+                  <div className="mb-2 flex justify-between text-[10px] text-[var(--text-muted)]">
+                    <span>Pondere restantă</span>
+                    <span>{overdueShare}%</span>
+                  </div>
+                  <KPI.Progress aria-label="Pondere restantă din sold" status="danger" value={overdueShare} />
+                </div>
+              )}
+              onPress={() => navigate("/facturi?payment_status=overdue")}
+            />
           </>
         )}
       </section>
@@ -343,7 +397,7 @@ export function DashboardPage() {
           {performance.isLoading ? <LoadingBlock /> : performance.isError ? <QueryError error={performance.error} retry={() => void performance.refetch()} /> : chartData.length === 0 ? <p className="py-16 text-center text-sm text-[var(--text-muted)]">Nu există date în intervalul ales.</p> : (
             <ComposedChart data={chartData} height={260}>
               <ComposedChart.Grid vertical={false} />
-              <ComposedChart.XAxis dataKey="label" />
+              <ComposedChart.XAxis dataKey="label" interval="preserveStartEnd" minTickGap={28} />
               <ComposedChart.YAxis tickFormatter={(value) => new Intl.NumberFormat("ro-RO", {notation: "compact"}).format(Number(value))} />
               <ComposedChart.Tooltip content={<ComposedChart.TooltipContent />} />
               <ComposedChart.Bar dataKey="facturat" name="Facturat (RON)" fill="var(--accent)" radius={[5, 5, 1, 1]} />
