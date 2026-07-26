@@ -44,7 +44,7 @@ const NAV: NavItem[] = [
 const META: Record<string, [string, string]> = {
   "/dashboard": ["Dashboard", "Sumarul activității firmei tale"],
   "/facturi": ["Facturi", "Toate documentele emise"],
-  "/achizitii": ["Facturi furnizori", "Documente primite automat din ANAF e-Factura"],
+  "/achizitii": ["Facturi furnizori", "Documente primite din SPV prin RO e-Factura"],
   "/seif-fiscal": ["Seif fiscal", "Originalele ANAF păstrate în spațiul privat al firmei"],
   "/recurente": ["Facturi recurente", "Generare controlată de ciorne"],
   "/clienti": ["Clienți", "Firmele cu care lucrezi"],

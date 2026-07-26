@@ -71,7 +71,7 @@ const AGING_LABELS: Record<DashboardAging["buckets"][number]["key"], string> = {
   overdue_over_90: "Restante peste 90 zile",
 };
 const EFACTURA_LABELS: Record<DashboardEfactura["buckets"][number]["key"], string> = {
-  not_submitted: "Netrimise",
+  not_submitted: "Netrimise în SPV",
   pending: "În curs",
   accepted: "Acceptate",
   problem: "Cu probleme",
@@ -423,17 +423,17 @@ export function DashboardPage() {
 
         <Card className="p-5">
           <Card.Header className="flex flex-wrap items-start justify-between gap-3">
-            <div><Card.Title>ANAF e-Factura</Card.Title><Card.Description>Doar documentele eligibile din perioada aleasă</Card.Description></div>
+            <div><Card.Title>RO e-Factura — documente emise</Card.Title><Card.Description>Facturile emise de tine către clienți din România</Card.Description></div>
             <PeriodControl label="e-Factura" value={periods.efactura} comparison={false} onChange={(value) => setPeriod("efactura", {...value, comparison: "none"})} />
           </Card.Header>
           <Card.Content>
             {efactura.isLoading ? <LoadingBlock /> : efactura.isError ? <QueryError error={efactura.error} retry={() => void efactura.refetch()} /> : (
               <div className="mt-4">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><div className="text-2xl font-bold">{efactura.data?.data.eligible_document_count} documente</div><div className="text-xs text-[var(--text-muted)]">{money(efactura.data?.data.eligible_value_ron_cents)} eligibil · {efactura.data?.data.accepted_percent}% acceptate</div></div><Chip size="sm" variant="soft" color={efactura.data?.data.connection.connected ? "success" : efactura.data?.data.connection.reauthorization_required ? "danger" : "warning"}><Chip.Label>{efactura.data?.data.connection.connected ? "SPV conectat" : efactura.data?.data.connection.reauthorization_required ? "Reconectare necesară" : "SPV neconectat"}</Chip.Label></Chip></div>
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><div className="text-2xl font-bold">{efactura.data?.data.eligible_document_count} documente eligibile</div><div className="text-xs text-[var(--text-muted)]">{money(efactura.data?.data.eligible_value_ron_cents)} · {efactura.data?.data.accepted_percent}% acceptate de SPV</div></div><Chip size="sm" variant="soft" color={efactura.data?.data.connection.connected ? "success" : efactura.data?.data.connection.reauthorization_required ? "danger" : "warning"}><Chip.Label>{efactura.data?.data.connection.connected ? "SPV conectat" : efactura.data?.data.connection.reauthorization_required ? "Reconectare necesară" : "SPV neconectat"}</Chip.Label></Chip></div>
                 <div className="grid grid-cols-2 gap-3">
                   {efactura.data?.data.buckets.map((bucket) => <button key={bucket.key} type="button" onClick={() => navigate(`/facturi?efactura_status=${bucket.key}&issue_from=${efactura.data!.data.period.from}&issue_to=${efactura.data!.data.period.to}`)} className="rounded-xl border border-[var(--border)] p-3 text-left hover:border-[var(--border-strong)]"><div className="flex items-center justify-between gap-2"><span className="text-sm">{EFACTURA_LABELS[bucket.key]}</span><Chip size="sm" variant="soft" color={EFACTURA_TONES[bucket.key]}><Chip.Label>{bucket.document_count}</Chip.Label></Chip></div><div className="mt-2 text-xs font-semibold tabular-nums">{money(bucket.value_ron_cents)}</div></button>)}
                 </div>
-                <p className="mt-4 text-xs text-[var(--text-muted)]">Dashboardul nu transmite automat documente în SPV.</p>
+                <p className="mt-4 text-xs text-[var(--text-muted)]">Transmiterea în SPV se face numai printr-o acțiune explicită.</p>
               </div>
             )}
           </Card.Content>
@@ -443,7 +443,7 @@ export function DashboardPage() {
       {can("purchase_invoice.view") ? (
         <Card className="p-5">
           <Card.Header className="flex flex-wrap items-start justify-between gap-3">
-            <div><Card.Title>Achiziții</Card.Title><Card.Description>Facturi primite din ANAF, fără amestecarea valutelor</Card.Description></div>
+            <div><Card.Title>RO e-Factura — documente primite</Card.Title><Card.Description>Facturi de la furnizori, sincronizate din SPV</Card.Description></div>
             <PeriodControl label="achiziții" value={periods.purchases} onChange={(value) => setPeriod("purchases", value)} />
           </Card.Header>
           <Card.Content>
