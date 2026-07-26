@@ -324,6 +324,120 @@ export type DashboardSummary = {
     total_ron_cents: number;
   }>;
   recent_invoices: Invoice[];
+  as_of: string;
+  outstanding: {
+    balance_ron_cents: number;
+    invoice_count: number;
+  };
+  overdue: {
+    balance_ron_cents: number;
+    invoice_count: number;
+    share_percent: number;
+  };
+  attention: {
+    total: number;
+    critical: number;
+    warning: number;
+  };
+};
+
+export type DashboardPeriod = {
+  from: string;
+  to: string;
+  preset: string;
+  bucket: "day" | "week" | "month";
+};
+
+export type DashboardPerformance = {
+  period: DashboardPeriod;
+  comparison_period: {from: string; to: string} | null;
+  summary: {
+    invoiced_ron_cents: number;
+    issued_document_count: number;
+    collected_ron_cents: number;
+    invoice_with_payment_count: number;
+  };
+  comparison: {
+    invoiced_ron_cents: number;
+    issued_document_count: number;
+    collected_ron_cents: number;
+    invoice_with_payment_count: number;
+    invoiced_change_percent: number | null;
+    collected_change_percent: number | null;
+  } | null;
+  series: Array<{
+    from: string;
+    to: string;
+    invoiced_ron_cents: number;
+    collected_ron_cents: number;
+  }>;
+};
+
+export type DashboardAging = {
+  as_of: string;
+  total_balance_ron_cents: number;
+  invoice_count: number;
+  buckets: Array<{
+    key: "current" | "overdue_1_30" | "overdue_31_60" | "overdue_61_90" | "overdue_over_90";
+    balance_ron_cents: number;
+    invoice_count: number;
+    share_percent: number;
+    filter: Record<string, string | number | string[]>;
+  }>;
+};
+
+export type DashboardEfactura = {
+  period: DashboardPeriod;
+  connection: {
+    status: "disconnected" | "reconnect_required" | "active" | "refreshable";
+    connected: boolean;
+    reauthorization_required: boolean;
+    last_synced_at: string | null;
+    last_error_code: string | null;
+  };
+  eligible_document_count: number;
+  eligible_value_ron_cents: number;
+  accepted_percent: number;
+  buckets: Array<{
+    key: "not_submitted" | "pending" | "accepted" | "problem";
+    document_count: number;
+    value_ron_cents: number;
+  }>;
+};
+
+export type DashboardPurchases = {
+  period: DashboardPeriod;
+  comparison_period: {from: string; to: string} | null;
+  summary: {
+    document_count: number;
+    supplier_count: number;
+    unreviewed_count: number;
+    reviewed_count: number;
+    needs_attention_count: number;
+    totals_by_currency: Array<{currency: string; document_count: number; total_cents: number}>;
+  };
+  comparison: {
+    document_count: number;
+    document_count_change_percent: number | null;
+  } | null;
+  series: Array<{from: string; to: string; document_count: number}>;
+};
+
+export type DashboardAttention = {
+  total: number;
+  critical: number;
+  warning: number;
+  items: Array<{
+    kind: string;
+    severity: "critical" | "warning" | "info";
+    title: string;
+    message: string;
+    target: string;
+    date: string | null;
+    invoice_id: string | null;
+    amount_cents: number | null;
+    currency: string | null;
+  }>;
 };
 
 export type RecurringInvoiceTemplate = {

@@ -1,5 +1,5 @@
 import {useMemo, useState} from "react";
-import {useNavigate} from "react-router";
+import {useNavigate, useSearchParams} from "react-router";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Chip, Spinner} from "@heroui/react";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
@@ -21,11 +21,14 @@ export const shouldPollPurchaseInvoices = (pollingUntil: number, now = Date.now(
 
 export function PurchaseInvoicesPage() {
   const {company, can} = useCompany(); const navigate = useNavigate(); const client = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [syncPollingByCompany, setSyncPollingByCompany] = useState<Record<string, number>>({});
-  const grid = useServerDataGridState<Filter>({defaultSort: DEFAULT_SORT, sortColumns: ["number", "issue_date", "due_date", "total_cents"], filter: {param: "status", defaultValue: "toate", values: FILTERS.map((f) => f.key)}});
+  const grid = useServerDataGridState<Filter>({defaultSort: DEFAULT_SORT, sortColumns: ["number", "issue_date", "due_date", "total_cents"], filter: {param: "status", defaultValue: "toate", values: FILTERS.map((f) => f.key)}, extraParams: ["issue_from", "issue_to"]});
   const active = FILTERS.find((item) => item.key === (grid.filter ?? "toate"));
+  const issueFrom = searchParams.get("issue_from");
+  const issueTo = searchParams.get("issue_to");
   const syncPollingUntil = company ? syncPollingByCompany[company.id] ?? 0 : 0;
-  const invoices = useQuery({queryKey: ["purchase-invoices", company?.id, grid.page, grid.filter, grid.debouncedSearch, grid.apiSort], enabled: Boolean(company?.id && can("purchase_invoice.view")), placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === company?.id ? previous : undefined, refetchInterval: () => shouldPollPurchaseInvoices(syncPollingUntil) ? 2500 : false, queryFn: () => api<PurchaseInvoice[]>(`/companies/${company!.id}/purchase-invoices${listQuery({page: grid.page, perPage: 20, sort: grid.apiSort, filter: {...(active?.value ? {review_status: active.value} : {}), ...(grid.debouncedSearch ? {search: {contains: grid.debouncedSearch}} : {})}})}`)});
+  const invoices = useQuery({queryKey: ["purchase-invoices", company?.id, grid.page, grid.filter, grid.debouncedSearch, grid.apiSort, issueFrom, issueTo], enabled: Boolean(company?.id && can("purchase_invoice.view")), placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === company?.id ? previous : undefined, refetchInterval: () => shouldPollPurchaseInvoices(syncPollingUntil) ? 2500 : false, queryFn: () => api<PurchaseInvoice[]>(`/companies/${company!.id}/purchase-invoices${listQuery({page: grid.page, perPage: 20, sort: grid.apiSort, filter: {...(active?.value ? {review_status: active.value} : {}), ...(grid.debouncedSearch ? {search: {contains: grid.debouncedSearch}} : {}), ...(issueFrom || issueTo ? {issue_date: {...(issueFrom ? {gte: issueFrom} : {}), ...(issueTo ? {lte: issueTo} : {})}} : {})}})}`)});
   const connection = useQuery({queryKey: ["spv-connection", company?.id], enabled: Boolean(company?.id && can("purchase_invoice.view")), refetchInterval: () => shouldPollPurchaseInvoices(syncPollingUntil) ? 2500 : false, queryFn: () => api<SpvConnection>(`/efactura/spv/connection?company_profile_id=${company!.id}`)});
   const sync = useMutation({mutationFn: (companyId: string) => api<{queued: boolean}>(`/companies/${companyId}/efactura/inbox/sync`, {method: "POST"}), onSuccess: (_response, companyId) => {
     setSyncPollingByCompany((current) => ({...current, [companyId]: Date.now() + PURCHASE_INVOICE_SYNC_POLLING_MS}));

@@ -13,6 +13,7 @@ type Options<TFilter extends string> = {
   defaultSort: DataGridSortDescriptor;
   sortColumns: readonly string[];
   filter?: FilterConfig<TFilter>;
+  extraParams?: readonly string[];
 };
 
 function descriptorValue(descriptor: DataGridSortDescriptor): string {
@@ -23,6 +24,7 @@ export function useServerDataGridState<TFilter extends string = never>({
   defaultSort,
   sortColumns,
   filter: filterConfig,
+  extraParams = [],
 }: Options<TFilter>) {
   const [params, setParams] = useSearchParams();
 
@@ -105,14 +107,16 @@ export function useServerDataGridState<TFilter extends string = never>({
       next.delete("q");
       next.delete("sort");
       if (filterConfig) next.delete(filterConfig.param);
+      for (const param of extraParams) next.delete(param);
     });
-  }, [filterConfig, updateParams]);
+  }, [extraParams, filterConfig, updateParams]);
 
   const isDirty =
     page !== 1 ||
     search !== "" ||
     descriptorValue(sort) !== descriptorValue(defaultSort) ||
-    Boolean(filterConfig && filter !== filterConfig.defaultValue);
+    Boolean(filterConfig && filter !== filterConfig.defaultValue) ||
+    extraParams.some((param) => params.has(param));
 
   return {
     apiSort: descriptorValue(sort),

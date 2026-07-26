@@ -1,5 +1,11 @@
 import {describe, expect, it} from "vitest";
 import type {Invoice} from "../lib/types";
+import {
+  clearDashboardPeriods,
+  dashboardPeriodQuery,
+  readDashboardPeriod,
+  writeDashboardPeriod,
+} from "../lib/dashboardPeriods";
 import {balanceRonCents, isOverdue} from "./DashboardPage";
 
 function invoice(attributes: Partial<Invoice>): Invoice {
@@ -21,5 +27,35 @@ describe("Dashboard payment-aware calculations", () => {
   it("uses the API payment status instead of due date alone", () => {
     expect(isOverdue(invoice({balance_cents: 0, payment_status: "paid"}))).toBe(false);
     expect(isOverdue(invoice({balance_cents: 2500, payment_status: "overdue"}))).toBe(true);
+  });
+});
+
+describe("Dashboard period controls", () => {
+  it("keeps each dashboard section independent in the URL", () => {
+    let params = writeDashboardPeriod(new URLSearchParams(), "performance", {
+      preset: "current_quarter",
+      comparison: "previous_year",
+    });
+    params = writeDashboardPeriod(params, "purchases", {
+      preset: "last_30_days",
+      comparison: "previous_period",
+    });
+
+    expect(readDashboardPeriod(params, "performance").preset).toBe("current_quarter");
+    expect(readDashboardPeriod(params, "purchases").preset).toBe("last_30_days");
+    expect(readDashboardPeriod(params, "efactura").preset).toBe("current_month");
+  });
+
+  it("only serializes a valid applied custom interval", () => {
+    const selection = {preset: "custom", comparison: "none", from: "2026-07-01", to: "2026-07-20"} as const;
+    expect(dashboardPeriodQuery(selection)).toContain("_from=2026-07-01");
+    expect(dashboardPeriodQuery(selection)).toContain("_to=2026-07-20");
+  });
+
+  it("clears dashboard keys without deleting unrelated URL state", () => {
+    const params = new URLSearchParams("performance_preset=current_month&onboarding=complete");
+    const cleared = clearDashboardPeriods(params);
+    expect(cleared.has("performance_preset")).toBe(false);
+    expect(cleared.get("onboarding")).toBe("complete");
   });
 });

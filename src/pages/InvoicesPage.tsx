@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from "react";
-import {useNavigate} from "react-router";
+import {useNavigate, useSearchParams} from "react-router";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Chip, Dropdown, Label, Separator, Spinner, Tooltip, type Selection} from "@heroui/react";
 import {ActionBar} from "@heroui-pro/react/action-bar";
@@ -11,7 +11,7 @@ import {ConfirmDialog} from "../components/ConfirmDialog";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
 import {AppCheckbox} from "../components/FormControls";
-import {api, downloadApiFile, listQuery, openApiFile} from "../lib/api";
+import {api, downloadApiFile, listQuery, openApiFile, type ListParams} from "../lib/api";
 import type {Invoice, InvoicePayment} from "../lib/types";
 import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
@@ -22,9 +22,9 @@ const FILTERS: {key: FilterKey; label: string}[] = [
   {key: "toate", label: "Toate"},
   {key: "ciorne", label: "Ciorne"},
   {key: "emise", label: "Emise"},
-  {key: "neachitate", label: "Neachitate"},
-  {key: "partiale", label: "Parțiale"},
-  {key: "achitate", label: "Achitate"},
+  {key: "neachitate", label: "Neîncasate"},
+  {key: "partiale", label: "Parțial încasate"},
+  {key: "achitate", label: "Încasate"},
   {key: "restante", label: "Restante"},
   {key: "anulate", label: "Anulate"},
 ];
@@ -73,6 +73,7 @@ function canSettle(invoice: Invoice): boolean {
 export function InvoicesPage() {
   const {company} = useCompany();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmation, setConfirmation] = useState<Confirmation>(null);
@@ -82,19 +83,35 @@ export function InvoicesPage() {
     defaultSort: DEFAULT_SORT,
     sortColumns: SORT_COLUMNS,
     filter: FILTER_CONFIG,
+    extraParams: ["payment_status", "efactura_status", "issue_from", "issue_to", "aging"],
   });
   const filter = grid.filter ?? "toate";
+  const dashboardPaymentStatus = searchParams.get("payment_status");
+  const efacturaStatus = searchParams.get("efactura_status");
+  const issueFrom = searchParams.get("issue_from");
+  const issueTo = searchParams.get("issue_to");
+  const agingBucket = searchParams.get("aging");
+  const issueDateFilter: Record<string, string | number> = {};
+  if (issueFrom) issueDateFilter.gte = issueFrom;
+  if (issueTo) issueDateFilter.lte = issueTo;
+  const dashboardFilters: NonNullable<ListParams["filter"]> = {
+    ...(dashboardPaymentStatus ? {payment_status: dashboardPaymentStatus} : {}),
+    ...(efacturaStatus ? {efactura_status: efacturaStatus} : {}),
+    ...(issueFrom || issueTo ? {issue_date: issueDateFilter} : {}),
+    ...(agingBucket ? {receivables_age: agingBucket} : {}),
+  };
   const exportQuery = listQuery({
     sort: grid.apiSort,
     filter: {
       ...(filter in displayFilter ? {display_status: displayFilter[filter as keyof typeof displayFilter]} : {}),
       ...(paymentFilter[filter] ? {payment_status: paymentFilter[filter]} : {}),
       ...(grid.debouncedSearch ? {formatted_number: {contains: grid.debouncedSearch}} : {}),
+      ...dashboardFilters,
     },
   });
 
   const invoices = useQuery({
-    queryKey: ["invoices", company?.id, "list", grid.page, filter, grid.debouncedSearch, grid.apiSort],
+    queryKey: ["invoices", company?.id, "list", grid.page, filter, grid.debouncedSearch, grid.apiSort, dashboardPaymentStatus, efacturaStatus, issueFrom, issueTo, agingBucket],
     queryFn: () =>
       api<Invoice[]>(
         `/companies/${company!.id}/invoices${listQuery({
@@ -105,6 +122,7 @@ export function InvoicesPage() {
             ...(filter in displayFilter ? {display_status: displayFilter[filter as keyof typeof displayFilter]} : {}),
             ...(paymentFilter[filter] ? {payment_status: paymentFilter[filter]} : {}),
             ...(grid.debouncedSearch ? {formatted_number: {contains: grid.debouncedSearch}} : {}),
+            ...dashboardFilters,
           },
         })}`,
       ),
@@ -306,7 +324,7 @@ export function InvoicesPage() {
         minWidth: 130,
         cell: (invoice) => {
           const status = displayStatus(invoice);
-          const paymentLabels = {unpaid: "Neachitată", partial: "Parțială", paid: "Achitată", overdue: "Restantă", not_applicable: "Corecție"};
+          const paymentLabels = {unpaid: "Neîncasată", partial: "Parțial încasată", paid: "Încasată", overdue: "Restantă", not_applicable: "Corecție"};
           const label = invoice.status === "issued" ? paymentLabels[invoice.payment_status] : displayStatusLabels[status];
           return (
             <Chip size="sm" color={invoice.payment_status === "paid" ? "success" : statusTone[status]} variant="soft">

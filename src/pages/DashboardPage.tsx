@@ -1,353 +1,433 @@
-import {useMemo} from "react";
+import {useMemo, useState} from "react";
 import {useNavigate, useSearchParams} from "react-router";
 import {useQuery} from "@tanstack/react-query";
 import {Button, Card, Chip, Spinner} from "@heroui/react";
-import {KPI} from "@heroui-pro/react/kpi";
-import {BarChart} from "@heroui-pro/react/bar-chart";
-import {AlertTriangle, ArrowRight, CheckCircle2, Clock, FileText, TrendingUp} from "lucide-react";
+import {ComposedChart} from "@heroui-pro/react/composed-chart";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Banknote,
+  CheckCircle2,
+  CircleAlert,
+  Clock,
+  FileCheck2,
+  FileText,
+  ReceiptText,
+  RotateCcw,
+  ShoppingCart,
+  TrendingUp,
+} from "lucide-react";
 import {useCompany} from "../components/AppShell";
-import {api} from "../lib/api";
-import type {DashboardSummary, Invoice} from "../lib/types";
-import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
+import {AppDatePicker, AppSelect} from "../components/FormControls";
+import {api, apiErrorMessage} from "../lib/api";
+import {
+  clearDashboardPeriods,
+  dashboardPeriodQuery,
+  dashboardPreferenceKey,
+  DEFAULT_DASHBOARD_PERIOD,
+  readDashboardPeriod,
+  readDashboardPeriods,
+  writeDashboardPeriod,
+  type DashboardComparison,
+  type DashboardPeriodNamespace,
+  type DashboardPeriodPreset,
+  type DashboardPeriodSelection,
+} from "../lib/dashboardPeriods";
+import {date, money} from "../lib/format";
+import type {
+  DashboardAging,
+  DashboardAttention,
+  DashboardEfactura,
+  DashboardPerformance,
+  DashboardPurchases,
+  DashboardSummary,
+  Invoice,
+} from "../lib/types";
 
-// ---------------------------------------------------------------------------
-// Derivation helpers (module scope, pure).
-// Money is INTEGER CENTS; mixed-currency invoices are aggregated in RON via
-// `total_cents_ron ?? total_cents` so every total lands in the local currency.
-// ---------------------------------------------------------------------------
+const PERIOD_OPTIONS = [
+  {id: "current_week", label: "Săptămâna curentă"},
+  {id: "previous_week", label: "Săptămâna trecută"},
+  {id: "current_month", label: "Luna curentă"},
+  {id: "previous_month", label: "Luna trecută"},
+  {id: "current_quarter", label: "Trimestrul curent"},
+  {id: "previous_quarter", label: "Trimestrul trecut"},
+  {id: "current_year", label: "Anul curent"},
+  {id: "previous_year", label: "Anul trecut"},
+  {id: "last_30_days", label: "Ultimele 30 zile"},
+  {id: "last_90_days", label: "Ultimele 90 zile"},
+  {id: "custom", label: "Interval personalizat"},
+];
+const COMPARISON_OPTIONS = [
+  {id: "previous_period", label: "vs. perioada anterioară"},
+  {id: "previous_year", label: "vs. anul anterior"},
+  {id: "none", label: "Fără comparație"},
+];
+const AGING_LABELS: Record<DashboardAging["buckets"][number]["key"], string> = {
+  current: "În termen",
+  overdue_1_30: "Restante 1–30 zile",
+  overdue_31_60: "Restante 31–60 zile",
+  overdue_61_90: "Restante 61–90 zile",
+  overdue_over_90: "Restante peste 90 zile",
+};
+const EFACTURA_LABELS: Record<DashboardEfactura["buckets"][number]["key"], string> = {
+  not_submitted: "Netrimise",
+  pending: "În curs",
+  accepted: "Acceptate",
+  problem: "Cu probleme",
+};
+const EFACTURA_TONES: Record<DashboardEfactura["buckets"][number]["key"], "default" | "warning" | "success" | "danger"> = {
+  not_submitted: "default",
+  pending: "warning",
+  accepted: "success",
+  problem: "danger",
+};
 
-const RO_MONTHS = ["Ian", "Feb", "Mar", "Apr", "Mai", "Iun", "Iul", "Aug", "Sep", "Oct", "Noi", "Dec"] as const;
-
-type SparkPoint = {value: number};
-type MonthPoint = {month: string; value: number};
-type Bucket = {key: string; label: string; value: number; color: string; dot: string};
-
-// RON-equivalent total in integer cents.
-function ronCents(inv: Invoice): number {
-  return inv.total_cents_ron ?? inv.total_cents;
-}
-
-export function balanceRonCents(inv: Invoice): number {
-  if (inv.balance_cents <= 0) return 0;
-  if (inv.total_cents_ron != null && inv.total_cents > 0) {
-    return Math.round((inv.balance_cents * inv.total_cents_ron) / inv.total_cents);
+export function balanceRonCents(invoice: Invoice): number {
+  if (invoice.balance_cents <= 0) return 0;
+  if (invoice.total_cents_ron != null && invoice.total_cents > 0) {
+    return Math.round((invoice.balance_cents * invoice.total_cents_ron) / invoice.total_cents);
   }
-  return inv.balance_cents;
+  return invoice.balance_cents;
 }
 
-export const isOverdue = (inv: Invoice): boolean => inv.payment_status === "overdue";
+export const isOverdue = (invoice: Invoice): boolean => invoice.payment_status === "overdue";
 
-// Running sum of a weekly series — a monotonic sparkline for cumulative KPIs.
-function cumulative(series: SparkPoint[]): SparkPoint[] {
-  let acc = 0;
-  return series.map((p) => ({value: (acc += p.value)}));
+function todayIso(): string {
+  return new Date().toLocaleDateString("en-CA", {timeZone: "Europe/Bucharest"});
 }
 
-// ---------------------------------------------------------------------------
+function periodLabel(from: string, to: string): string {
+  return from === to ? date(from) : `${date(from)} – ${date(to)}`;
+}
+
+function seriesLabel(from: string, to: string): string {
+  const first = date(from).slice(0, 5);
+  const last = date(to).slice(0, 5);
+  return from === to ? first : `${first}–${last}`;
+}
+
+function paymentLabel(invoice: Invoice): string {
+  if (invoice.document_type !== "invoice") return "Corecție";
+  return {
+    paid: "Încasată",
+    partial: "Parțial încasată",
+    unpaid: "Neîncasată",
+    overdue: "Restantă",
+    not_applicable: "Corecție",
+  }[invoice.payment_status];
+}
+
+function paymentTone(invoice: Invoice): "default" | "success" | "warning" | "danger" {
+  if (invoice.payment_status === "paid") return "success";
+  if (invoice.payment_status === "overdue") return "danger";
+  if (invoice.payment_status === "partial") return "warning";
+  return "default";
+}
+
+function QueryError({error, retry}: {error: unknown; retry: () => void}) {
+  return (
+    <div className="flex min-h-32 flex-col items-center justify-center gap-3 p-5 text-center">
+      <p className="text-sm text-[var(--danger)]">{apiErrorMessage(error, "Datele nu au putut fi încărcate.")}</p>
+      <Button size="sm" variant="outline" onPress={retry}>Reîncearcă</Button>
+    </div>
+  );
+}
+
+function LoadingBlock({label = "Se încarcă…"}: {label?: string}) {
+  return <div className="flex min-h-32 items-center justify-center gap-2 text-sm text-[var(--text-muted)]"><Spinner size="sm" /> {label}</div>;
+}
+
+function PeriodControl({
+  value,
+  comparison = true,
+  label,
+  onChange,
+}: {
+  value: DashboardPeriodSelection;
+  comparison?: boolean;
+  label: string;
+  onChange: (next: DashboardPeriodSelection) => void;
+}) {
+  const [customOpen, setCustomOpen] = useState(false);
+  const [draftFrom, setDraftFrom] = useState(value.from ?? todayIso());
+  const [draftTo, setDraftTo] = useState(value.to ?? todayIso());
+  const invalid = !draftFrom || !draftTo || draftFrom > draftTo || draftTo > todayIso();
+
+  const choosePreset = (preset: string) => {
+    if (preset === "custom") {
+      setDraftFrom(value.from ?? todayIso());
+      setDraftTo(value.to ?? todayIso());
+      setCustomOpen(true);
+      return;
+    }
+    setCustomOpen(false);
+    onChange({...value, preset: preset as DashboardPeriodPreset, from: undefined, to: undefined});
+  };
+
+  return (
+    <div className="relative flex flex-wrap items-end gap-2">
+      <AppSelect
+        ariaLabel={`Perioadă ${label}`}
+        className="min-w-48"
+        value={value.preset}
+        options={PERIOD_OPTIONS}
+        onChange={choosePreset}
+      />
+      {comparison ? (
+        <AppSelect
+          ariaLabel={`Comparație ${label}`}
+          className="min-w-48"
+          value={value.comparison}
+          options={COMPARISON_OPTIONS}
+          onChange={(next) => onChange({...value, comparison: next as DashboardComparison})}
+        />
+      ) : null}
+      {customOpen ? (
+        <div className="absolute right-0 top-12 z-20 w-[min(440px,calc(100vw-3rem))] rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-xl">
+          <p className="mb-3 text-sm font-semibold">Interval personalizat</p>
+          <div className="grid grid-cols-2 gap-3">
+            <AppDatePicker name="dashboard_from" ariaLabel="De la" label="De la" value={draftFrom} maxValue={draftTo || todayIso()} onChange={setDraftFrom} />
+            <AppDatePicker name="dashboard_to" ariaLabel="Până la" label="Până la" value={draftTo} minValue={draftFrom} maxValue={todayIso()} onChange={setDraftTo} />
+          </div>
+          {invalid ? <p className="mt-2 text-xs text-[var(--danger)]">Alege un interval valid, care nu depășește data de azi.</p> : null}
+          <div className="mt-4 flex justify-end gap-2">
+            <Button size="sm" variant="ghost" onPress={() => setCustomOpen(false)}>Renunță</Button>
+            <Button
+              size="sm"
+              variant="primary"
+              isDisabled={invalid}
+              onPress={() => {
+                onChange({...value, preset: "custom", from: draftFrom, to: draftTo});
+                setCustomOpen(false);
+              }}
+            >
+              Aplică
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MetricCard({
+  icon,
+  label,
+  value,
+  detail,
+  tone = "default",
+  onPress,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "default" | "success" | "warning" | "danger";
+  onPress?: () => void;
+}) {
+  const colors = {default: "text-[var(--text)]", success: "text-[var(--success)]", warning: "text-[var(--warning)]", danger: "text-[var(--danger)]"};
+  return (
+    <button type="button" onClick={onPress} className="text-left disabled:cursor-default" disabled={!onPress}>
+      <Card className="h-full p-4 transition-colors hover:border-[var(--border-strong)]">
+        <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-muted)]">{icon}{label}</div>
+        <div className={`mt-4 text-2xl font-bold tabular-nums ${colors[tone]}`}>{value}</div>
+        <div className="mt-1 text-xs text-[var(--text-muted)]">{detail}</div>
+      </Card>
+    </button>
+  );
+}
 
 export function DashboardPage() {
+  const {company, can} = useCompany();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const {company} = useCompany();
+  const [params, setParams] = useSearchParams();
+  const stored = useMemo(() => readDashboardPeriods(company?.id), [company?.id]);
+  const periods = {
+    performance: readDashboardPeriod(params, "performance", stored.performance ?? DEFAULT_DASHBOARD_PERIOD),
+    efactura: readDashboardPeriod(params, "efactura", stored.efactura ?? {...DEFAULT_DASHBOARD_PERIOD, comparison: "none"}),
+    purchases: readDashboardPeriod(params, "purchases", stored.purchases ?? DEFAULT_DASHBOARD_PERIOD),
+  };
 
-  const dashboardQuery = useQuery({
-    queryKey: ["dashboard", company?.id],
+  const setPeriod = (namespace: DashboardPeriodNamespace, value: DashboardPeriodSelection) => {
+    setParams(writeDashboardPeriod(params, namespace, value));
+    if (company?.id) {
+      localStorage.setItem(dashboardPreferenceKey(company.id), JSON.stringify({...readDashboardPeriods(company.id), [namespace]: value}));
+    }
+  };
+  const resetPeriods = () => {
+    setParams(clearDashboardPeriods(params));
+    if (company?.id) localStorage.removeItem(dashboardPreferenceKey(company.id));
+  };
+
+  const overview = useQuery({
+    queryKey: ["dashboard", company?.id, "overview"],
     queryFn: () => api<DashboardSummary>(`/companies/${company!.id}/dashboard`),
     enabled: Boolean(company?.id),
   });
+  const performance = useQuery({
+    queryKey: ["dashboard", company?.id, "performance", periods.performance],
+    queryFn: () => api<DashboardPerformance>(`/companies/${company!.id}/dashboard/performance${dashboardPeriodQuery(periods.performance)}`),
+    enabled: Boolean(company?.id),
+  });
+  const aging = useQuery({
+    queryKey: ["dashboard", company?.id, "aging"],
+    queryFn: () => api<DashboardAging>(`/companies/${company!.id}/dashboard/receivables-aging`),
+    enabled: Boolean(company?.id),
+  });
+  const efactura = useQuery({
+    queryKey: ["dashboard", company?.id, "efactura", periods.efactura],
+    queryFn: () => api<DashboardEfactura>(`/companies/${company!.id}/dashboard/efactura${dashboardPeriodQuery(periods.efactura)}`),
+    enabled: Boolean(company?.id),
+  });
+  const purchases = useQuery({
+    queryKey: ["dashboard", company?.id, "purchases", periods.purchases],
+    queryFn: () => api<DashboardPurchases>(`/companies/${company!.id}/dashboard/purchases${dashboardPeriodQuery(periods.purchases)}`),
+    enabled: Boolean(company?.id && can("purchase_invoice.view")),
+  });
+  const attention = useQuery({
+    queryKey: ["dashboard", company?.id, "attention"],
+    queryFn: () => api<DashboardAttention>(`/companies/${company!.id}/dashboard/attention?_limit=10`),
+    enabled: Boolean(company?.id),
+  });
 
-  const summary = dashboardQuery.data?.data;
-
-  const model = useMemo(() => {
-    const billedThisMonth = summary?.billed_this_month_ron_cents ?? 0;
-    const billedPrevMonth = summary?.previous_month_invoiced_ron_cents ?? 0;
-    const momPct = billedPrevMonth > 0 ? Math.round(((billedThisMonth - billedPrevMonth) / billedPrevMonth) * 100) : null;
-    const toCollect = summary?.balance_ron_cents ?? 0;
-    const overdueAmount = summary?.overdue_balance_ron_cents ?? 0;
-    const overduePct = toCollect > 0 ? Math.round((overdueAmount / toCollect) * 100) : null;
-    const lastYearMonth = summary?.same_month_last_year_invoiced_ron_cents ?? 0;
-    const yoyPct = lastYearMonth > 0 ? Math.round(((billedThisMonth - lastYearMonth) / lastYearMonth) * 100) : null;
-    const spark: SparkPoint[] = (summary?.weekly_invoiced_ron_cents ?? []).map((value) => ({
-      value: Math.round(value / 100),
-    }));
-    const overdueSpark: SparkPoint[] = (summary?.weekly_overdue_balance_ron_cents ?? []).map((value) => ({
-      value: Math.round(value / 100),
-    }));
-
-    const buckets: Bucket[] = [
-      {key: "in-termen", label: "În termen", value: summary?.outstanding_balance_ron_cents ?? 0, color: "var(--success)", dot: "var(--success)"},
-      {key: "restante", label: "Restante", value: overdueAmount, color: "var(--danger)", dot: "var(--danger)"},
-      {key: "ciorne", label: "Ciorne", value: summary?.draft_total_ron_cents ?? 0, color: "var(--warning)", dot: "var(--warning)"},
-    ];
-
-    return {
-      billedThisMonth,
-      totalBilled: summary?.total_invoiced_ron_cents ?? 0,
-      toCollect,
-      overdueAmount,
-      issuedThisMonthCount: summary?.issued_this_month_count ?? 0,
-      outstandingCount: summary?.outstanding_count ?? 0,
-      momPct,
-      overduePct,
-      yoyPct,
-      spark,
-      cumulativeSpark: cumulative(spark),
-      overdueSpark,
-      monthly: (summary?.monthly_invoiced_ron_cents ?? []).map(({month, total_ron_cents}): MonthPoint => ({
-        month: RO_MONTHS[Number(month.slice(5, 7)) - 1] ?? month,
-        value: Math.round(total_ron_cents / 100 / 1000),
-      })),
-      buckets,
-      bucketTotal: buckets.reduce((acc, b) => acc + b.value, 0),
-    };
-  }, [summary]);
-
-  if (dashboardQuery.isLoading) {
-    return (
-      <div className="flex items-center justify-center gap-3 py-24 text-sm text-[var(--text-muted)]">
-        <Spinner size="sm" /> Se încarcă datele…
-      </div>
-    );
-  }
-
-  if (dashboardQuery.isError) {
-    return (
-      <div className="rounded-2xl border border-[var(--danger)] bg-[var(--danger-soft)] px-5 py-4 text-sm font-medium text-[var(--danger)]">
-        Datele nu au putut fi încărcate.
-      </div>
-    );
-  }
-
-  const kpiValueStyle: React.CSSProperties = {
-    fontSize: 26,
-    fontWeight: 700,
-    letterSpacing: "-0.02em",
-    fontVariantNumeric: "tabular-nums",
-  };
-  const recent = summary?.recent_invoices ?? [];
+  const performanceData = performance.data?.data;
+  const overviewData = overview.data?.data;
+  const chartData = performanceData?.series.map((point) => ({
+    label: seriesLabel(point.from, point.to),
+    facturat: point.invoiced_ron_cents / 100,
+    incasat: point.collected_ron_cents / 100,
+  })) ?? [];
+  const periodIsDirty = ["performance", "efactura", "purchases"].some((namespace) => params.has(`${namespace}_preset`))
+    || Object.keys(stored).length > 0;
 
   return (
     <div className="flex flex-col gap-4">
-      {searchParams.get("onboarding") === "complete" ? (
+      {params.get("onboarding") === "complete" ? (
         <section className="rounded-2xl border border-[var(--success)]/30 bg-[var(--success-soft)] p-5">
-          <div className="flex items-start gap-3">
-            <CheckCircle2 size={21} className="mt-0.5 shrink-0 text-[var(--success)]" />
-            <div>
-              <h2 className="font-bold text-[var(--success)]">Firma este configurată</h2>
-              <p className="mt-1 text-sm text-[var(--text-muted)]">
-                Poți continua cu pașii neblocanți de mai jos.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onPress={() => navigate("/serii")}>
-                  Configurează seria
-                </Button>
-                <Button size="sm" variant="outline" onPress={() => navigate("/conturi")}>
-                  Adaugă un cont bancar
-                </Button>
-                <span className="inline-flex items-center rounded-lg border border-[var(--border)] px-3 text-xs text-[var(--text-muted)]">
-                  Conectarea SPV urmează în setările integrării
-                </span>
-              </div>
-            </div>
-          </div>
+          <div className="flex items-start gap-3"><CheckCircle2 size={21} className="mt-0.5 text-[var(--success)]" /><div><h2 className="font-bold text-[var(--success)]">Firma este configurată</h2><p className="mt-1 text-sm text-[var(--text-muted)]">Poți emite prima factură sau continua configurarea.</p></div></div>
         </section>
       ) : null}
 
-      {/* 1. KPI grid ------------------------------------------------------ */}
-      <section
-        style={{display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 16}}
-      >
-        <KPI className="p-4">
-          <KPI.Header className="flex items-center gap-2.5">
-            <KPI.Icon status="success">
-              <TrendingUp size={18} />
-            </KPI.Icon>
-            <KPI.Title className="text-[13px] text-[var(--text-muted)]">Facturat luna aceasta</KPI.Title>
-          </KPI.Header>
-          <KPI.Content className="mt-3 flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <span style={kpiValueStyle}>{money(model.billedThisMonth)}</span>
-              {model.momPct != null && (
-                <KPI.Trend trend={model.momPct >= 0 ? "up" : "down"} size="sm">
-                  {`${model.momPct >= 0 ? "+" : ""}${model.momPct}%`}
-                </KPI.Trend>
-              )}
-            </div>
-            <span className="text-xs text-[var(--text-muted)]">{model.issuedThisMonthCount} facturi emise</span>
-          </KPI.Content>
-          <KPI.Chart data={model.spark} color="var(--accent)" height={40} />
-        </KPI>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold">Performanță comercială</h2>
+          <p className="text-sm text-[var(--text-muted)]">Facturarea urmează data emiterii; încasările urmează data plății.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <PeriodControl label="performanță" value={periods.performance} onChange={(value) => setPeriod("performance", value)} />
+          <Button size="sm" variant="ghost" isDisabled={!periodIsDirty} onPress={resetPeriods}><RotateCcw size={15} /> Resetează perioadele</Button>
+        </div>
+      </div>
 
-        <KPI className="p-4">
-          <KPI.Header className="flex items-center gap-2.5">
-            <KPI.Icon>
-              <FileText size={18} />
-            </KPI.Icon>
-            <KPI.Title className="text-[13px] text-[var(--text-muted)]">Total facturat</KPI.Title>
-          </KPI.Header>
-          <KPI.Content className="mt-3 flex flex-col gap-1">
-              <span style={kpiValueStyle}>{money(model.totalBilled)}</span>
-            <span className="text-xs text-[var(--text-muted)]">total emis</span>
-          </KPI.Content>
-          <KPI.Chart data={model.cumulativeSpark} color="var(--accent)" height={40} />
-        </KPI>
-
-        <KPI className="p-4">
-          <KPI.Header className="flex items-center gap-2.5">
-            <KPI.Icon status="warning">
-              <Clock size={18} />
-            </KPI.Icon>
-            <KPI.Title className="text-[13px] text-[var(--text-muted)]">De încasat</KPI.Title>
-          </KPI.Header>
-          <KPI.Content className="mt-3 flex flex-col gap-1">
-            <span style={kpiValueStyle}>{money(model.toCollect)}</span>
-            <span className="text-xs text-[var(--text-muted)]">sold deschis</span>
-          </KPI.Content>
-          <KPI.Chart data={model.spark} color="var(--warning)" height={40} />
-        </KPI>
-
-        <KPI className="p-4">
-          <KPI.Header className="flex items-center gap-2.5">
-            <KPI.Icon status="danger">
-              <AlertTriangle size={18} />
-            </KPI.Icon>
-            <KPI.Title className="text-[13px] text-[var(--text-muted)]">Restant</KPI.Title>
-          </KPI.Header>
-          <KPI.Content className="mt-3 flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <span style={kpiValueStyle}>{summary?.overdue_count ?? 0}</span>
-              {model.overduePct != null && (
-                <KPI.Trend trend="down" size="sm">
-                  {`${model.overduePct}%`}
-                </KPI.Trend>
-              )}
-            </div>
-            <span className="text-xs text-[var(--text-muted)]">facturi peste termen</span>
-          </KPI.Content>
-          <KPI.Chart data={model.overdueSpark} color="var(--danger)" height={40} />
-        </KPI>
+      <section className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
+        {performance.isLoading ? <LoadingBlock /> : performance.isError ? <QueryError error={performance.error} retry={() => void performance.refetch()} /> : (
+          <>
+            <MetricCard icon={<TrendingUp size={17} />} label="Facturat" value={money(performanceData?.summary.invoiced_ron_cents)} detail={`${performanceData?.summary.issued_document_count ?? 0} documente · ${periodLabel(performanceData!.period.from, performanceData!.period.to)}`} tone="success" />
+            <MetricCard icon={<Banknote size={17} />} label="Încasat" value={money(performanceData?.summary.collected_ron_cents)} detail={`${performanceData?.summary.invoice_with_payment_count ?? 0} facturi cu încasări`} tone="success" />
+          </>
+        )}
+        {overview.isLoading ? <LoadingBlock /> : overview.isError ? <QueryError error={overview.error} retry={() => void overview.refetch()} /> : (
+          <>
+            <MetricCard icon={<Clock size={17} />} label="De încasat acum" value={money(overviewData?.outstanding.balance_ron_cents)} detail={`${overviewData?.outstanding.invoice_count ?? 0} facturi cu sold`} tone="warning" onPress={() => navigate("/facturi?payment_status=outstanding")} />
+            <MetricCard icon={<AlertTriangle size={17} />} label="Restant acum" value={money(overviewData?.overdue.balance_ron_cents)} detail={`${overviewData?.overdue.invoice_count ?? 0} facturi · ${overviewData?.overdue.share_percent ?? 0}% din sold`} tone="danger" onPress={() => navigate("/facturi?payment_status=overdue")} />
+          </>
+        )}
       </section>
 
-      {/* 2. Revenue chart + invoice status ------------------------------- */}
-      <section
-        style={{display: "grid", gridTemplateColumns: "minmax(0,2fr) minmax(280px,1fr)", gap: 16}}
-        className="[@media(max-width:900px)]:!grid-cols-1"
-      >
-        <Card className="p-5">
-          <Card.Header className="flex items-start justify-between gap-3">
-            <div>
-              <Card.Title className="text-[15px]">Facturat lunar</Card.Title>
-              <Card.Description className="text-[12.5px]">Ultimele 6 luni · mii RON</Card.Description>
-            </div>
-            {model.yoyPct != null && (
-              <span className="text-[13px] font-semibold text-[var(--success)]">
-                {`${model.yoyPct >= 0 ? "+" : ""}${model.yoyPct}% vs. an trecut`}
-              </span>
-            )}
-          </Card.Header>
-          <Card.Content className="mt-2">
-            <BarChart data={model.monthly} height={220}>
-              <BarChart.Grid vertical={false} />
-              <BarChart.XAxis dataKey="month" />
-              <BarChart.YAxis />
-              <BarChart.Tooltip content={<BarChart.TooltipContent />} />
-              <BarChart.Bar dataKey="value" fill="var(--accent)" radius={[6, 6, 2, 2]} />
-            </BarChart>
-          </Card.Content>
-        </Card>
-
-        <Card className="flex flex-col p-5">
-          <Card.Header>
-            <Card.Title className="text-[15px]">Stare facturi</Card.Title>
-            <Card.Description className="text-[12.5px]">Distribuția pe valoare</Card.Description>
-          </Card.Header>
-          <Card.Content className="mt-1 flex flex-1 flex-col">
-            <div
-              className="my-5 flex overflow-hidden rounded-md"
-              style={{height: 12, background: "var(--bg-muted)"}}
-            >
-              {model.bucketTotal > 0 &&
-                model.buckets
-                  .filter((b) => b.value > 0)
-                  .map((b) => <div key={b.key} style={{flexGrow: b.value, background: b.color}} />)}
-            </div>
-
-            {model.buckets.map((b) => (
-              <div key={b.key} className="flex items-center gap-2.5 py-2 text-[13px]">
-                <span
-                  style={{width: 9, height: 9, borderRadius: 3, background: b.dot}}
-                  className="shrink-0"
-                />
-                <span className="flex-1 text-[var(--text-muted)]">{b.label}</span>
-                <b className="tabular-nums">{money(b.value)}</b>
-              </div>
-            ))}
-
-          </Card.Content>
-        </Card>
-      </section>
-
-      {/* 3. Recent invoices ---------------------------------------------- */}
-      <Card className="overflow-hidden">
-        <Card.Header className="flex items-center justify-between px-5 py-4">
-          <Card.Title className="text-[16px]">Facturi recente</Card.Title>
-          <button
-            onClick={() => navigate("/facturi")}
-            className="flex items-center gap-1 text-[13px] font-semibold text-[var(--accent)] transition-opacity hover:opacity-80"
-          >
-            Vezi toate <ArrowRight size={15} />
-          </button>
+      <Card className="p-5">
+        <Card.Header className="flex flex-wrap items-start justify-between gap-3">
+          <div><Card.Title>Facturat vs. încasat</Card.Title><Card.Description>{performanceData ? periodLabel(performanceData.period.from, performanceData.period.to) : "Perioada selectată"}</Card.Description></div>
+          {performanceData?.comparison ? <div className="flex gap-2 text-xs"><Chip size="sm" variant="soft" color={(performanceData.comparison.invoiced_change_percent ?? 0) >= 0 ? "success" : "danger"}><Chip.Label>Facturat {performanceData.comparison.invoiced_change_percent == null ? "—" : `${performanceData.comparison.invoiced_change_percent > 0 ? "+" : ""}${performanceData.comparison.invoiced_change_percent}%`}</Chip.Label></Chip><Chip size="sm" variant="soft" color={(performanceData.comparison.collected_change_percent ?? 0) >= 0 ? "success" : "danger"}><Chip.Label>Încasat {performanceData.comparison.collected_change_percent == null ? "—" : `${performanceData.comparison.collected_change_percent > 0 ? "+" : ""}${performanceData.comparison.collected_change_percent}%`}</Chip.Label></Chip></div> : null}
         </Card.Header>
-        <Card.Content className="p-0">
-          {recent.length === 0 ? (
-            <div className="px-5 py-12 text-center text-sm text-[var(--text-muted)]">
-              Nu există facturi încă. Emite prima ta factură pentru a începe.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-[13px]" style={{minWidth: 720}}>
-                <thead>
-                  <tr className="text-left text-[10.5px] uppercase tracking-wide text-[var(--faint)]">
-                    <th className="border-b border-[var(--border)] px-5 py-3 font-semibold">Număr</th>
-                    <th className="border-b border-[var(--border)] px-5 py-3 font-semibold">Client</th>
-                    <th className="border-b border-[var(--border)] px-5 py-3 font-semibold">Scadență</th>
-                    <th className="border-b border-[var(--border)] px-5 py-3 text-right font-semibold">Valoare</th>
-                    <th className="border-b border-[var(--border)] px-5 py-3 font-semibold">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recent.map((inv) => {
-                    const ds = displayStatus(inv);
-                    return (
-                      <tr
-                        key={inv.id}
-                        onClick={() => navigate(`/facturi/${inv.id}`)}
-                        className="cursor-pointer transition-colors hover:bg-[var(--bg-muted)]"
-                      >
-                        <td className="border-b border-[var(--border)] px-5 py-3">
-                          <b className="tabular-nums">{inv.formatted_number}</b>
-                        </td>
-                        <td className="border-b border-[var(--border)] px-5 py-3 text-[var(--text-muted)]">
-                          {inv.customer?.name ?? "—"}
-                        </td>
-                        <td className="border-b border-[var(--border)] px-5 py-3 text-[var(--text-muted)]">
-                          {date(inv.due_date)}
-                        </td>
-                        <td className="border-b border-[var(--border)] px-5 py-3 text-right tabular-nums">
-                          {money(inv.total_cents, inv.currency)}
-                        </td>
-                        <td className="border-b border-[var(--border)] px-5 py-3">
-                          <Chip color={statusTone[ds]} variant="soft" size="sm">
-                            <Chip.Label>{displayStatusLabels[ds]}</Chip.Label>
-                          </Chip>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+        <Card.Content>
+          {performance.isLoading ? <LoadingBlock /> : performance.isError ? <QueryError error={performance.error} retry={() => void performance.refetch()} /> : chartData.length === 0 ? <p className="py-16 text-center text-sm text-[var(--text-muted)]">Nu există date în intervalul ales.</p> : (
+            <ComposedChart data={chartData} height={260}>
+              <ComposedChart.Grid vertical={false} />
+              <ComposedChart.XAxis dataKey="label" />
+              <ComposedChart.YAxis tickFormatter={(value) => new Intl.NumberFormat("ro-RO", {notation: "compact"}).format(Number(value))} />
+              <ComposedChart.Tooltip content={<ComposedChart.TooltipContent />} />
+              <ComposedChart.Bar dataKey="facturat" name="Facturat (RON)" fill="var(--accent)" radius={[5, 5, 1, 1]} />
+              <ComposedChart.Line dataKey="incasat" name="Încasat (RON)" stroke="var(--success)" strokeWidth={3} dot={false} />
+            </ComposedChart>
           )}
+        </Card.Content>
+      </Card>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Card className="p-5">
+          <Card.Header><Card.Title>Vechimea soldurilor</Card.Title><Card.Description>Situație live, la zi</Card.Description></Card.Header>
+          <Card.Content>
+            {aging.isLoading ? <LoadingBlock /> : aging.isError ? <QueryError error={aging.error} retry={() => void aging.refetch()} /> : (
+              <div className="mt-3">
+                <div className="mb-4 flex items-end justify-between"><div><div className="text-2xl font-bold">{money(aging.data?.data.total_balance_ron_cents)}</div><div className="text-xs text-[var(--text-muted)]">{aging.data?.data.invoice_count} facturi cu sold</div></div><span className="text-xs text-[var(--text-muted)]">la {date(aging.data?.data.as_of)}</span></div>
+                <div className="mb-4 flex h-3 overflow-hidden rounded-full bg-[var(--bg-muted)]">{aging.data?.data.buckets.filter((bucket) => bucket.balance_ron_cents > 0).map((bucket, index) => <div key={bucket.key} style={{width: `${bucket.share_percent}%`, background: ["var(--success)", "var(--warning)", "#f97316", "#ef4444", "#991b1b"][index]}} />)}</div>
+                {aging.data?.data.buckets.map((bucket) => <button key={bucket.key} type="button" onClick={() => navigate(`/facturi?aging=${bucket.key}`)} className="flex w-full items-center gap-3 border-t border-[var(--border)] py-3 text-left hover:bg-[var(--bg-muted)]"><span className="flex-1 text-sm">{AGING_LABELS[bucket.key]}</span><span className="text-xs text-[var(--text-muted)]">{bucket.invoice_count} facturi</span><b className="min-w-32 text-right text-sm tabular-nums">{money(bucket.balance_ron_cents)}</b><ArrowRight size={15} className="text-[var(--faint)]" /></button>)}
+              </div>
+            )}
+          </Card.Content>
+        </Card>
+
+        <Card className="p-5">
+          <Card.Header className="flex flex-wrap items-start justify-between gap-3">
+            <div><Card.Title>ANAF e-Factura</Card.Title><Card.Description>Doar documentele eligibile din perioada aleasă</Card.Description></div>
+            <PeriodControl label="e-Factura" value={periods.efactura} comparison={false} onChange={(value) => setPeriod("efactura", {...value, comparison: "none"})} />
+          </Card.Header>
+          <Card.Content>
+            {efactura.isLoading ? <LoadingBlock /> : efactura.isError ? <QueryError error={efactura.error} retry={() => void efactura.refetch()} /> : (
+              <div className="mt-4">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><div className="text-2xl font-bold">{efactura.data?.data.eligible_document_count} documente</div><div className="text-xs text-[var(--text-muted)]">{money(efactura.data?.data.eligible_value_ron_cents)} eligibil · {efactura.data?.data.accepted_percent}% acceptate</div></div><Chip size="sm" variant="soft" color={efactura.data?.data.connection.connected ? "success" : efactura.data?.data.connection.reauthorization_required ? "danger" : "warning"}><Chip.Label>{efactura.data?.data.connection.connected ? "SPV conectat" : efactura.data?.data.connection.reauthorization_required ? "Reconectare necesară" : "SPV neconectat"}</Chip.Label></Chip></div>
+                <div className="grid grid-cols-2 gap-3">
+                  {efactura.data?.data.buckets.map((bucket) => <button key={bucket.key} type="button" onClick={() => navigate(`/facturi?efactura_status=${bucket.key}&issue_from=${efactura.data!.data.period.from}&issue_to=${efactura.data!.data.period.to}`)} className="rounded-xl border border-[var(--border)] p-3 text-left hover:border-[var(--border-strong)]"><div className="flex items-center justify-between gap-2"><span className="text-sm">{EFACTURA_LABELS[bucket.key]}</span><Chip size="sm" variant="soft" color={EFACTURA_TONES[bucket.key]}><Chip.Label>{bucket.document_count}</Chip.Label></Chip></div><div className="mt-2 text-xs font-semibold tabular-nums">{money(bucket.value_ron_cents)}</div></button>)}
+                </div>
+                <p className="mt-4 text-xs text-[var(--text-muted)]">Dashboardul nu transmite automat documente în SPV.</p>
+              </div>
+            )}
+          </Card.Content>
+        </Card>
+      </section>
+
+      {can("purchase_invoice.view") ? (
+        <Card className="p-5">
+          <Card.Header className="flex flex-wrap items-start justify-between gap-3">
+            <div><Card.Title>Achiziții</Card.Title><Card.Description>Facturi primite din ANAF, fără amestecarea valutelor</Card.Description></div>
+            <PeriodControl label="achiziții" value={periods.purchases} onChange={(value) => setPeriod("purchases", value)} />
+          </Card.Header>
+          <Card.Content>
+            {purchases.isLoading ? <LoadingBlock /> : purchases.isError ? <QueryError error={purchases.error} retry={() => void purchases.refetch()} /> : (
+              <div className="mt-4 grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {[
+                    ["Documente", purchases.data?.data.summary.document_count ?? 0, "toate"],
+                    ["De verificat", purchases.data?.data.summary.unreviewed_count ?? 0, "nevalidate"],
+                    ["Necesită atenție", purchases.data?.data.summary.needs_attention_count ?? 0, "atentie"],
+                    ["Furnizori", purchases.data?.data.summary.supplier_count ?? 0, "toate"],
+                  ].map(([label, count, status]) => <button key={String(label)} type="button" onClick={() => navigate(`/achizitii?status=${status}&issue_from=${purchases.data!.data.period.from}&issue_to=${purchases.data!.data.period.to}`)} className="rounded-xl border border-[var(--border)] p-3 text-left hover:border-[var(--border-strong)]"><span className="text-xs text-[var(--text-muted)]">{label}</span><div className="mt-2 text-2xl font-bold">{count}</div></button>)}
+                </div>
+                <div className="rounded-xl bg-[var(--bg-muted)] p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Totaluri pe monedă</p>
+                  {purchases.data?.data.summary.totals_by_currency.length ? purchases.data.data.summary.totals_by_currency.map((total) => <div key={total.currency} className="mt-3 flex items-center justify-between text-sm"><span>{total.document_count} documente · {total.currency}</span><b>{money(total.total_cents, total.currency)}</b></div>) : <p className="mt-3 text-sm text-[var(--text-muted)]">Nicio achiziție în perioadă.</p>}
+                </div>
+              </div>
+            )}
+          </Card.Content>
+        </Card>
+      ) : null}
+
+      <Card className="p-5">
+        <Card.Header className="flex items-start justify-between gap-3"><div><Card.Title>Necesită atenție</Card.Title><Card.Description>Acțiuni curente, ordonate după severitate</Card.Description></div>{attention.data?.data.total ? <Chip size="sm" variant="soft" color={attention.data.data.critical ? "danger" : "warning"}><Chip.Label>{attention.data.data.total}</Chip.Label></Chip> : null}</Card.Header>
+        <Card.Content>
+          {attention.isLoading ? <LoadingBlock /> : attention.isError ? <QueryError error={attention.error} retry={() => void attention.refetch()} /> : attention.data?.data.items.length ? (
+            <div className="mt-3 divide-y divide-[var(--border)]">{attention.data.data.items.map((item, index) => <button key={`${item.kind}-${item.invoice_id ?? item.target}-${index}`} type="button" onClick={() => navigate(item.target)} className="flex w-full items-start gap-3 py-3 text-left hover:bg-[var(--bg-muted)]">{item.severity === "critical" ? <CircleAlert size={18} className="mt-0.5 shrink-0 text-[var(--danger)]" /> : item.severity === "warning" ? <AlertTriangle size={18} className="mt-0.5 shrink-0 text-[var(--warning)]" /> : <Clock size={18} className="mt-0.5 shrink-0 text-[var(--text-muted)]" />}<span className="flex-1"><b className="block text-sm">{item.title}</b><span className="text-xs text-[var(--text-muted)]">{item.message}</span></span>{item.amount_cents != null && item.currency ? <b className="text-sm tabular-nums">{money(item.amount_cents, item.currency)}</b> : null}<ArrowRight size={15} className="mt-1 text-[var(--faint)]" /></button>)}</div>
+          ) : <div className="flex flex-col items-center py-10 text-center"><FileCheck2 size={28} className="text-[var(--success)]" /><p className="mt-2 text-sm font-semibold">Totul este în regulă</p><p className="text-xs text-[var(--text-muted)]">Nu există acțiuni urgente în acest moment.</p></div>}
+        </Card.Content>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <Card.Header className="flex items-center justify-between px-5 py-4"><div><Card.Title>Facturi recente</Card.Title><Card.Description>Ultimele 5 documente</Card.Description></div><Button size="sm" variant="ghost" onPress={() => navigate("/facturi")}>Vezi toate <ArrowRight size={15} /></Button></Card.Header>
+        <Card.Content className="p-0">
+          {overview.isLoading ? <LoadingBlock /> : overview.isError ? <QueryError error={overview.error} retry={() => void overview.refetch()} /> : overviewData?.recent_invoices.length ? (
+            <div className="overflow-x-auto"><table className="w-full min-w-[720px] border-collapse text-sm"><thead><tr className="text-left text-xs text-[var(--text-muted)]"><th className="border-b border-[var(--border)] px-5 py-3">Număr</th><th className="border-b border-[var(--border)] px-5 py-3">Client</th><th className="border-b border-[var(--border)] px-5 py-3">Scadență</th><th className="border-b border-[var(--border)] px-5 py-3 text-right">Valoare</th><th className="border-b border-[var(--border)] px-5 py-3">Încasare</th></tr></thead><tbody>{overviewData.recent_invoices.map((invoice) => <tr key={invoice.id} onClick={() => navigate(`/facturi/${invoice.id}`)} className="cursor-pointer hover:bg-[var(--bg-muted)]"><td className="border-b border-[var(--border)] px-5 py-3 font-semibold">{invoice.formatted_number}</td><td className="border-b border-[var(--border)] px-5 py-3">{invoice.customer?.name ?? "—"}</td><td className="border-b border-[var(--border)] px-5 py-3">{date(invoice.due_date)}</td><td className="border-b border-[var(--border)] px-5 py-3 text-right">{money(invoice.total_cents, invoice.currency)}</td><td className="border-b border-[var(--border)] px-5 py-3"><Chip size="sm" variant="soft" color={paymentTone(invoice)}><Chip.Label>{paymentLabel(invoice)}</Chip.Label></Chip></td></tr>)}</tbody></table></div>
+          ) : <p className="px-5 py-12 text-center text-sm text-[var(--text-muted)]">Nu există facturi încă.</p>}
         </Card.Content>
       </Card>
     </div>
