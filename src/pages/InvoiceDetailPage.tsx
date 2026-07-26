@@ -1,47 +1,25 @@
 import {useRef, useState, type ReactNode} from "react";
 import {useNavigate, useParams} from "react-router";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
-import {Button, Card, Chip, Spinner} from "@heroui/react";
+import {Button, Card, Chip, Dropdown, Label, Spinner, Tooltip} from "@heroui/react";
 import {Timeline} from "@heroui-pro/react/timeline";
 import type {TimelineStatus} from "@heroui-pro/react/timeline";
-import {Ban, Banknote, Check, ChevronLeft, Copy, Download, FileCode2, Mail, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X} from "lucide-react";
+import {Ban, Check, ChevronLeft, Copy, Download, FileCode2, Mail, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
+import {ConfirmDialog} from "../components/ConfirmDialog";
 import {AppDatePicker, AppSelect} from "../components/FormControls";
+import {InvoiceDocumentPreview} from "../components/InvoiceDocumentPreview";
 import {api, downloadApiFile} from "../lib/api";
-import type {Address, EfacturaSubmission, Invoice, InvoiceDelivery, InvoicePayment, PaymentMethod} from "../lib/types";
+import type {EfacturaSubmission, Invoice, InvoiceDelivery, InvoicePayment, PaymentMethod} from "../lib/types";
 import {
   cents,
   date,
   displayStatus,
   displayStatusLabels,
-  exchangeRate,
   money,
   spvStatusLabels,
   statusTone,
 } from "../lib/format";
-
-// The invoice "paper" is always rendered light, regardless of the app theme.
-const PAPER = {
-  bg: "#ffffff",
-  text: "#18181b",
-  muted: "#6b7280",
-  faint: "#9ca3af",
-  border: "#eeeeee",
-  boxBg: "#f7f7f8",
-} as const;
-
-function addressLine(address: Address | null | undefined): string {
-  if (!address) return "";
-  return [
-    address.street,
-    address.street_details,
-    address.resolved_city ?? address.city_name,
-    address.resolved_region ?? address.region_name,
-    address.country_code,
-  ]
-    .filter(Boolean)
-    .join(", ");
-}
 
 type StepState = "done" | "error" | "pending" | "active";
 
@@ -53,6 +31,11 @@ const STEP_TO_TIMELINE: Record<StepState, TimelineStatus> = {
 };
 
 type Step = {title: string; sub: string; state: StepState};
+
+type DetailConfirmation =
+  | {kind: "issue" | "delete" | "cancel" | "settle" | "submit-spv" | "retry-spv"}
+  | {kind: "delete-payment"; payment: InvoicePayment}
+  | null;
 
 // Derive a 4-step e-Factura timeline from the latest submission (submissions[0]).
 function buildSteps(invoice: Invoice, latest: EfacturaSubmission | undefined): Step[] {
@@ -117,6 +100,8 @@ export function InvoiceDetailPage() {
   const [editingPayment, setEditingPayment] = useState<InvoicePayment | null | undefined>(undefined);
   const [emailOpen, setEmailOpen] = useState(false);
   const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState<DetailConfirmation>(null);
+  const [cancellationReason, setCancellationReason] = useState("");
 
   const invoiceQuery = useQuery({
     queryKey: ["invoice", company?.id, id],
@@ -216,20 +201,17 @@ export function InvoiceDetailPage() {
     },
   });
   const lifecycleMutation = useMutation({
-    mutationFn: async (action: "issue" | "cancel" | "delete" | "duplicate") => {
+    mutationFn: async ({action, reason}: {action: "issue" | "cancel" | "delete" | "duplicate"; reason?: string}) => {
       if (action === "delete") {
         await api<void>(`/companies/${company!.id}/invoices/${id}`, {method: "DELETE"});
         return null;
       }
-      let body: string | undefined;
-      if (action === "cancel") {
-        const reason = window.prompt("Motivul anulării (rămâne în istoricul documentului):")?.trim();
-        if (!reason) throw new Error("Motivul anulării este obligatoriu.");
-        body = JSON.stringify({cancellation_reason: reason});
-      }
+      const body = action === "cancel" ? JSON.stringify({cancellation_reason: reason}) : undefined;
       return api<Invoice>(`/companies/${company!.id}/invoices/${id}/${action}`, {method: "POST", body});
     },
-    onSuccess: (result, action) => {
+    onSuccess: (result, {action}) => {
+      setConfirmation(null);
+      setCancellationReason("");
       void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
       void queryClient.invalidateQueries({queryKey: ["dashboard", company?.id]});
       if (action === "delete") navigate("/facturi", {replace: true});
@@ -265,7 +247,6 @@ export function InvoiceDetailPage() {
 
   const ds = displayStatus(invoice);
   const currency = invoice.currency;
-  const seller = invoice.company_profile;
   const customer = invoice.customer;
   const submissions = submissionsQuery.data?.data ?? [];
   const latest = submissions[0];
@@ -301,217 +282,114 @@ export function InvoiceDetailPage() {
     }
   }
 
+  function confirmDetailAction() {
+    if (!confirmation) return;
+    if (confirmation.kind === "issue" || confirmation.kind === "delete") {
+      lifecycleMutation.mutate({action: confirmation.kind});
+    } else if (confirmation.kind === "cancel") {
+      lifecycleMutation.mutate({action: "cancel", reason: cancellationReason.trim()});
+    } else if (confirmation.kind === "settle") {
+      settleInvoice.mutate(undefined, {onSuccess: () => setConfirmation(null)});
+    } else if (confirmation.kind === "delete-payment") {
+      deletePayment.mutate(confirmation.payment.id, {onSuccess: () => setConfirmation(null)});
+    } else if (confirmation.kind === "submit-spv") {
+      if (submittingRef.current) return;
+      submittingRef.current = true;
+      submitMutation.mutate(undefined, {onSuccess: () => setConfirmation(null)});
+    } else if (latest) {
+      retryUnknownMutation.mutate(latest.id, {onSuccess: () => setConfirmation(null)});
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5">
-      {/* Top action row */}
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="outline" onPress={() => navigate("/facturi")}>
-          <ChevronLeft size={16} /> Înapoi
-        </Button>
-        <Chip color={statusTone[ds]} variant="soft" size="lg">
-          <Chip.Label>{displayStatusLabels[ds]}</Chip.Label>
-        </Chip>
-        {invoice.recurring_source ? (
-          <Button variant="outline" onPress={() => navigate("/recurente")}>
-            Sursă: {invoice.recurring_source.template_name ?? "șablon recurent"} · v{invoice.recurring_source.version ?? "—"}
+      {/* Cohesive document header and state-aware actions. */}
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-[var(--shadow)] sm:p-4">
+        <Tooltip delay={300}>
+          <Button isIconOnly variant="ghost" aria-label="Înapoi la facturi" onPress={() => navigate("/facturi")}>
+            <ChevronLeft size={18} />
           </Button>
-        ) : null}
+          <Tooltip.Content>Înapoi la facturi</Tooltip.Content>
+        </Tooltip>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-lg font-bold tracking-tight">{formattedNumber}</h1>
+            <Chip color={statusTone[ds]} variant="soft" size="sm">
+              <Chip.Label>{displayStatusLabels[ds]}</Chip.Label>
+            </Chip>
+          </div>
+          <p className="truncate text-xs text-[var(--text-muted)]">
+            {customer?.name ?? "Client necunoscut"} · {date(invoice.issue_date)}
+          </p>
+        </div>
         <div className="flex-1" />
         {isDraft ? (
           <>
-            <Button variant="outline" onPress={() => navigate(`/facturi/${id}/editeaza`)}><Pencil size={16} /> Editează</Button>
-            <Button variant="primary" isDisabled={lifecycleMutation.isPending} onPress={() => {
-              if (window.confirm("Emiți această ciornă? După emitere conținutul fiscal nu mai poate fi editat.")) lifecycleMutation.mutate("issue");
-            }}><Send size={16} /> Emite</Button>
-            <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => {
-              if (window.confirm("Ștergi definitiv această ciornă?")) lifecycleMutation.mutate("delete");
-            }}><Trash2 size={16} /> Șterge</Button>
+            <Button variant="outline" onPress={() => navigate(`/facturi/${id}/editeaza`)}>
+              <Pencil size={16} /> Editează
+            </Button>
+            <Button variant="primary" isDisabled={lifecycleMutation.isPending} onPress={() => setConfirmation({kind: "issue"})}>
+              <Send size={16} /> Emite
+            </Button>
           </>
-        ) : null}
-        {invoice.document_type === "invoice" ? (
-          <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => lifecycleMutation.mutate("duplicate")}><Copy size={16} /> Duplică</Button>
-        ) : null}
-        {invoice.status === "issued" ? (
-          <Button variant="outline" isDisabled={lifecycleMutation.isPending} onPress={() => {
-            if (window.confirm("Anularea nu creează un storno și nu modifică documentul original. Continui?")) lifecycleMutation.mutate("cancel");
-          }}><Ban size={16} /> Anulează</Button>
-        ) : null}
-        {invoice.status === "issued" && invoice.document_type === "invoice" ? (
-          <Button variant="outline" onPress={() => setCorrectionOpen(true)}><RotateCcw size={16} /> Stornează</Button>
-        ) : null}
-        {!isDraft ? (
-          <Button variant="outline" isDisabled={downloading !== null} onPress={() => void download("pdf")}>
-            {downloading === "pdf" ? <Spinner size="sm" /> : <Download size={16} />} Descarcă PDF
+        ) : (
+          <>
+            <Button variant="outline" isDisabled={downloading !== null} onPress={() => void download("pdf")}>
+              {downloading === "pdf" ? <Spinner size="sm" /> : <Download size={16} />} Descarcă PDF
+            </Button>
+            {invoice.status === "issued" ? (
+              <Button variant="primary" onPress={() => setEmailOpen(true)}>
+                <Mail size={16} /> Trimite pe email
+              </Button>
+            ) : null}
+          </>
+        )}
+        <Dropdown>
+          <Button isIconOnly variant="ghost" aria-label="Mai multe acțiuni">
+            <MoreHorizontal size={18} />
           </Button>
-        ) : null}
-        {invoice.status === "issued" ? <Button variant="outline" onPress={() => setEmailOpen(true)}><Mail size={16} /> Trimite pe email</Button> : null}
+          <Dropdown.Popover placement="bottom end" className="min-w-[220px]">
+            <Dropdown.Menu onAction={(key) => {
+              if (key === "source") navigate("/recurente");
+              if (key === "duplicate") lifecycleMutation.mutate({action: "duplicate"});
+              if (key === "cancel") setConfirmation({kind: "cancel"});
+              if (key === "correction") setCorrectionOpen(true);
+              if (key === "delete") setConfirmation({kind: "delete"});
+            }}>
+              {invoice.recurring_source ? (
+                <Dropdown.Item id="source" textValue="Deschide sursa recurentă">
+                  <RefreshCw size={15} /><Label>Deschide sursa recurentă</Label>
+                </Dropdown.Item>
+              ) : null}
+              {invoice.document_type === "invoice" ? (
+                <Dropdown.Item id="duplicate" textValue="Duplică">
+                  <Copy size={15} /><Label>Duplică factura</Label>
+                </Dropdown.Item>
+              ) : null}
+              {invoice.status === "issued" && invoice.document_type === "invoice" ? (
+                <Dropdown.Item id="correction" textValue="Stornează">
+                  <RotateCcw size={15} /><Label>Creează corecție</Label>
+                </Dropdown.Item>
+              ) : null}
+              {invoice.status === "issued" ? (
+                <Dropdown.Item id="cancel" textValue="Anulează" variant="danger">
+                  <Ban size={15} /><Label>Anulează factura</Label>
+                </Dropdown.Item>
+              ) : null}
+              {isDraft ? (
+                <Dropdown.Item id="delete" textValue="Șterge" variant="danger">
+                  <Trash2 size={15} /><Label>Șterge ciorna</Label>
+                </Dropdown.Item>
+              ) : null}
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
       </div>
       {/* 2-column grid */}
       <div className="invoice-detail-grid">
         {/* LEFT — the paper */}
         <div className="rounded-2xl bg-[var(--bg-muted)] p-4 sm:p-6">
-          <div
-            className="mx-auto w-full max-w-[640px] rounded-xl p-7 shadow-[0_10px_40px_rgba(24,24,27,.12)] sm:p-9"
-            style={{background: PAPER.bg, color: PAPER.text}}
-          >
-            {/* Header */}
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <span
-                  className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-lg font-extrabold text-white"
-                  style={{background: "var(--accent)"}}
-                >
-                  B
-                </span>
-                <div className="min-w-0">
-                  <div className="text-[15px] font-bold leading-tight">{seller?.legal_name ?? "—"}</div>
-                  <div className="mt-1 text-[12px] tabular-nums" style={{color: PAPER.muted}}>
-                    CUI {seller?.tax_id ?? "—"} · {seller?.registration_number ?? "—"}
-                  </div>
-                  <div className="mt-1 text-[12px]" style={{color: PAPER.muted}}>
-                    {addressLine(seller?.address) || "—"}
-                  </div>
-                </div>
-              </div>
-              <div className="shrink-0 text-right">
-                <div className="text-[20px] font-extrabold tracking-tight">FACTURĂ</div>
-                <div className="mt-0.5 text-[13px] font-semibold tabular-nums">{invoice.formatted_number}</div>
-                <div className="mt-2 text-[12px] tabular-nums" style={{color: PAPER.muted}}>
-                  Emitere: {date(invoice.issue_date)}
-                </div>
-                {invoice.exchange_rate && <div className="mt-1 text-[12px]" style={{color: PAPER.muted}}>
-                  Curs {invoice.exchange_rate_source?.toUpperCase() ?? "BNR"}: 1 {invoice.currency} = {exchangeRate(invoice.exchange_rate)} RON
-                  {invoice.exchange_rate_day ? ` (${date(invoice.exchange_rate_day)})` : ""}
-                </div>}
-                <div className="text-[12px] tabular-nums" style={{color: PAPER.muted}}>
-                  Scadență: {date(invoice.due_date)}
-                </div>
-              </div>
-            </div>
-
-            {/* Client box */}
-            <div className="mt-7 rounded-lg p-4" style={{background: PAPER.boxBg}}>
-              <div className="text-[10.5px] font-bold uppercase tracking-wide" style={{color: PAPER.faint}}>
-                Client
-              </div>
-              <div className="mt-1.5 text-[14px] font-semibold">{customer?.name ?? "—"}</div>
-              {customer?.tax_id && (
-                <div className="mt-0.5 text-[12px] tabular-nums" style={{color: PAPER.muted}}>
-                  CUI {customer.tax_id}
-                  {customer.registration_number ? ` · ${customer.registration_number}` : ""}
-                </div>
-              )}
-              <div className="mt-0.5 text-[12px]" style={{color: PAPER.muted}}>
-                {addressLine(customer?.address) || "—"}
-              </div>
-            </div>
-
-            {/* Lines table */}
-            <div className="mt-7 overflow-x-auto">
-              <table className="w-full border-collapse text-[12.5px] tabular-nums">
-                <thead>
-                  <tr style={{color: PAPER.faint}} className="text-[10.5px] uppercase tracking-wide">
-                    <th className="border-b py-2 pr-2 text-left font-semibold" style={{borderColor: PAPER.border}}>
-                      Descriere
-                    </th>
-                    <th className="border-b px-2 py-2 text-right font-semibold" style={{borderColor: PAPER.border}}>
-                      Cant.
-                    </th>
-                    <th className="border-b px-2 py-2 text-right font-semibold" style={{borderColor: PAPER.border}}>
-                      Preț
-                    </th>
-                    <th className="border-b px-2 py-2 text-right font-semibold" style={{borderColor: PAPER.border}}>
-                      TVA
-                    </th>
-                    <th className="border-b py-2 pl-2 text-right font-semibold" style={{borderColor: PAPER.border}}>
-                      Valoare
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoice.lines.map((line) => (
-                    <tr key={line.id}>
-                      <td className="border-b py-2.5 pr-2 align-top" style={{borderColor: PAPER.border}}>
-                        <div className="font-medium" style={{color: PAPER.text}}>
-                          {line.description}
-                        </div>
-                        {line.unit && (
-                          <div className="text-[11px]" style={{color: PAPER.faint}}>
-                            {line.unit}
-                          </div>
-                        )}
-                      </td>
-                      <td className="border-b px-2 py-2.5 text-right align-top" style={{borderColor: PAPER.border}}>
-                        {Number(line.quantity)}
-                      </td>
-                      <td className="border-b px-2 py-2.5 text-right align-top" style={{borderColor: PAPER.border}}>
-                        {money(line.unit_price_cents, currency)}
-                        {invoice.exchange_rate && <div className="text-[10px]" style={{color: PAPER.faint}}>
-                          {money(Math.round(line.unit_price_cents * Number(invoice.exchange_rate)), "RON")}
-                        </div>}
-                      </td>
-                      <td className="border-b px-2 py-2.5 text-right align-top" style={{borderColor: PAPER.border}}>
-                        {Number(line.vat_rate)}%
-                      </td>
-                      <td
-                        className="border-b py-2.5 pl-2 text-right align-top font-medium"
-                        style={{borderColor: PAPER.border}}
-                      >
-                        {money(line.subtotal_cents, currency)}
-                        {invoice.exchange_rate && <div className="text-[10px] font-normal" style={{color: PAPER.faint}}>
-                          {money(Math.round(line.subtotal_cents * Number(invoice.exchange_rate)), "RON")}
-                        </div>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Totals */}
-            <div className="mt-6 flex justify-end">
-              <div className="w-full max-w-[260px] text-[13px] tabular-nums">
-                <div className="flex justify-between py-1" style={{color: PAPER.muted}}>
-                  <span>Subtotal</span>
-                  <span>{money(invoice.subtotal_cents, currency)}</span>
-                </div>
-                <div className="flex justify-between py-1" style={{color: PAPER.muted}}>
-                  <span>TVA</span>
-                  <span>{money(invoice.vat_cents, currency)}</span>
-                </div>
-                <div
-                  className="mt-1 flex justify-between border-t pt-2 text-[15px] font-bold"
-                  style={{borderColor: PAPER.border, color: PAPER.text}}
-                >
-                  <span>Total</span>
-                  <span>{money(invoice.total_cents, currency)}</span>
-                </div>
-                {invoice.total_cents_ron !== null && invoice.currency !== "RON" && <div className="mt-2 border-t pt-2" style={{borderColor: PAPER.border}}>
-                  <div className="flex justify-between py-1" style={{color: PAPER.muted}}><span>Subtotal RON</span><span>{money(invoice.subtotal_cents_ron, "RON")}</span></div>
-                  <div className="flex justify-between py-1" style={{color: PAPER.muted}}><span>TVA RON</span><span>{money(invoice.vat_cents_ron, "RON")}</span></div>
-                  <div className="flex justify-between py-1 font-bold"><span>Total RON</span><span>{money(invoice.total_cents_ron, "RON")}</span></div>
-                </div>}
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="mt-8 border-t pt-4 text-[12px]" style={{borderColor: PAPER.border, color: PAPER.muted}}>
-              <div className="flex items-center gap-2">
-                <Banknote size={14} style={{color: PAPER.faint}} />
-                <span>Plata se face în contul bancar indicat de emitent.</span>
-              </div>
-              {invoice.notes && (
-                <div className="mt-3">
-                  <div className="text-[10.5px] font-bold uppercase tracking-wide" style={{color: PAPER.faint}}>
-                    Mențiuni
-                  </div>
-                  <div className="mt-1 whitespace-pre-line" style={{color: PAPER.text}}>
-                    {invoice.notes}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <InvoiceDocumentPreview invoice={invoice} />
         </div>
 
         {/* RIGHT — sticky rail */}
@@ -583,23 +461,27 @@ export function InvoiceDetailPage() {
 
               {!isDraft && invoice.document_type === "invoice" ? (
                 <div className="mt-5 border-t border-[var(--border)] pt-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-[12px] font-semibold">Încasări</div>
-                    <div className="flex gap-1">
-                      {invoice.balance_cents > 0 ? (
-                        <>
-                          <Button size="sm" variant="ghost" isDisabled={settleInvoice.isPending} onPress={() => {
-                            if (window.confirm(`Înregistrezi soldul integral de ${money(invoice.balance_cents, currency)} ca transfer bancar, cu data de azi?`)) settleInvoice.mutate();
-                          }}>
-                            <Check size={14} /> Încasează integral
-                          </Button>
-                          <Button size="sm" variant="outline" onPress={() => setEditingPayment(null)}>
-                            <Plus size={14} /> Adaugă
-                          </Button>
-                        </>
-                      ) : null}
+                  <div className="text-[12px] font-semibold">Încasări</div>
+                  {invoice.balance_cents > 0 ? (
+                    <div className="mt-3 grid gap-2">
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        className="w-full"
+                        isDisabled={settleInvoice.isPending}
+                        onPress={() => setConfirmation({kind: "settle"})}
+                      >
+                        <Check size={14} /> Încasează integral
+                      </Button>
+                      <Button size="sm" variant="outline" className="w-full" onPress={() => setEditingPayment(null)}>
+                        <Plus size={14} /> Adaugă încasare parțială
+                      </Button>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="mt-3 flex items-center gap-2 rounded-xl bg-[var(--success-soft)] px-3 py-2.5 text-xs font-semibold text-[var(--success)]">
+                      <Check size={15} /> Factură încasată integral
+                    </div>
+                  )}
                   {paymentsQuery.isLoading ? (
                     <div className="mt-3 flex items-center gap-2 text-xs text-[var(--text-muted)]"><Spinner size="sm" /> Se încarcă…</div>
                   ) : payments.length === 0 ? (
@@ -613,9 +495,9 @@ export function InvoiceDetailPage() {
                             <div className="truncate text-[var(--text-muted)]">{date(payment.paid_at)} · {payment.reference || paymentMethodLabels[payment.method]}</div>
                           </div>
                           <Button isIconOnly size="sm" variant="ghost" aria-label="Editează încasarea" onPress={() => setEditingPayment(payment)}><Pencil size={14} /></Button>
-                          <Button isIconOnly size="sm" variant="ghost" aria-label="Șterge încasarea" onPress={() => {
-                            if (window.confirm("Ștergi această încasare? Soldul facturii va fi recalculat.")) deletePayment.mutate(payment.id);
-                          }}><Trash2 size={14} className="text-[var(--danger)]" /></Button>
+                          <Button isIconOnly size="sm" variant="ghost" aria-label="Șterge încasarea" onPress={() => setConfirmation({kind: "delete-payment", payment})}>
+                            <Trash2 size={14} className="text-[var(--danger)]" />
+                          </Button>
                         </div>
                       ))}
                     </div>
@@ -670,9 +552,7 @@ export function InvoiceDetailPage() {
                       variant="primary"
                       isDisabled={submitMutation.isPending}
                       onPress={() => {
-                        if (submittingRef.current || !window.confirm("Trimiți explicit această factură în ANAF SPV?")) return;
-                        submittingRef.current = true;
-                        submitMutation.mutate();
+                        if (!submittingRef.current) setConfirmation({kind: "submit-spv"});
                       }}
                     >
                       {submitMutation.isPending ? <Spinner size="sm" /> : <Send size={14} />}
@@ -684,10 +564,7 @@ export function InvoiceDetailPage() {
                       size="sm"
                       variant="outline"
                       isDisabled={retryUnknownMutation.isPending}
-                      onPress={() => {
-                        if (!window.confirm("Ai verificat în SPV și confirmi că factura NU a fost primită de ANAF? Retransmiterea fără această verificare poate crea un duplicat.")) return;
-                        retryUnknownMutation.mutate(latest.id);
-                      }}
+                      onPress={() => setConfirmation({kind: "retry-spv"})}
                     >
                       {retryUnknownMutation.isPending ? <Spinner size="sm" /> : <RefreshCw size={14} />}
                       Confirmă absența și retransmite
@@ -766,6 +643,74 @@ export function InvoiceDetailPage() {
           }}
         />
       ) : null}
+      <ConfirmDialog
+        isOpen={confirmation !== null}
+        title={
+          confirmation?.kind === "issue" ? "Emiți această factură?"
+            : confirmation?.kind === "delete" ? "Ștergi definitiv ciorna?"
+              : confirmation?.kind === "cancel" ? "Anulezi factura emisă?"
+                : confirmation?.kind === "settle" ? "Înregistrezi încasarea integrală?"
+                  : confirmation?.kind === "delete-payment" ? "Ștergi această încasare?"
+                    : confirmation?.kind === "retry-spv" ? "Confirmi absența facturii din SPV?"
+                      : "Trimiți factura în ANAF SPV?"
+        }
+        description={
+          confirmation?.kind === "issue"
+            ? "După emitere, conținutul fiscal nu mai poate fi editat."
+            : confirmation?.kind === "delete"
+              ? "Ciorna va fi ștearsă definitiv."
+              : confirmation?.kind === "cancel"
+                ? "Anularea păstrează documentul în istoric și nu creează automat un storno."
+                : confirmation?.kind === "settle"
+                  ? `Se înregistrează soldul de ${money(invoice.balance_cents, currency)} ca transfer bancar, cu data de azi.`
+                  : confirmation?.kind === "delete-payment"
+                    ? "Soldul facturii va fi recalculat imediat."
+                    : confirmation?.kind === "retry-spv"
+                      ? "Retransmite numai după ce ai verificat manual în SPV că ANAF nu a primit factura. Altfel poate apărea un duplicat."
+                      : "Aceasta este o acțiune explicită. Billwise va trimite factura în SPV numai după confirmarea ta."
+        }
+        confirmLabel={
+          confirmation?.kind === "issue" ? "Emite factura"
+            : confirmation?.kind === "delete" || confirmation?.kind === "delete-payment" ? "Șterge"
+              : confirmation?.kind === "cancel" ? "Anulează factura"
+                : confirmation?.kind === "settle" ? "Încasează integral"
+                  : confirmation?.kind === "retry-spv" ? "Confirmă și retransmite"
+                    : "Trimite în SPV"
+        }
+        tone={
+          confirmation?.kind === "delete" || confirmation?.kind === "delete-payment" || confirmation?.kind === "retry-spv"
+            ? "danger"
+            : confirmation?.kind === "settle" ? "success"
+              : confirmation?.kind === "issue" || confirmation?.kind === "cancel" ? "warning" : "accent"
+        }
+        isPending={
+          lifecycleMutation.isPending
+          || settleInvoice.isPending
+          || deletePayment.isPending
+          || submitMutation.isPending
+          || retryUnknownMutation.isPending
+        }
+        isConfirmDisabled={confirmation?.kind === "cancel" && !cancellationReason.trim()}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) {
+            setConfirmation(null);
+            setCancellationReason("");
+          }
+        }}
+        onConfirm={confirmDetailAction}
+      >
+        {confirmation?.kind === "cancel" ? (
+          <label className="mt-4 block text-xs font-semibold text-[var(--text)]">
+            Motivul anulării
+            <textarea
+              autoFocus
+              className="mt-2 min-h-24 w-full rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm font-normal outline-none focus:border-[var(--accent)]"
+              value={cancellationReason}
+              onChange={(event) => setCancellationReason(event.target.value)}
+            />
+          </label>
+        ) : null}
+      </ConfirmDialog>
 
       {/* Scoped layout: responsive 2-col grid + sticky rail. */}
       <style>{`
@@ -839,9 +784,9 @@ function CorrectionModal({companyId, invoice, onClose, onCreated}: {
           ) : null}
           <label className="text-xs font-semibold text-[var(--text-muted)]">Motiv<textarea name="reason" className="mt-1.5 min-h-24 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
         </div>
-        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={create.isPending || !reason.trim() || (mode === "partial" && !Object.values(quantities).some((value) => Number(value) > 0))} onPress={() => {
-          if (window.confirm("Creezi ciorna documentului de corecție? Aceasta nu se trimite automat în SPV sau pe email.")) create.mutate();
-        }}>{create.isPending ? <Spinner size="sm" /> : <RotateCcw size={15} />} Creează ciorna</Button></footer>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={create.isPending || !reason.trim() || (mode === "partial" && !Object.values(quantities).some((value) => Number(value) > 0))} onPress={() => create.mutate()}>
+          {create.isPending ? <Spinner size="sm" /> : <RotateCcw size={15} />} Creează ciorna
+        </Button></footer>
       </div>
     </div>
   );
@@ -880,9 +825,9 @@ function EmailDeliveryModal({companyId, invoice, onClose, onSaved}: {
           <label className="text-xs font-semibold text-[var(--text-muted)]">Subiect<input name="subject" className={`${input} mt-1.5`} value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
           <label className="text-xs font-semibold text-[var(--text-muted)]">Mesaj<textarea name="message" className="mt-1.5 min-h-28 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={message} onChange={(event) => setMessage(event.target.value)} /></label>
         </div>
-        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={send.isPending || !recipient.trim() || !subject.trim()} onPress={() => {
-          if (window.confirm(`Trimiți explicit factura către ${recipient.trim()}?`)) send.mutate();
-        }}>{send.isPending ? <Spinner size="sm" /> : <Mail size={15} />} Trimite</Button></footer>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={send.isPending || !recipient.trim() || !subject.trim()} onPress={() => send.mutate()}>
+          {send.isPending ? <Spinner size="sm" /> : <Mail size={15} />} Trimite explicit
+        </Button></footer>
       </div>
     </div>
   );

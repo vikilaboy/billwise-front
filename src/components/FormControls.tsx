@@ -68,9 +68,11 @@ export function AppCheckbox({
   id,
   name,
   value,
+  slot,
   ariaLabel,
   apiFields,
   isSelected,
+  isIndeterminate,
   isDisabled,
   className,
   children,
@@ -79,9 +81,11 @@ export function AppCheckbox({
   id?: string;
   name?: string;
   value?: string;
+  slot?: string;
   ariaLabel?: string;
   apiFields?: string[];
   isSelected: boolean;
+  isIndeterminate?: boolean;
   isDisabled?: boolean;
   className?: string;
   children: ReactNode;
@@ -93,8 +97,10 @@ export function AppCheckbox({
         aria-label={ariaLabel}
         id={id}
         isDisabled={isDisabled}
+        isIndeterminate={isIndeterminate}
         isSelected={isSelected}
         name={name}
+        slot={slot}
         value={value}
         onChange={onChange}
       >

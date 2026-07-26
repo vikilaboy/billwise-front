@@ -131,6 +131,36 @@ export async function downloadApiFile(path: string, fallbackName: string): Promi
   await saveResponseBlob(response, fallbackName);
 }
 
+export async function openApiFile(path: string): Promise<void> {
+  const preview = window.open("", "_blank");
+  const headers = new Headers({Accept: "application/pdf", "Accept-Language": "ro"});
+  const token = session.token();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  try {
+    const response = await fetch(`${API_URL}${path}`, {headers});
+    expireSessionOnUnauthorized(response.status, token);
+    if (!response.ok) throw await downloadResponseError(response);
+
+    const url = URL.createObjectURL(await response.blob());
+    if (preview) {
+      preview.location.href = url;
+    } else {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.target = "_blank";
+      anchor.rel = "noopener";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (error) {
+    preview?.close();
+    throw error;
+  }
+}
+
 async function downloadResponseError(response: Response): Promise<ApiError> {
   let problem: ProblemDetails = {title: "Fișierul nu a putut fi descărcat", status: response.status};
   try {

@@ -197,6 +197,17 @@ export type VatBreakdownGroup = {
   vat_exemption_reason: string | null;
 };
 
+export type InvoiceBankAccountSnapshot = {
+  bank_name: string;
+  scheme: "iban" | "uk_domestic" | "us_domestic";
+  currency_code: string | null;
+  iban: string | null;
+  swift_bic: string | null;
+  sort_code: string | null;
+  account_number: string | null;
+  routing_number: string | null;
+};
+
 export type Invoice = {
   id: string;
   company_profile: CompanyProfile | null;
@@ -241,6 +252,7 @@ export type Invoice = {
   } | null;
   notes: string | null;
   locale: "ro" | "en";
+  bank_accounts_snapshot: InvoiceBankAccountSnapshot[];
   subtotal_cents: number;
   vat_cents: number;
   total_cents: number;

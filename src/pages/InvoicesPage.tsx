@@ -1,16 +1,18 @@
-import {useMemo, useState} from "react";
+import {useEffect, useMemo, useState} from "react";
 import {useNavigate} from "react-router";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
-import {Button, Chip, Spinner} from "@heroui/react";
+import {Button, Chip, Dropdown, Label, Separator, Spinner, Tooltip, type Selection} from "@heroui/react";
+import {ActionBar} from "@heroui-pro/react/action-bar";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
-import {Copy, Download, FileText, Pencil, Plus, RotateCcw, Search, Send, Trash2} from "lucide-react";
+import {Banknote, Copy, Download, Eye, FileText, MoreHorizontal, Pencil, Plus, RotateCcw, Search, Send, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
+import {ConfirmDialog} from "../components/ConfirmDialog";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
 import {AppCheckbox} from "../components/FormControls";
-import {api, downloadApiFile, listQuery} from "../lib/api";
-import type {Invoice} from "../lib/types";
+import {api, downloadApiFile, listQuery, openApiFile} from "../lib/api";
+import type {Invoice, InvoicePayment} from "../lib/types";
 import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
@@ -49,11 +51,33 @@ const paymentFilter: Partial<Record<FilterKey, Invoice["payment_status"]>> = {
   restante: "overdue",
 };
 
+type Confirmation =
+  | {kind: "issue"; invoice: Invoice}
+  | {kind: "delete"; invoice: Invoice}
+  | {kind: "settle"; invoice: Invoice}
+  | {kind: "bulk-delete"; invoices: Invoice[]}
+  | {kind: "bulk-settle"; invoices: Invoice[]}
+  | null;
+
+type BatchResult = {id: string; label: string; success: boolean};
+
+function isSelectable(invoice: Invoice): boolean {
+  return invoice.status === "draft"
+    || (invoice.status === "issued" && invoice.document_type === "invoice" && invoice.balance_cents > 0);
+}
+
+function canSettle(invoice: Invoice): boolean {
+  return invoice.status === "issued" && invoice.document_type === "invoice" && invoice.balance_cents > 0;
+}
+
 export function InvoicesPage() {
   const {company} = useCompany();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [selectedDrafts, setSelectedDrafts] = useState<Set<string>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmation, setConfirmation] = useState<Confirmation>(null);
+  const [batchResult, setBatchResult] = useState<{kind: "delete" | "settle"; results: BatchResult[]} | null>(null);
+  const [previewingPdfId, setPreviewingPdfId] = useState<string | null>(null);
   const grid = useServerDataGridState<FilterKey>({
     defaultSort: DEFAULT_SORT,
     sortColumns: SORT_COLUMNS,
@@ -89,6 +113,25 @@ export function InvoicesPage() {
   });
 
   const rows = useMemo(() => invoices.data?.data ?? [], [invoices.data]);
+  const selectableRows = useMemo(() => rows.filter(isSelectable), [rows]);
+  const selectedRows = useMemo(() => rows.filter((invoice) => selectedIds.has(invoice.id)), [rows, selectedIds]);
+  const selectedDrafts = useMemo(() => selectedRows.filter((invoice) => invoice.status === "draft"), [selectedRows]);
+  const selectedOutstanding = useMemo(() => selectedRows.filter(canSettle), [selectedRows]);
+  const allSelectableSelected = selectableRows.length > 0 && selectableRows.every((invoice) => selectedIds.has(invoice.id));
+
+  useEffect(() => {
+    setSelectedIds((current) => {
+      const visible = new Set(rows.map((invoice) => invoice.id));
+      const next = new Set([...current].filter((id) => visible.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [rows]);
+
+  const invalidateInvoiceData = () => {
+    void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+    void queryClient.invalidateQueries({queryKey: ["dashboard", company?.id]});
+  };
+
   const action = useMutation({
     mutationFn: async ({invoice, kind}: {invoice: Invoice; kind: "issue" | "duplicate" | "delete"}) => {
       if (kind === "delete") {
@@ -98,13 +141,13 @@ export function InvoicesPage() {
       return api<Invoice>(`/companies/${company!.id}/invoices/${invoice.id}/${kind}`, {method: "POST"});
     },
     onSuccess: (result, variables) => {
-      void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+      invalidateInvoiceData();
+      setConfirmation(null);
       if (variables.kind === "duplicate" && result) navigate(`/facturi/${result.data.id}`);
     },
   });
   const bulkDelete = useMutation({
-    mutationFn: async () => {
-      const targets = rows.filter((invoice) => selectedDrafts.has(invoice.id));
+    mutationFn: async (targets: Invoice[]) => {
       const results = await Promise.allSettled(targets.map((invoice) =>
         api<void>(`/companies/${company!.id}/invoices/${invoice.id}`, {method: "DELETE"})));
       return results.map((result, index) => ({
@@ -114,27 +157,90 @@ export function InvoicesPage() {
       }));
     },
     onSuccess: (results) => {
-      setSelectedDrafts(new Set(results.filter((result) => !result.success).map((result) => result.id)));
-      void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+      setSelectedIds(new Set(results.filter((result) => !result.success).map((result) => result.id)));
+      setBatchResult({kind: "delete", results});
+      setConfirmation(null);
+      invalidateInvoiceData();
+    },
+  });
+  const settleInvoices = useMutation({
+    mutationFn: async (targets: Invoice[]) => {
+      const results = await Promise.allSettled(targets.map((invoice) =>
+        api<InvoicePayment>(`/companies/${company!.id}/invoices/${invoice.id}/payments`, {
+          method: "POST",
+          body: JSON.stringify({
+            amount_cents: invoice.balance_cents,
+            currency: invoice.currency,
+            paid_at: new Date().toISOString().slice(0, 10),
+            method: "bank_transfer",
+            reference: null,
+            notes: "Încasare integrală din lista de facturi",
+          }),
+        })));
+      return results.map((result, index) => ({
+        id: targets[index].id,
+        label: targets[index].formatted_number,
+        success: result.status === "fulfilled",
+      }));
+    },
+    onSuccess: (results) => {
+      setSelectedIds(new Set(results.filter((result) => !result.success).map((result) => result.id)));
+      setBatchResult({kind: "settle", results});
+      setConfirmation(null);
+      invalidateInvoiceData();
     },
   });
   const exportInvoices = useMutation({
     mutationFn: () => downloadApiFile(`/companies/${company!.id}/invoices/export${exportQuery}`, "facturi.csv"),
   });
 
+  async function previewPdf(invoice: Invoice) {
+    setPreviewingPdfId(invoice.id);
+    try {
+      await openApiFile(`/companies/${company!.id}/invoices/${invoice.id}/pdf`);
+    } finally {
+      setPreviewingPdfId(null);
+    }
+  }
+
+  function confirmAction() {
+    if (!confirmation) return;
+    if (confirmation.kind === "issue" || confirmation.kind === "delete") {
+      action.mutate({invoice: confirmation.invoice, kind: confirmation.kind});
+    } else if (confirmation.kind === "settle") {
+      settleInvoices.mutate([confirmation.invoice]);
+    } else if (confirmation.kind === "bulk-delete") {
+      bulkDelete.mutate(confirmation.invoices);
+    } else {
+      settleInvoices.mutate(confirmation.invoices);
+    }
+  }
+
   const columns = useMemo<DataGridColumn<Invoice>[]>(
     () => [
       {
         id: "select",
-        header: "",
-        minWidth: 48,
-        cell: (invoice) => invoice.status === "draft" ? (
+        header: selectableRows.length > 0 ? (
           <AppCheckbox
-            name="selected_drafts"
+            name="select_all_invoices"
+            slot="selection"
+            ariaLabel="Selectează facturile eligibile de pe pagină"
+            isSelected={allSelectableSelected}
+            isIndeterminate={!allSelectableSelected && selectedRows.length > 0}
+            onChange={(selected) => setSelectedIds(selected ? new Set(selectableRows.map((invoice) => invoice.id)) : new Set())}
+          >
+            <span className="sr-only">Selectează pagina</span>
+          </AppCheckbox>
+        ) : "",
+        minWidth: 48,
+        cell: (invoice) => isSelectable(invoice) ? (
+          <AppCheckbox
+            name="selected_invoices"
+            slot="selection"
             value={invoice.id}
             ariaLabel={`Selectează ${invoice.formatted_number}`}
-            isSelected={selectedDrafts.has(invoice.id)}
-            onChange={(selected) => setSelectedDrafts((current) => {
+            isSelected={selectedIds.has(invoice.id)}
+            onChange={(selected) => setSelectedIds((current) => {
               const next = new Set(current);
               if (selected) next.add(invoice.id); else next.delete(invoice.id);
               return next;
@@ -213,28 +319,81 @@ export function InvoicesPage() {
         id: "actions",
         header: "Acțiuni",
         align: "end",
-        minWidth: 160,
+        minWidth: 180,
         cell: (invoice) => (
           <div className="flex justify-end gap-1">
-            {invoice.status === "draft" ? (
-              <>
-                <Button isIconOnly size="sm" variant="ghost" aria-label="Editează" onPress={() => navigate(`/facturi/${invoice.id}/editeaza`)}><Pencil size={14} /></Button>
-                <Button isIconOnly size="sm" variant="ghost" aria-label="Emite" onPress={() => {
-                  if (window.confirm("Emiți această ciornă?")) action.mutate({invoice, kind: "issue"});
-                }}><Send size={14} /></Button>
-                <Button isIconOnly size="sm" variant="ghost" aria-label="Șterge" onPress={() => {
-                  if (window.confirm("Ștergi această ciornă?")) action.mutate({invoice, kind: "delete"});
-                }}><Trash2 size={14} className="text-[var(--danger)]" /></Button>
-              </>
+            {invoice.status !== "draft" ? (
+              <Tooltip delay={300}>
+                <Button
+                  isIconOnly
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Vezi PDF ${invoice.formatted_number}`}
+                  isDisabled={previewingPdfId === invoice.id}
+                  onPress={() => void previewPdf(invoice)}
+                >
+                  {previewingPdfId === invoice.id ? <Spinner size="sm" /> : <Eye size={15} />}
+                </Button>
+                <Tooltip.Content>Vezi PDF</Tooltip.Content>
+              </Tooltip>
             ) : null}
-            {invoice.document_type === "invoice" ? (
-              <Button isIconOnly size="sm" variant="ghost" aria-label="Duplică" onPress={() => action.mutate({invoice, kind: "duplicate"})}><Copy size={14} /></Button>
+            {canSettle(invoice) ? (
+              <Tooltip delay={300}>
+                <Button
+                  isIconOnly
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Marchează ${invoice.formatted_number} ca încasată`}
+                  onPress={() => setConfirmation({kind: "settle", invoice})}
+                >
+                  <Banknote size={15} className="text-[var(--success)]" />
+                </Button>
+                <Tooltip.Content>Marchează ca încasată</Tooltip.Content>
+              </Tooltip>
             ) : null}
+            <Dropdown>
+              <Button isIconOnly size="sm" variant="ghost" aria-label={`Mai multe acțiuni pentru ${invoice.formatted_number}`}>
+                <MoreHorizontal size={16} />
+              </Button>
+              <Dropdown.Popover placement="bottom end" className="min-w-[200px]">
+                <Dropdown.Menu onAction={(key) => {
+                  if (key === "open") navigate(`/facturi/${invoice.id}`);
+                  if (key === "edit") navigate(`/facturi/${invoice.id}/editeaza`);
+                  if (key === "issue") setConfirmation({kind: "issue", invoice});
+                  if (key === "duplicate") action.mutate({invoice, kind: "duplicate"});
+                  if (key === "delete") setConfirmation({kind: "delete", invoice});
+                }}>
+                  <Dropdown.Item id="open" textValue="Deschide factura">
+                    <FileText size={15} /><Label>Deschide factura</Label>
+                  </Dropdown.Item>
+                  {invoice.status === "draft" ? (
+                    <Dropdown.Item id="edit" textValue="Editează">
+                      <Pencil size={15} /><Label>Editează</Label>
+                    </Dropdown.Item>
+                  ) : null}
+                  {invoice.status === "draft" ? (
+                    <Dropdown.Item id="issue" textValue="Emite">
+                      <Send size={15} /><Label>Emite</Label>
+                    </Dropdown.Item>
+                  ) : null}
+                  {invoice.document_type === "invoice" ? (
+                    <Dropdown.Item id="duplicate" textValue="Duplică">
+                      <Copy size={15} /><Label>Duplică</Label>
+                    </Dropdown.Item>
+                  ) : null}
+                  {invoice.status === "draft" ? (
+                    <Dropdown.Item id="delete" textValue="Șterge" variant="danger">
+                      <Trash2 size={15} /><Label>Șterge</Label>
+                    </Dropdown.Item>
+                  ) : null}
+                </Dropdown.Menu>
+              </Dropdown.Popover>
+            </Dropdown>
           </div>
         ),
       },
     ],
-    [action, navigate, selectedDrafts],
+    [action, allSelectableSelected, navigate, previewingPdfId, selectableRows, selectedIds, selectedRows.length],
   );
 
   return (
@@ -277,26 +436,25 @@ export function InvoicesPage() {
           </Button>
         </div>
 
-        <Button variant="primary" onPress={() => navigate("/facturi/noi")}>
-          <Plus size={17} /> Emite factură
-        </Button>
-        <Button variant="outline" isDisabled={exportInvoices.isPending} onPress={() => exportInvoices.mutate()}>
-          <Download size={16} /> Exportă CSV
-        </Button>
-        {selectedDrafts.size > 0 ? (
-          <Button variant="outline" isDisabled={bulkDelete.isPending} onPress={() => {
-            if (window.confirm(`Ștergi ${selectedDrafts.size} ciorne selectate?`)) bulkDelete.mutate();
-          }}><Trash2 size={16} /> Șterge ciornele ({selectedDrafts.size})</Button>
-        ) : null}
-        {bulkDelete.data ? (
-          <p role="status" className="w-full text-xs text-[var(--text-muted)]">
-            {bulkDelete.data.filter((result) => result.success).length} ciorne șterse.
-            {bulkDelete.data.some((result) => !result.success)
-              ? ` Nu s-au putut șterge: ${bulkDelete.data.filter((result) => !result.success).map((result) => result.label).join(", ")}.`
-              : ""}
-          </p>
-        ) : null}
+        <div className="flex items-center gap-2">
+          <Button variant="outline" isDisabled={exportInvoices.isPending} onPress={() => exportInvoices.mutate()}>
+            <Download size={16} /> Exportă CSV
+          </Button>
+          <Button variant="primary" onPress={() => navigate("/facturi/noi")}>
+            <Plus size={17} /> Emite factură
+          </Button>
+        </div>
       </div>
+      {batchResult ? (
+        <p role="status" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--text-muted)]">
+          {batchResult.results.filter((result) => result.success).length} facturi {
+            batchResult.kind === "settle" ? "marcate ca încasate" : "șterse"
+          }.
+          {batchResult.results.some((result) => !result.success)
+            ? ` Operația a eșuat pentru: ${batchResult.results.filter((result) => !result.success).map((result) => result.label).join(", ")}.`
+            : ""}
+        </p>
+      ) : null}
       {/* Table card */}
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
         <DataTableLoadingOverlay isLoading={invoices.isFetching && !invoices.isLoading} />
@@ -333,13 +491,105 @@ export function InvoicesPage() {
             columns={columns}
             data={rows}
             getRowId={(invoice) => invoice.id}
+            selectedKeys={selectedIds}
+            selectionBehavior="toggle"
+            selectionMode="multiple"
             sortDescriptor={grid.sort}
+            onSelectionChange={(keys: Selection) => {
+              if (keys === "all") {
+                setSelectedIds(new Set(selectableRows.map((invoice) => invoice.id)));
+                return;
+              }
+              const eligibleIds = new Set(selectableRows.map((invoice) => invoice.id));
+              setSelectedIds(new Set([...keys].map(String).filter((id) => eligibleIds.has(id))));
+            }}
             onSortChange={grid.setSort}
             onRowAction={(key) => navigate(`/facturi/${String(key)}`)}
           />
         )}
         <DataTablePagination pagination={invoices.data?.meta?.pagination} onPageChange={grid.setPage} />
       </div>
+
+      <ActionBar aria-label="Acțiuni pentru facturile selectate" isOpen={selectedRows.length > 0}>
+        <ActionBar.Prefix>
+          <Chip size="sm" className="shrink-0 tabular-nums">
+            <Chip.Label>{selectedRows.length} selectate</Chip.Label>
+          </Chip>
+        </ActionBar.Prefix>
+        <Separator orientation="vertical" />
+        <ActionBar.Content>
+          {selectedOutstanding.length > 0 ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label={selectedOutstanding.length === 1
+                ? "Marchează factura selectată ca încasată"
+                : `Marchează ${selectedOutstanding.length} facturi ca încasate`}
+              onPress={() => setConfirmation({kind: "bulk-settle", invoices: selectedOutstanding})}
+            >
+              <Banknote size={15} />
+              <span className="action-bar__label">Marchează încasate ({selectedOutstanding.length})</span>
+            </Button>
+          ) : null}
+          {selectedDrafts.length > 0 ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-[var(--danger)]"
+              aria-label={`Șterge ${selectedDrafts.length} ciorne`}
+              onPress={() => setConfirmation({kind: "bulk-delete", invoices: selectedDrafts})}
+            >
+              <Trash2 size={15} />
+              <span className="action-bar__label">Șterge ciorne ({selectedDrafts.length})</span>
+            </Button>
+          ) : null}
+        </ActionBar.Content>
+        <Separator orientation="vertical" />
+        <ActionBar.Suffix>
+          <Tooltip delay={300}>
+            <Button isIconOnly size="sm" variant="ghost" aria-label="Golește selecția" onPress={() => setSelectedIds(new Set())}>
+              <X size={15} />
+            </Button>
+            <Tooltip.Content>Golește selecția</Tooltip.Content>
+          </Tooltip>
+        </ActionBar.Suffix>
+      </ActionBar>
+
+      <ConfirmDialog
+        isOpen={confirmation !== null}
+        title={
+          confirmation?.kind === "issue" ? "Emiți această factură?"
+            : confirmation?.kind === "delete" ? "Ștergi această ciornă?"
+              : confirmation?.kind === "bulk-delete" ? `Ștergi ${confirmation.invoices.length} ciorne?`
+                : confirmation?.kind === "bulk-settle"
+                  ? confirmation.invoices.length === 1
+                    ? "Marchezi factura selectată ca încasată?"
+                    : `Marchezi ${confirmation.invoices.length} facturi ca încasate?`
+                  : "Marchezi factura ca încasată?"
+        }
+        description={
+          confirmation?.kind === "issue"
+            ? "După emitere, conținutul fiscal nu mai poate fi editat."
+            : confirmation?.kind === "delete" || confirmation?.kind === "bulk-delete"
+              ? "Ciornele selectate vor fi șterse definitiv. Facturile emise nu sunt afectate."
+              : "Se înregistrează soldul integral ca transfer bancar, cu data de azi. Fiecare factură își păstrează moneda."
+        }
+        confirmLabel={
+          confirmation?.kind === "issue" ? "Emite factura"
+            : confirmation?.kind === "delete" || confirmation?.kind === "bulk-delete" ? "Șterge"
+              : "Marchează încasată"
+        }
+        tone={
+          confirmation?.kind === "delete" || confirmation?.kind === "bulk-delete"
+            ? "danger"
+            : confirmation?.kind === "settle" || confirmation?.kind === "bulk-settle" ? "success" : "warning"
+        }
+        isPending={action.isPending || bulkDelete.isPending || settleInvoices.isPending}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setConfirmation(null);
+        }}
+        onConfirm={confirmAction}
+      />
     </div>
   );
 }

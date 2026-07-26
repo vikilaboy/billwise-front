@@ -79,7 +79,6 @@ describe("InvoiceDetailPage SPV", () => {
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
-    vi.spyOn(window, "confirm").mockReturnValue(true);
 
     render(
       <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
@@ -91,10 +90,12 @@ describe("InvoiceDetailPage SPV", () => {
 
     const button = await screen.findByRole("button", {name: "Trimite în SPV"});
     fireEvent.click(button);
-    fireEvent.click(button);
+    expect(await screen.findByText("Trimiți factura în ANAF SPV?")).toBeInTheDocument();
+    const confirm = screen.getByRole("button", {name: "Trimite în SPV"});
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
 
     await waitFor(() => expect(submitCount).toBe(1));
-    expect(window.confirm).toHaveBeenCalledWith("Trimiți explicit această factură în ANAF SPV?");
     expect(await screen.findByText("În coadă")).toBeInTheDocument();
   });
 
@@ -126,8 +127,9 @@ describe("InvoiceDetailPage SPV", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("INV-0002")).toBeInTheDocument();
-    expect(screen.queryByRole("button", {name: "Duplică"})).not.toBeInTheDocument();
+    expect((await screen.findAllByText("INV-0002")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", {name: "Mai multe acțiuni"}));
+    expect(screen.queryByText("Duplică factura")).not.toBeInTheDocument();
   });
 
   it("permite verificarea manuală a unei trimiteri aflate în procesare", async () => {
