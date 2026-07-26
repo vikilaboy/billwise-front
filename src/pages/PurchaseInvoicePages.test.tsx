@@ -397,6 +397,54 @@ describe("purchase invoice pages", () => {
     );
   });
 
+  it("nu readuce exportul vechi cât timp pornește unul nou", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "POST") return new Promise(() => {});
+      if (String(input).endsWith("/companies/company-1/vault-exports/current")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          data: {
+            id: "export-ready",
+            status: "ready",
+            from_date: "2026-07-01",
+            to_date: "2026-07-26",
+            document_count: 2,
+            source_size_bytes: 100,
+            size_bytes: 80,
+            sha256: "abc",
+            expires_at: "2026-08-02T10:00:00Z",
+          },
+        }), {status: 200, headers: {"Content-Type": "application/json"}}));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        data: [],
+        meta: {pagination: {current_page: 1, last_page: 1, per_page: 20, total: 0}, storage: {used_bytes: 0}},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter><FiscalVaultPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Export nou"}));
+    const createButton = await screen.findByRole("button", {name: "Exportă Seiful"});
+    fireEvent.click(createButton);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/companies/company-1/vault-exports"),
+      expect.objectContaining({method: "POST"}),
+    ));
+
+    expect(screen.queryByRole("button", {name: "Descarcă exportul"})).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Exportă Seiful"})).toBeInTheDocument();
+  });
+
   it("nu transferă eroarea descărcării la următorul export al aceleiași firme", () => {
     const previousDownload = {companyId: "company-1", exportId: "export-1"};
 

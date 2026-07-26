@@ -81,7 +81,6 @@ export function FiscalVaultPage() {
   const createExport = useMutation({
     mutationFn: ({companyId, from, to}: {companyId: string; from: string; to: string}) => api<FiscalVaultExport>(`/companies/${companyId}/vault-exports`, {method: "POST", body: JSON.stringify({from_date: from, to_date: to})}),
     onMutate: async ({companyId}) => {
-      setIgnoredExportId(null);
       await client.cancelQueries({queryKey: ["fiscal-vault-export-current", companyId]});
     },
     onSuccess: (response, target) => client.setQueryData(["fiscal-vault-export-current", target.companyId], response),
