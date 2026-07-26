@@ -388,6 +388,9 @@ describe("purchase invoice pages", () => {
     );
 
     expect(await screen.findByRole("button", {name: "Descarcă exportul"})).toBeEnabled();
+    expect(screen.getByText("Perioada 01.07.2026 – 26.07.2026 · 2 documente")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Export de la")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Export nou"})).toBeEnabled();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/companies/company-1/vault-exports/current"),
       expect.anything(),
