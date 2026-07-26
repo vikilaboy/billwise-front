@@ -1,8 +1,9 @@
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {ApiError, api} from "./api";
+import {API_URL, ApiError, api, downloadApiFileOrTemporaryUrl} from "./api";
 import {API_ERROR_EVENT, type ApiErrorEventDetail} from "./apiErrorPresentation";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -40,5 +41,30 @@ describe("api client", () => {
         errors: {email: ["Email invalid"]},
       },
     });
+  });
+});
+
+describe("downloadApiFileOrTemporaryUrl", () => {
+  it("navighează direct la URL-ul temporar fără să încarce arhiva în memorie", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        url: "https://storage.example.test/export.zip?signature=test",
+        expires_at: "2026-07-26T12:00:00Z",
+      },
+    }), {status: 200, headers: {"Content-Type": "application/json"}})));
+    let clickedUrl: string | null = null;
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      clickedUrl = this.href;
+    });
+
+    await downloadApiFileOrTemporaryUrl("/companies/company-1/vault-exports/export-1/download", "seif-fiscal.zip");
+
+    expect(clickedUrl).toBe("https://storage.example.test/export.zip?signature=test");
+    expect(fetch).toHaveBeenCalledWith(
+      `${API_URL}/companies/company-1/vault-exports/export-1/download`,
+      expect.objectContaining({
+        headers: expect.objectContaining({"Accept-Language": "ro"}),
+      }),
+    );
   });
 });

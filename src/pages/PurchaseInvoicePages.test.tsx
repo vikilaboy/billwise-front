@@ -321,7 +321,7 @@ describe("purchase invoice pages", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((_input: string | URL | Request, init?: RequestInit) => {
       if (init?.method === "POST") {
         return Promise.resolve(new Response(JSON.stringify({
-          data: {id: "export-1", status: "queued", from_date: null, to_date: null, size_bytes: null, sha256: null, expires_at: null},
+          data: {id: "export-1", status: "queued", from_date: null, to_date: null, document_count: 1, source_size_bytes: 100, size_bytes: null, sha256: null, expires_at: null},
         }), {status: 202, headers: {"Content-Type": "application/json"}}));
       }
       return Promise.resolve(new Response(JSON.stringify({
@@ -336,8 +336,10 @@ describe("purchase invoice pages", () => {
       </QueryClientProvider>,
     );
 
-    fireEvent.click(await screen.findByRole("button", {name: "Exportă Seiful"}));
-    expect(await screen.findByRole("status")).toHaveTextContent("Exportul cu manifest și hash-uri este în pregătire.");
+    const exportButton = await screen.findByRole("button", {name: "Exportă Seiful"});
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+    expect(await screen.findByRole("status")).toHaveTextContent("Exportul pentru 1 document este în pregătire pe o coadă separată.");
 
     companyMock.current = {id: "company-2", legal_name: "Beta SRL"};
     view.rerender(
@@ -346,8 +348,50 @@ describe("purchase invoice pages", () => {
       </QueryClientProvider>,
     );
 
-    await waitFor(() => expect(screen.queryByText(/Exportul cu manifest și hash-uri este în pregătire/)).not.toBeInTheDocument());
-    expect(screen.getByRole("button", {name: "Exportă Seiful"})).toBeEnabled();
+    await waitFor(() => expect(screen.queryByText(/este în pregătire pe o coadă separată/)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", {name: "Exportă Seiful"})).toBeEnabled());
+  });
+
+  it("recuperează exportul pregătit după reîncărcarea paginii", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      if (String(input).endsWith("/companies/company-1/vault-exports/current")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          data: {
+            id: "export-ready",
+            status: "ready",
+            from_date: "2026-07-01",
+            to_date: "2026-07-26",
+            document_count: 2,
+            source_size_bytes: 100,
+            size_bytes: 80,
+            sha256: "abc",
+            expires_at: "2026-08-02T10:00:00Z",
+          },
+        }), {status: 200, headers: {"Content-Type": "application/json"}}));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        data: [],
+        meta: {pagination: {current_page: 1, last_page: 1, per_page: 20, total: 0}, storage: {used_bytes: 0}},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter><FiscalVaultPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("button", {name: "Descarcă exportul"})).toBeEnabled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/companies/company-1/vault-exports/current"),
+      expect.anything(),
+    );
   });
 
   it("nu transferă eroarea descărcării la următorul export al aceleiași firme", () => {
@@ -441,7 +485,7 @@ describe("purchase invoice pages", () => {
     await screen.findByText("Păstrat, neverificat");
     fireEvent.click(screen.getByRole("button", {name: "Elimină blocajul legal"}));
     expect(window.confirm).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")).toHaveLength(0);
   });
 
   it("afișează metadatele ANAF în pagina originalului", async () => {

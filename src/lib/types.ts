@@ -82,7 +82,7 @@ export type FiscalVaultItem = {
   original: {filename: string; size_bytes: number; sha256: string} | null; purchase_invoice_id: string | null;
   anaf_message_id: string | null; anaf_download_id: string | null; anaf_available_at: string | null;
 };
-export type FiscalVaultExport = {id: string; status: "queued" | "processing" | "ready" | "failed"; from_date: string | null; to_date: string | null; size_bytes: number | null; sha256: string | null; expires_at: string | null};
+export type FiscalVaultExport = {id: string; status: "queued" | "processing" | "ready" | "failed"; from_date: string | null; to_date: string | null; document_count: number | null; source_size_bytes: number | null; size_bytes: number | null; sha256: string | null; expires_at: string | null};
 
 export type State = {
   id: string;
