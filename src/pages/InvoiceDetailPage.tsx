@@ -10,7 +10,7 @@ import {ConfirmDialog} from "../components/ConfirmDialog";
 import {AppDatePicker, AppSelect} from "../components/FormControls";
 import {InvoiceDocumentPreview} from "../components/InvoiceDocumentPreview";
 import {api, downloadApiFile} from "../lib/api";
-import type {EfacturaSubmission, Invoice, InvoiceDelivery, InvoicePayment, PaymentMethod} from "../lib/types";
+import type {EfacturaSubmission, EfacturaSubmissionEvent, Invoice, InvoiceDelivery, InvoicePayment, PaymentMethod} from "../lib/types";
 import {
   cents,
   date,
@@ -76,8 +76,8 @@ function buildSteps(invoice: Invoice, latest: EfacturaSubmission | undefined): S
   };
 
   const confirmed: Step = {
-    title: "Confirmare descărcată",
-    sub: latest?.has_confirmation ? "Confirmare disponibilă" : "În așteptare",
+    title: "Recipisă ANAF",
+    sub: latest?.has_confirmation ? "Recipisă disponibilă" : "În așteptare",
     state: latest?.has_confirmation ? "done" : "pending",
   };
 
@@ -89,6 +89,17 @@ function StepIcon({state}: {state: StepState}): ReactNode {
   if (state === "error") return <X size={13} />;
   return null;
 }
+
+const submissionEventLabels: Record<string, string> = {
+  submission_requested: "Trimitere solicitată explicit",
+  upload_started: "Încărcare XML începută",
+  upload_accepted: "XML acceptat tehnic de ANAF",
+  upload_retry_scheduled: "Reîncercare încărcare programată",
+  upload_outcome_unknown: "Rezultatul încărcării este necunoscut",
+  status_checked: "Stare verificată în ANAF",
+  receipt_stored: "Recipisă ANAF salvată",
+  submission_failed: "Trimitere eșuată",
+};
 
 export function InvoiceDetailPage() {
   const {id} = useParams();
@@ -117,6 +128,18 @@ export function InvoiceDetailPage() {
     refetchInterval: (query) => {
       const latestSubmission = query.state.data?.data?.[0];
       return latestSubmission && ["queued", "sending", "sent", "processing"].includes(latestSubmission.status) ? 5000 : false;
+    },
+  });
+  const latestSubmissionId = submissionsQuery.data?.data?.[0]?.id;
+  const submissionEventsQuery = useQuery({
+    queryKey: ["invoice", company?.id, id, "submission-events", latestSubmissionId],
+    queryFn: () => api<EfacturaSubmissionEvent[]>(
+      `/companies/${company!.id}/invoices/${id}/efactura/submissions/${latestSubmissionId}/events`,
+    ),
+    enabled: Boolean(company?.id && id && latestSubmissionId),
+    refetchInterval: () => {
+      const latestStatus = submissionsQuery.data?.data?.[0]?.status;
+      return latestStatus && ["queued", "sending", "sent", "processing"].includes(latestStatus) ? 5000 : false;
     },
   });
   const paymentsQuery = useQuery({
@@ -545,6 +568,23 @@ export function InvoiceDetailPage() {
                   </p>
                 ) : null}
 
+                {latest && (submissionEventsQuery.data?.data.length ?? 0) > 0 ? (
+                  <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg-muted)]/40 p-3">
+                    <div className="text-[12px] font-semibold text-[var(--text)]">Audit ANAF</div>
+                    <div className="mt-2 space-y-2">
+                      {submissionEventsQuery.data!.data.map((event) => (
+                        <div key={event.id} className="flex items-start justify-between gap-3 text-[11.5px]">
+                          <div>
+                            <div className="font-medium text-[var(--text)]">{submissionEventLabels[event.event_type] ?? event.event_type}</div>
+                            {event.error_code ? <div className="text-[var(--danger)]">{event.error_code}</div> : null}
+                          </div>
+                          <time className="shrink-0 text-[var(--text-muted)]">{new Date(event.occurred_at).toLocaleString("ro-RO")}</time>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="mt-4 flex flex-col gap-2">
                   {invoice.efactura_eligibility.eligible && !hasBlockingSubmission ? (
                     <Button
@@ -595,7 +635,7 @@ export function InvoiceDetailPage() {
                       onPress={() => void download("confirmation")}
                     >
                       {downloading === "confirmation" ? <Spinner size="sm" /> : <Download size={14} />}
-                      Descarcă confirmarea ZIP
+                      Descarcă recipisa ANAF (ZIP)
                     </Button>
                   ) : null}
                 </div>

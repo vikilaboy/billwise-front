@@ -4,7 +4,7 @@ import {Button, Input, Modal, Pagination, Spinner, Switch} from "@heroui/react";
 import {useNavigate, useSearchParams} from "react-router";
 import {BadgePercent, Building2, Check, CircleAlert, Clock3, Coins, Globe, History, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
-import {AppCheckbox} from "../components/FormControls";
+import {AppCheckbox, AppDatePicker} from "../components/FormControls";
 import {api} from "../lib/api";
 import type {Address, CompanyProfile, Currency, SpvAuthorize, SpvConnection, SpvConnectionEvent, VatProfile} from "../lib/types";
 import {exchangeRate} from "../lib/format";
@@ -97,6 +97,16 @@ function currencyFlag(code: string): {emoji: string; label: string} {
     emoji: "🌐",
     label: `simbol internațional pentru ${code.toUpperCase()}`,
   };
+}
+
+function dateInputValue(value: string | null | undefined): string {
+  return value ? value.slice(0, 10) : new Date().toISOString().slice(0, 10);
+}
+
+function syncWindowStartValue(): string {
+  const date = new Date();
+  date.setDate(date.getDate() - 60);
+  return date.toISOString().slice(0, 10);
 }
 
 // Reusable HeroUI Switch (compound) wired to a boolean value.
@@ -212,6 +222,10 @@ export function SettingsPage() {
     queryFn: () => api<SpvConnection>(`/efactura/spv/connection?company_profile_id=${company!.id}`),
     enabled: Boolean(company?.id),
   });
+  const [inboxAutoSync, setInboxAutoSync] = useState(true);
+  const [inboxSyncFrom, setInboxSyncFrom] = useState("");
+  const [outboxAutoSync, setOutboxAutoSync] = useState(false);
+  const [outboxSyncFrom, setOutboxSyncFrom] = useState("");
   const [spvHistoryOpen, setSpvHistoryOpen] = useState(false);
   const [spvHistoryPage, setSpvHistoryPage] = useState(1);
   const spvHistoryQuery = useQuery({
@@ -288,6 +302,27 @@ export function SettingsPage() {
       queryClient.invalidateQueries({queryKey: ["spv-events", company?.id]}),
     ]),
   });
+  const spvSettingsMutation = useMutation({
+    mutationFn: () => api<SpvConnection>("/efactura/spv/settings", {
+      method: "PATCH",
+      body: JSON.stringify({
+        company_profile_id: company!.id,
+        inbox_auto_sync_enabled: inboxAutoSync,
+        inbox_sync_from: inboxSyncFrom,
+        outbox_auto_sync_enabled: outboxAutoSync,
+        outbox_sync_from: outboxSyncFrom,
+      }),
+    }),
+    onSuccess: (result) => queryClient.setQueryData(["spv-connection", company?.id], result),
+  });
+  const inboxSyncMutation = useMutation({
+    mutationFn: () => api<{queued: boolean}>(`/companies/${company!.id}/efactura/inbox/sync`, {method: "POST"}),
+    onSuccess: () => void queryClient.invalidateQueries({queryKey: ["spv-connection", company?.id]}),
+  });
+  const outboxSyncMutation = useMutation({
+    mutationFn: () => api<{queued: boolean}>(`/companies/${company!.id}/efactura/outbox/sync`, {method: "POST"}),
+    onSuccess: () => void queryClient.invalidateQueries({queryKey: ["spv-connection", company?.id]}),
+  });
   const archiveMutation = useMutation({
     mutationFn: () => api<void>(`/companies/${company!.id}`, {method: "DELETE"}),
     onSuccess: async () => {
@@ -336,6 +371,15 @@ export function SettingsPage() {
     setSpvHistoryOpen(false);
     setSpvHistoryPage(1);
   }, [company?.id]);
+
+  useEffect(() => {
+    const connection = spvQuery.data?.data;
+    if (!connection) return;
+    setInboxAutoSync(Boolean(connection.inbox_auto_sync_enabled));
+    setInboxSyncFrom(dateInputValue(connection.inbox_enabled_at));
+    setOutboxAutoSync(Boolean(connection.outbox_auto_sync_enabled));
+    setOutboxSyncFrom(dateInputValue(connection.outbox_enabled_at));
+  }, [spvQuery.data]);
 
   function openSpvHistory() {
     setSpvHistoryPage(1);
@@ -764,6 +808,86 @@ export function SettingsPage() {
                   >
                     <Link2Off size={14} /> Deconectează
                   </Button>
+                </div>
+                <div className="mt-6 grid gap-4 border-t border-[var(--border)] pt-5">
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-muted)]/40 p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-sm font-bold">Facturi primite de la furnizori</h3>
+                        <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+                          Documentele sunt arhivate automat și importate cu starea „De verificat”.
+                        </p>
+                      </div>
+                      <Toggle
+                        name="inbox_auto_sync_enabled"
+                        label="Sincronizare automată facturi primite"
+                        isSelected={inboxAutoSync}
+                        onChange={setInboxAutoSync}
+                      />
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-end gap-3">
+                      <AppDatePicker
+                        name="inbox_sync_from"
+                        label="Preia începând cu"
+                        ariaLabel="Preia facturile primite începând cu"
+                        className="min-w-[190px]"
+                        value={inboxSyncFrom}
+                        minValue={syncWindowStartValue()}
+                        maxValue={dateInputValue(null)}
+                        onChange={setInboxSyncFrom}
+                      />
+                      <Button size="sm" variant="outline" isDisabled={inboxSyncMutation.isPending} onPress={() => inboxSyncMutation.mutate()}>
+                        {inboxSyncMutation.isPending ? <Spinner size="sm" /> : <RefreshCw size={14} />} Sincronizează acum
+                      </Button>
+                    </div>
+                    <p className="mt-3 text-xs text-[var(--text-muted)]">
+                      Ultima sincronizare: {connection.inbox_last_synced_at ? new Date(connection.inbox_last_synced_at).toLocaleString("ro-RO") : "niciodată"}
+                    </p>
+                    {connection.inbox_last_error_code ? <p role="alert" className="mt-1 text-xs text-[var(--danger)]">{connection.inbox_last_error_code}</p> : null}
+                  </div>
+
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-muted)]/40 p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-sm font-bold">Facturi proprii existente în SPV</h3>
+                        <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+                          Arhivează documentele trimise și le reconciliază cu facturile Billwise, fără suprascriere.
+                        </p>
+                      </div>
+                      <Toggle
+                        name="outbox_auto_sync_enabled"
+                        label="Import recurent facturi proprii"
+                        isSelected={outboxAutoSync}
+                        onChange={setOutboxAutoSync}
+                      />
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-end gap-3">
+                      <AppDatePicker
+                        name="outbox_sync_from"
+                        label="Importă începând cu"
+                        ariaLabel="Importă facturile proprii începând cu"
+                        className="min-w-[190px]"
+                        value={outboxSyncFrom}
+                        minValue={syncWindowStartValue()}
+                        maxValue={dateInputValue(null)}
+                        onChange={setOutboxSyncFrom}
+                      />
+                      <Button size="sm" variant="outline" isDisabled={outboxSyncMutation.isPending} onPress={() => outboxSyncMutation.mutate()}>
+                        {outboxSyncMutation.isPending ? <Spinner size="sm" /> : <RefreshCw size={14} />} Import unic acum
+                      </Button>
+                    </div>
+                    <p className="mt-3 text-xs text-[var(--text-muted)]">
+                      Ultima sincronizare: {connection.outbox_last_synced_at ? new Date(connection.outbox_last_synced_at).toLocaleString("ro-RO") : "niciodată"}
+                    </p>
+                    {connection.outbox_last_error_code ? <p role="alert" className="mt-1 text-xs text-[var(--danger)]">{connection.outbox_last_error_code}</p> : null}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs text-[var(--text-muted)]">ANAF permite preluarea documentelor disponibile din ultimele maximum 60 de zile.</p>
+                    <Button variant="primary" size="sm" isDisabled={spvSettingsMutation.isPending || !inboxSyncFrom || !outboxSyncFrom} onPress={() => spvSettingsMutation.mutate()}>
+                      {spvSettingsMutation.isPending ? <Spinner size="sm" /> : null} Salvează setările e-Factura
+                    </Button>
+                  </div>
                 </div>
               </div>
             );

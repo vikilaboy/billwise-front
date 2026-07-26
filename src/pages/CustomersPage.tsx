@@ -30,6 +30,7 @@ type FiscalEntity = {
 // So we persist the fiscal identity here; the collected address fields stay in the
 // form for parity + ANAF display until the nomenclature pickers land.
 type CreatePayload = {
+  kind: "business" | "individual";
   name: string;
   email: string | null;
   phone: string | null;
@@ -229,6 +230,7 @@ export function CustomersPage() {
 
 // ---------------------------------------------------------------------------
 type FormState = {
+  kind: "business" | "individual";
   cui: string;
   name: string;
   registration_number: string;
@@ -249,6 +251,7 @@ type FormState = {
 };
 
 const EMPTY_FORM: FormState = {
+  kind: "business",
   cui: "",
   name: "",
   registration_number: "",
@@ -271,6 +274,7 @@ const EMPTY_FORM: FormState = {
 function formFromCustomer(customer: Customer): FormState {
   return {
     ...EMPTY_FORM,
+    kind: customer.kind,
     cui: customer.tax_id ?? "",
     name: customer.name,
     registration_number: customer.registration_number ?? "",
@@ -383,12 +387,13 @@ function AddCustomerModal({
 
   function submit() {
     create.mutate({
+      kind: form.kind,
       name: form.name.trim(),
       email: form.email.trim() || null,
       phone: form.phone.trim() || null,
-      tax_id: form.cui.trim() || null,
-      registration_number: form.registration_number.trim() || null,
-      is_vat_payer: form.is_vat_payer,
+      tax_id: form.kind === "business" ? form.cui.trim() || null : null,
+      registration_number: form.kind === "business" ? form.registration_number.trim() || null : null,
+      is_vat_payer: form.kind === "business" && form.is_vat_payer,
       locale: form.locale,
       notes: form.notes.trim() || null,
       address: form.street.trim() ? {
@@ -432,7 +437,31 @@ function AddCustomerModal({
 
         {/* Body */}
         <div className="flex flex-col gap-4 px-6 py-5">
+          {fieldLabel(
+            "Tip client",
+            <AppSelect
+              name="kind"
+              ariaLabel="Tip client"
+              value={form.kind}
+              onChange={(value) => setForm((previous) => ({
+                ...previous,
+                kind: value as "business" | "individual",
+                ...(value === "individual" ? {cui: "", registration_number: "", is_vat_payer: false} : {}),
+              }))}
+              options={[
+                {id: "business", label: "Companie / profesionist cu identificator fiscal"},
+                {id: "individual", label: "Persoană fizică neidentificată cu CNP"},
+              ]}
+            />,
+          )}
+          {form.kind === "individual" ? (
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-muted)] px-3.5 py-3 text-xs leading-relaxed text-[var(--text-muted)]">
+              Billwise nu colectează CNP-ul. XML-ul e-Factura va folosi identificatorul tehnic
+              <span className="ml-1 font-mono font-semibold text-[var(--text)]">0000000000000</span>.
+            </div>
+          ) : null}
           {/* CUI + ANAF lookup */}
+          {form.kind === "business" ? (
           <div className="flex flex-col gap-1.5">
             <span className="text-[12.5px] font-semibold text-[var(--text-muted)]">CUI</span>
             <div className="flex items-stretch gap-2">
@@ -452,6 +481,7 @@ function AddCustomerModal({
               <span className="text-[11.5px] font-medium text-[var(--danger)]">{lookupError}</span>
             ) : null}
           </div>
+          ) : null}
 
           {fieldLabel(
             "Denumire",
@@ -464,7 +494,7 @@ function AddCustomerModal({
             />,
           )}
 
-          {fieldLabel(
+          {form.kind === "business" ? fieldLabel(
             "Reg. Com.",
             <Input
               name="registration_number"
@@ -473,7 +503,7 @@ function AddCustomerModal({
               value={form.registration_number}
               onChange={(e) => set("registration_number", e.target.value)}
             />,
-          )}
+          ) : null}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {fieldLabel(
@@ -543,9 +573,11 @@ function AddCustomerModal({
             )}
           </div>
 
-          <AppCheckbox name="is_vat_payer" isSelected={form.is_vat_payer} onChange={(selected) => set("is_vat_payer", selected)}>
-            Plătitor de TVA
-          </AppCheckbox>
+          {form.kind === "business" ? (
+            <AppCheckbox name="is_vat_payer" isSelected={form.is_vat_payer} onChange={(selected) => set("is_vat_payer", selected)}>
+              Plătitor de TVA
+            </AppCheckbox>
+          ) : null}
 
           <div>
             <div className="text-[12.5px] font-semibold text-[var(--text-muted)]">Conturi ale emitentului afișate clientului</div>

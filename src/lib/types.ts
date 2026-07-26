@@ -103,6 +103,7 @@ export type Locality = {
 export type Customer = {
   id: string;
   company_profile_id: string;
+  kind: "business" | "individual";
   name: string;
   email: string | null;
   phone: string | null;
@@ -542,10 +543,25 @@ export type SpvConnection = {
   access_token_expires_at: string | null;
   reauthorization_required: boolean;
   last_error_code: string | null;
+  inbox_auto_sync_enabled: boolean;
   inbox_enabled_at: string | null;
   inbox_cursor_at: string | null;
   inbox_last_synced_at: string | null;
   inbox_last_error_code: string | null;
+  outbox_auto_sync_enabled: boolean;
+  outbox_enabled_at: string | null;
+  outbox_cursor_at: string | null;
+  outbox_last_synced_at: string | null;
+  outbox_last_error_code: string | null;
+};
+
+export type EfacturaSubmissionEvent = {
+  id: string;
+  event_type: string;
+  status: SpvSubmissionStatus | null;
+  error_code: string | null;
+  metadata: Record<string, string | number | boolean | null> | null;
+  occurred_at: string;
 };
 
 export type SpvAuthorize = {
