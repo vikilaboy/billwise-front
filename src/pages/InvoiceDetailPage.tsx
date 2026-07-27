@@ -840,8 +840,11 @@ function EmailDeliveryModal({companyId, invoice, onClose, onSaved}: {
 }) {
   const [recipient, setRecipient] = useState(invoice.customer?.email ?? "");
   const [cc, setCc] = useState("");
-  const [subject, setSubject] = useState(`Factura ${invoice.formatted_number}`);
-  const [message, setMessage] = useState("Bună ziua,\n\nVă transmitem factura atașată.");
+  const senderName = invoice.company_profile?.legal_name || invoice.company_profile?.trade_name;
+  const [subject, setSubject] = useState(
+    senderName ? `${senderName} · Factura ${invoice.formatted_number}` : `Factura ${invoice.formatted_number}`,
+  );
+  const [message, setMessage] = useState("");
   const send = useMutation({
     mutationFn: () => api<InvoiceDelivery>(`/companies/${companyId}/invoices/${invoice.id}/deliveries/email`, {
       method: "POST",
@@ -863,7 +866,7 @@ function EmailDeliveryModal({companyId, invoice, onClose, onSaved}: {
           <label className="text-xs font-semibold text-[var(--text-muted)]">Destinatar<input name="recipient" className={`${input} mt-1.5`} type="email" value={recipient} onChange={(event) => setRecipient(event.target.value)} /></label>
           <label className="text-xs font-semibold text-[var(--text-muted)]">CC (separate prin virgulă)<input name="cc" className={`${input} mt-1.5`} value={cc} onChange={(event) => setCc(event.target.value)} /></label>
           <label className="text-xs font-semibold text-[var(--text-muted)]">Subiect<input name="subject" className={`${input} mt-1.5`} value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
-          <label className="text-xs font-semibold text-[var(--text-muted)]">Mesaj<textarea name="message" className="mt-1.5 min-h-28 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={message} onChange={(event) => setMessage(event.target.value)} /></label>
+          <label className="text-xs font-semibold text-[var(--text-muted)]">Mesaj suplimentar (opțional)<textarea name="message" className="mt-1.5 min-h-28 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={message} onChange={(event) => setMessage(event.target.value)} /></label>
         </div>
         <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={send.isPending || !recipient.trim() || !subject.trim()} onPress={() => send.mutate()}>
           {send.isPending ? <Spinner size="sm" /> : <Mail size={15} />} Trimite explicit
