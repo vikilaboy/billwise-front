@@ -84,7 +84,7 @@ function MenuItem({href, isCurrent = false, className = "", children, ...props}:
       <button
         type="button"
         aria-current={isCurrent ? "page" : undefined}
-        className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
+        className={`flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
           isCurrent
             ? "bg-[var(--accent-soft)] font-semibold text-[var(--accent-soft-foreground)]"
             : "text-[var(--text-muted)] hover:bg-[var(--bg-muted)] hover:text-[var(--text)]"
@@ -152,7 +152,7 @@ function Trigger({className = "", ...props}: HTMLAttributes<HTMLButtonElement>) 
   return (
     <button
       type="button"
-      className={`grid h-9 w-9 place-items-center rounded-lg border border-[var(--border)] bg-[var(--surface)] ${className}`}
+      className={`grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-[var(--border)] bg-[var(--surface)] ${className}`}
       onClick={() => setMobileOpen(true)}
       {...props}
     />
