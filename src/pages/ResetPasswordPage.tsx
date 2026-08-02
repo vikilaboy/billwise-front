@@ -1,5 +1,5 @@
 import {FormEvent, useState} from "react";
-import {Link, useNavigate, useParams, useSearchParams} from "react-router";
+import {Link, useNavigate, useParams} from "react-router";
 import {Button} from "@heroui/react";
 import {ArrowLeft} from "lucide-react";
 import {api} from "../lib/api";
@@ -7,9 +7,18 @@ import {AuthLayout, authInputCls, authLabelCls} from "../components/AuthLayout";
 
 export function ResetPasswordPage() {
   const navigate = useNavigate();
-  const {token} = useParams();
-  const [params] = useSearchParams();
-  const email = params.get("email") ?? "";
+  const {token: legacyPathToken} = useParams();
+  const [{token, email}] = useState(() => {
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const query = new URLSearchParams(window.location.search);
+    const credentials = {
+      token: fragment.get("token") ?? legacyPathToken ?? "",
+      email: fragment.get("email") ?? query.get("email") ?? "",
+    };
+    window.history.replaceState(window.history.state, "", "/reset-password");
+
+    return credentials;
+  });
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -59,7 +68,7 @@ export function ResetPasswordPage() {
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Minim 8 caractere"
+          placeholder="Minim 12 caractere"
           className={authInputCls}
         />
         {passwordMismatch ? <div className="mt-1 text-[12px] text-[var(--danger)]">Parolele nu coincid.</div> : null}

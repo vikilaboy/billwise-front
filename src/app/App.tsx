@@ -1,8 +1,8 @@
 import {lazy, Suspense, type ComponentType} from "react";
 import {Navigate, Route, Routes} from "react-router";
 import {Spinner} from "@heroui/react";
-import {session} from "../lib/api";
 import {AppShell} from "../components/AppShell";
+import {useSession} from "../components/SessionProvider";
 import {LoginPage} from "../pages/LoginPage";
 import {SignupPage} from "../pages/SignupPage";
 import {ForgotPasswordPage} from "../pages/ForgotPasswordPage";
@@ -12,6 +12,8 @@ import {AccountActivationPage} from "../pages/AccountActivationPage";
 import {CompanyOnboardingPage} from "../pages/CompanyOnboardingPage";
 import {AppErrorBoundary} from "../components/AppErrorBoundary";
 import {ApiErrorToast} from "../components/ApiErrorToast";
+import {EmailChangeConfirmationPage} from "../pages/EmailChangeConfirmationPage";
+import {StepUpDialog} from "../components/StepUpDialog";
 
 // Route-level code splitting: each page (and its heavy deps — charts, timeline,
 // data-grid) loads on navigation, keeping the initial bundle small.
@@ -26,13 +28,21 @@ const CustomersPage = lazyNamed(() => import("../pages/CustomersPage"), "Custome
 const BankAccountsPage = lazyNamed(() => import("../pages/BankAccountsPage"), "BankAccountsPage");
 const InvoiceSeriesPage = lazyNamed(() => import("../pages/InvoiceSeriesPage"), "InvoiceSeriesPage");
 const SettingsPage = lazyNamed(() => import("../pages/SettingsPage"), "SettingsPage");
+const ProfilePage = lazyNamed(() => import("../pages/ProfilePage"), "ProfilePage");
+const SecurityPage = lazyNamed(() => import("../pages/SecurityPage"), "SecurityPage");
 const ProductsPage = lazyNamed(() => import("../pages/ProductsPage"), "ProductsPage");
 const PurchaseInvoicesPage = lazyNamed(() => import("../pages/PurchaseInvoicesPage"), "PurchaseInvoicesPage");
 const PurchaseInvoiceDetailPage = lazyNamed(() => import("../pages/PurchaseInvoiceDetailPage"), "PurchaseInvoiceDetailPage");
 const FiscalVaultPage = lazyNamed(() => import("../pages/FiscalVaultPage"), "FiscalVaultPage");
 const FiscalVaultDetailPage = lazyNamed(() => import("../pages/FiscalVaultDetailPage"), "FiscalVaultDetailPage");
 
-const Protected = () => (session.token() ? <AppShell /> : <Navigate to="/login" replace />);
+const Protected = () => {
+  const {status} = useSession();
+  if (status === "loading") return <PageFallback />;
+  return status === "authenticated" || status === "legacy_authenticated"
+    ? <AppShell />
+    : <Navigate to="/login" replace />;
+};
 
 const PageFallback = () => (
   <div className="flex justify-center py-16 text-[var(--text-muted)]">
@@ -44,14 +54,17 @@ export function App() {
   return (
     <AppErrorBoundary>
       <ApiErrorToast />
+      <StepUpDialog />
       <Suspense fallback={<PageFallback />}>
         <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/inregistrare" element={<SignupPage />} />
         <Route path="/recuperare-parola" element={<ForgotPasswordPage />} />
         <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/verifica-email" element={<VerifyEmailPendingPage />} />
         <Route path="/activare-cont" element={<AccountActivationPage />} />
+        <Route path="/confirmare-email" element={<EmailChangeConfirmationPage />} />
         <Route element={<Protected />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/onboarding/firma" element={<CompanyOnboardingPage />} />
@@ -71,6 +84,8 @@ export function App() {
           <Route path="/conturi" element={<BankAccountsPage />} />
           <Route path="/serii" element={<InvoiceSeriesPage />} />
           <Route path="/setari" element={<SettingsPage />} />
+          <Route path="/profil" element={<ProfilePage />} />
+          <Route path="/securitate" element={<SecurityPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

@@ -2,17 +2,6 @@ import type {ReactNode} from "react";
 import type {Address, Invoice, InvoiceBankAccountSnapshot} from "../lib/types";
 import {date, exchangeRate, money} from "../lib/format";
 
-const COLORS = {
-  ink: "#17211b",
-  muted: "#64716a",
-  faint: "#8a958f",
-  line: "#dfe5e1",
-  soft: "#f4f7f5",
-  accent: "#16a34a",
-  accentSoft: "#eaf8ef",
-  tableHeader: "#46504b",
-} as const;
-
 const LABELS = {
   invoice: ["Factură", "Invoice"],
   correctionInvoice: ["Factură de corecție", "Credit note"],
@@ -65,7 +54,7 @@ function addressLine(address: Address | null | undefined): string {
 
 function SectionTitle({name, bilingual}: {name: LabelKey; bilingual: boolean}) {
   return (
-    <div className="mb-2 text-[9px] font-extrabold uppercase tracking-[.05em]" style={{color: COLORS.muted}}>
+    <div className="mb-2 text-[9px] font-extrabold uppercase tracking-[.05em] text-[#64716a]">
       <LabelPair name={name} bilingual={bilingual} />
     </div>
   );
@@ -77,7 +66,7 @@ function PartyCard({title, bilingual, children}: {
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-lg border p-3.5" style={{borderColor: COLORS.line, background: COLORS.soft}}>
+    <div className="rounded-lg border border-[#dfe5e1] bg-[#f4f7f5] p-3.5">
       <SectionTitle name={title} bilingual={bilingual} />
       {children}
     </div>
@@ -107,21 +96,19 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
   return (
     <article
       aria-label={`Preview document ${invoice.formatted_number}`}
-      className="mx-auto w-full max-w-[820px] overflow-hidden rounded-xl bg-white px-6 py-7 text-[11px] leading-[1.42] shadow-[0_10px_40px_rgba(24,24,27,.12)] sm:px-8 sm:py-9"
-      style={{color: COLORS.ink}}
+      className="mx-auto w-full max-w-[820px] overflow-hidden rounded-xl bg-white px-6 py-7 text-[11px] leading-[1.42] text-[#17211b] shadow-[0_10px_40px_rgba(24,24,27,.12)] sm:px-8 sm:py-9"
     >
-      <header className="grid grid-cols-[minmax(0,1fr)_auto] gap-5 border-b-2 pb-4" style={{borderColor: COLORS.ink}}>
+      <header className="grid grid-cols-[minmax(0,1fr)_auto] gap-5 border-b-2 border-[#17211b] pb-4">
         <div className="flex min-w-0 items-center gap-3">
           <span
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-[18px] font-extrabold text-white"
-            style={{background: COLORS.accent}}
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[#16a34a] text-[18px] font-extrabold text-white"
           >
             {sellerInitial}
           </span>
           <div className="min-w-0">
             <div className="text-[17px] font-extrabold tracking-[-.02em]">{sellerDisplayName}</div>
             {seller?.trade_name && seller.trade_name !== seller.legal_name ? (
-              <div className="mt-0.5 text-[10px]" style={{color: COLORS.muted}}>{seller.legal_name}</div>
+              <div className="mt-0.5 text-[10px] text-[#64716a]">{seller.legal_name}</div>
             ) : null}
           </div>
         </div>
@@ -129,22 +116,22 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
           <div className="text-[20px] font-extrabold uppercase leading-none">
             <LabelPair name={documentTitle} bilingual={bilingual} />
           </div>
-          <div className="mt-2 text-[13px] font-extrabold" style={{color: COLORS.accent}}>{invoice.formatted_number}</div>
+          <div className="mt-2 text-[13px] font-extrabold text-[#16a34a]">{invoice.formatted_number}</div>
           {invoice.corrected_invoice ? (
-            <div className="mt-1" style={{color: COLORS.muted}}>
+            <div className="mt-1 text-[#64716a]">
               <LabelPair name="corrects" bilingual={bilingual} /> {invoice.corrected_invoice.formatted_number}
             </div>
           ) : null}
           <div className="mt-2">
-            <span style={{color: COLORS.muted}}>{LABELS.issueDate[0]}:</span> {date(invoice.issue_date)}
+            <span className="text-[#64716a]">{LABELS.issueDate[0]}:</span> {date(invoice.issue_date)}
           </div>
-          {bilingual ? <div className="text-[9px]" style={{color: COLORS.faint}}>{LABELS.issueDate[1]}: {date(invoice.issue_date)}</div> : null}
+          {bilingual ? <div className="text-[9px] text-[#8a958f]">{LABELS.issueDate[1]}: {date(invoice.issue_date)}</div> : null}
           {invoice.due_date ? (
             <>
               <div>
-                <span style={{color: COLORS.muted}}>{LABELS.dueDate[0]}:</span> {date(invoice.due_date)}
+                <span className="text-[#64716a]">{LABELS.dueDate[0]}:</span> {date(invoice.due_date)}
               </div>
-              {bilingual ? <div className="text-[9px]" style={{color: COLORS.faint}}>{LABELS.dueDate[1]}: {date(invoice.due_date)}</div> : null}
+              {bilingual ? <div className="text-[9px] text-[#8a958f]">{LABELS.dueDate[1]}: {date(invoice.due_date)}</div> : null}
             </>
           ) : null}
         </div>
@@ -155,33 +142,33 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
           <div className="text-[12px] font-extrabold">{seller?.legal_name ?? "—"}</div>
           <div className="mt-1">
             {LABELS.taxId[0]}: {seller?.tax_id ?? "—"}
-            {bilingual ? <span className="block text-[9px]" style={{color: COLORS.faint}}>{LABELS.taxId[1]}: {seller?.tax_id ?? "—"}</span> : null}
+            {bilingual ? <span className="block text-[9px] text-[#8a958f]">{LABELS.taxId[1]}: {seller?.tax_id ?? "—"}</span> : null}
           </div>
           {seller?.registration_number ? (
             <div>
               {LABELS.registrationNumber[0]}: {seller.registration_number}
-              {bilingual ? <span className="block text-[9px]" style={{color: COLORS.faint}}>{LABELS.registrationNumber[1]}: {seller.registration_number}</span> : null}
+              {bilingual ? <span className="block text-[9px] text-[#8a958f]">{LABELS.registrationNumber[1]}: {seller.registration_number}</span> : null}
             </div>
           ) : null}
           <div>{addressLine(seller?.address) || "—"}</div>
-          {seller?.email ? <div style={{color: COLORS.muted}}>{seller.email}</div> : null}
+          {seller?.email ? <div className="text-[#64716a]">{seller.email}</div> : null}
         </PartyCard>
         <PartyCard title="customer" bilingual={bilingual}>
           <div className="text-[12px] font-extrabold">{customer?.name ?? "—"}</div>
           {customer?.tax_id ? (
             <div className="mt-1">
               {LABELS.taxId[0]}: {customer.tax_id}
-              {bilingual ? <span className="block text-[9px]" style={{color: COLORS.faint}}>{LABELS.taxId[1]}: {customer.tax_id}</span> : null}
+              {bilingual ? <span className="block text-[9px] text-[#8a958f]">{LABELS.taxId[1]}: {customer.tax_id}</span> : null}
             </div>
           ) : null}
           {customer?.registration_number ? (
             <div>
               {LABELS.registrationNumber[0]}: {customer.registration_number}
-              {bilingual ? <span className="block text-[9px]" style={{color: COLORS.faint}}>{LABELS.registrationNumber[1]}: {customer.registration_number}</span> : null}
+              {bilingual ? <span className="block text-[9px] text-[#8a958f]">{LABELS.registrationNumber[1]}: {customer.registration_number}</span> : null}
             </div>
           ) : null}
           <div>{addressLine(customer?.address) || "—"}</div>
-          {customer?.email ? <div style={{color: COLORS.muted}}>{customer.email}</div> : null}
+          {customer?.email ? <div className="text-[#64716a]">{customer.email}</div> : null}
         </PartyCard>
       </section>
 
@@ -189,8 +176,7 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
         <table className="w-full table-fixed border-collapse text-[9px] tabular-nums">
           <thead>
             <tr
-              className="text-left text-[8.5px] font-bold uppercase tracking-[.03em] text-white"
-              style={{background: COLORS.tableHeader}}
+              className="bg-[#46504b] text-left text-[8.5px] font-bold uppercase tracking-[.03em] text-white"
             >
               <th className="w-[4%] px-1.5 py-2">#</th>
               <th className="w-[39%] px-1.5 py-2"><LabelPair name="description" bilingual={bilingual} /></th>
@@ -204,29 +190,29 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
           <tbody>
             {invoice.lines.map((line, index) => (
               <tr key={line.id} className="even:bg-[#fafcfb]">
-                <td className="border-b px-1.5 py-2 align-top" style={{borderColor: COLORS.line, color: COLORS.faint}}>{index + 1}</td>
-                <td className="border-b px-1.5 py-2 align-top font-medium" style={{borderColor: COLORS.line}}>{line.description}</td>
-                <td className="border-b px-1.5 py-2 align-top" style={{borderColor: COLORS.line}}>
+                <td className="border-b border-[#dfe5e1] px-1.5 py-2 align-top text-[#8a958f]">{index + 1}</td>
+                <td className="border-b border-[#dfe5e1] px-1.5 py-2 align-top font-medium">{line.description}</td>
+                <td className="border-b border-[#dfe5e1] px-1.5 py-2 align-top">
                   {line.unit || "—"}
-                  {line.unit_code ? <span className="block" style={{color: COLORS.muted}}>{line.unit_code}</span> : null}
+                  {line.unit_code ? <span className="block text-[#64716a]">{line.unit_code}</span> : null}
                 </td>
-                <td className="border-b px-1.5 py-2 text-right align-top" style={{borderColor: COLORS.line}}>{line.quantity}</td>
-                <td className="border-b px-1.5 py-2 text-right align-top" style={{borderColor: COLORS.line}}>
+                <td className="border-b border-[#dfe5e1] px-1.5 py-2 text-right align-top">{line.quantity}</td>
+                <td className="border-b border-[#dfe5e1] px-1.5 py-2 text-right align-top">
                   {money(line.unit_price_cents, currency)}
                   {isForeign && invoice.exchange_rate ? (
-                    <span className="block text-[9px]" style={{color: COLORS.faint}}>
+                    <span className="block text-[9px] text-[#8a958f]">
                       {money(Math.round(line.unit_price_cents * Number(invoice.exchange_rate)), "RON")}
                     </span>
                   ) : null}
                 </td>
-                <td className="border-b px-1.5 py-2 text-right align-top" style={{borderColor: COLORS.line}}>
+                <td className="border-b border-[#dfe5e1] px-1.5 py-2 text-right align-top">
                   {Number(line.vat_rate)}%
-                  <span className="block" style={{color: COLORS.muted}}>{line.vat_category}</span>
+                  <span className="block text-[#64716a]">{line.vat_category}</span>
                 </td>
-                <td className="border-b px-1.5 py-2 text-right align-top font-bold" style={{borderColor: COLORS.line}}>
+                <td className="border-b border-[#dfe5e1] px-1.5 py-2 text-right align-top font-bold">
                   {money(line.total_cents, currency)}
                   {isForeign && invoice.exchange_rate ? (
-                    <span className="block text-[9px] font-normal" style={{color: COLORS.faint}}>
+                    <span className="block text-[9px] font-normal text-[#8a958f]">
                       {money(Math.round(line.total_cents * Number(invoice.exchange_rate)), "RON")}
                     </span>
                   ) : null}
@@ -241,20 +227,20 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
         <div>
           <SectionTitle name="vatBreakdown" bilingual={bilingual} />
           {invoice.vat_breakdown.map((group) => (
-            <div key={`${group.vat_category}-${group.vat_rate}`} className="mt-1.5 border-l-[3px] px-2.5 py-2" style={{borderColor: COLORS.accent, background: COLORS.soft}}>
+            <div key={`${group.vat_category}-${group.vat_rate}`} className="mt-1.5 border-l-[3px] border-[#16a34a] bg-[#f4f7f5] px-2.5 py-2">
               <strong>{group.vat_category} · {Number(group.vat_rate)}%</strong><br />
               {money(group.taxable_cents, currency)} + {money(group.vat_cents, currency)} {LABELS.vat[0]}
               {group.vat_exemption_code || group.vat_exemption_reason ? (
-                <span className="block" style={{color: COLORS.muted}}>
+                <span className="block text-[#64716a]">
                   {[group.vat_exemption_code, group.vat_exemption_reason].filter(Boolean).join(" ")}
                 </span>
               ) : null}
             </div>
           ))}
           {isForeign && invoice.exchange_rate ? (
-            <div className="mt-3 rounded-md px-3 py-2.5 text-[#166534]" style={{background: COLORS.accentSoft}}>
+            <div className="mt-3 rounded-md bg-[#eaf8ef] px-3 py-2.5 text-[#166534]">
               <strong>{LABELS.bnrRate[0]}</strong>
-              {bilingual ? <span className="block text-[9px]" style={{color: COLORS.faint}}>{LABELS.bnrRate[1]}</span> : null}
+              {bilingual ? <span className="block text-[9px] text-[#8a958f]">{LABELS.bnrRate[1]}</span> : null}
               1 {currency} = {exchangeRate(invoice.exchange_rate)} RON
               {invoice.exchange_rate_day ? ` · ${date(invoice.exchange_rate_day)}` : ""}
             </div>
@@ -281,9 +267,9 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
           <SectionTitle name="bankAccounts" bilingual={bilingual} />
           <div className="grid gap-1.5 sm:grid-cols-2">
             {invoice.bank_accounts_snapshot.map((bank, index) => (
-              <div key={`${bank.bank_name}-${index}`} className="rounded-md border px-2.5 py-2" style={{borderColor: COLORS.line}}>
+              <div key={`${bank.bank_name}-${index}`} className="rounded-md border border-[#dfe5e1] px-2.5 py-2">
                 <strong>{bank.bank_name}</strong>
-                {bank.currency_code ? <span style={{color: COLORS.muted}}> · {bank.currency_code}</span> : null}
+                {bank.currency_code ? <span className="text-[#64716a]"> · {bank.currency_code}</span> : null}
                 <span className="block">{bankAccountLine(bank)}</span>
               </div>
             ))}
@@ -298,10 +284,10 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
         </section>
       ) : null}
 
-      <footer className="mt-6 border-t pt-2.5 text-[9px]" style={{borderColor: COLORS.line, color: COLORS.muted}}>
+      <footer className="mt-6 border-t border-[#dfe5e1] pt-2.5 text-[9px] text-[#64716a]">
         <div>Factura este valabilă fără semnătură și ștampilă, conform art. 319 alin. (29) din Legea nr. 227/2015 privind Codul fiscal.</div>
         {bilingual ? (
-          <div className="mt-1" style={{color: COLORS.faint}}>
+          <div className="mt-1 text-[#8a958f]">
             This invoice is valid without a signature or stamp under Romanian Fiscal Code, Law 227/2015, article 319(29).
           </div>
         ) : null}
@@ -319,16 +305,10 @@ function SummaryRow({label, value, grand = false, strong = false, ronStart = fal
 }) {
   return (
     <tr className={grand ? "text-[13px] font-extrabold" : strong ? "font-bold" : ""}>
-      <td
-        className={`border-b px-0.5 py-1.5 ${grand ? "border-t-2 py-2" : ronStart ? "border-t pt-2" : ""}`}
-        style={{borderColor: grand ? COLORS.ink : COLORS.line}}
-      >
+      <td className={`border-b px-0.5 py-1.5 ${grand ? "border-y-[#17211b] border-t-2 py-2" : ronStart ? "border-[#dfe5e1] border-t pt-2" : "border-[#dfe5e1]"}`}>
         {label}
       </td>
-      <td
-        className={`border-b px-0.5 py-1.5 text-right ${grand ? "border-t-2 py-2" : ronStart ? "border-t pt-2" : ""}`}
-        style={{borderColor: grand ? COLORS.ink : COLORS.line}}
-      >
+      <td className={`border-b px-0.5 py-1.5 text-right ${grand ? "border-y-[#17211b] border-t-2 py-2" : ronStart ? "border-[#dfe5e1] border-t pt-2" : "border-[#dfe5e1]"}`}>
         {value}
       </td>
     </tr>

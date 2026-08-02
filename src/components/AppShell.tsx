@@ -2,10 +2,11 @@ import {createContext, useContext, useEffect, useState} from "react";
 import {Navigate, Outlet, useLocation, useNavigate} from "react-router";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Avatar, Button, Dropdown, Spinner} from "@heroui/react";
-import {Sidebar} from "@heroui-pro/react/sidebar";
+import {CspSidebar as Sidebar} from "./CspSidebar";
 import {
   Check,
   Bell,
+  ChevronRight,
   ChevronsUpDown,
   CircleGauge,
   CreditCard,
@@ -22,8 +23,11 @@ import {
   Settings,
   Sun,
   Users,
+  UserRound,
+  ShieldCheck,
 } from "lucide-react";
-import {api, AUTH_EXPIRED_EVENT, session} from "../lib/api";
+import {api, AUTH_EXPIRED_EVENT, type ApiEnvelope} from "../lib/api";
+import {useSession} from "./SessionProvider";
 import type {ActivityNotificationFeed, CompanyProfile, User} from "../lib/types";
 
 type NavItem = {to: string; label: string; icon: typeof FileText; group: string; badge?: number; permission?: string};
@@ -52,6 +56,8 @@ const META: Record<string, [string, string]> = {
   "/conturi": ["Conturi bancare", "Conturile afișate pe facturi"],
   "/serii": ["Serii de facturare", "Prefixe și numerotare"],
   "/setari": ["Setări", "Date firmă și preferințe"],
+  "/profil": ["Profil", "Datele personale ale contului"],
+  "/securitate": ["Securitate", "Parolă, MFA, sesiuni și activitate"],
 };
 
 // Current tenant company shared with every page (invoices/customers are scoped to it).
@@ -98,10 +104,121 @@ function pageMeta(pathname: string): [string, string] {
   return (key && META[key]) || ["BillWise", "Administrare firmă"];
 }
 
+export function activityNotificationTime(value: string, now = new Date()): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Dată necunoscută";
+
+  const time = date.toLocaleTimeString("ro-RO", {hour: "2-digit", minute: "2-digit"});
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const dayDifference = Math.round((startToday.getTime() - startDate.getTime()) / 86_400_000);
+
+  if (dayDifference === 0) {
+    const elapsedMinutes = Math.max(0, Math.floor((now.getTime() - date.getTime()) / 60_000));
+    if (elapsedMinutes < 1) return "Acum";
+    if (elapsedMinutes < 60) return `Acum ${elapsedMinutes} min`;
+    return `Astăzi · ${time}`;
+  }
+  if (dayDifference === 1) return `Ieri · ${time}`;
+
+  const dateLabel = date.toLocaleDateString("ro-RO", {
+    day: "numeric",
+    month: "short",
+    ...(date.getFullYear() === now.getFullYear() ? {} : {year: "numeric"}),
+  });
+  return `${dateLabel} · ${time}`;
+}
+
+function activityNotificationExactTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Dată necunoscută";
+  return date.toLocaleString("ro-RO", {dateStyle: "medium", timeStyle: "short"});
+}
+
+type AccountFooterProps = {
+  user?: User;
+  companyName?: string;
+  currentPath: string;
+  onNavigate: (path: string) => void;
+  onLogout: () => void;
+};
+
+function AccountFooter({user, companyName, currentPath, onNavigate, onLogout}: AccountFooterProps) {
+  const actionClass = (active: boolean) => [
+    "group flex min-h-12 w-full cursor-pointer items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors",
+    active
+      ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+      : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]",
+  ].join(" ");
+
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-muted)] p-2.5 shadow-[var(--shadow)]">
+      <div className="flex items-center gap-2.5 px-1 pb-2.5">
+        <Avatar className="h-10 w-10 shrink-0 rounded-xl bg-[var(--accent)] text-white">
+          <Avatar.Fallback className="text-[13px] font-bold">{initials(user?.name)}</Avatar.Fallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-semibold">{user?.name ?? "Cont BillWise"}</div>
+          <div className="truncate text-[11px] text-[var(--text-muted)]">{companyName ?? user?.email}</div>
+        </div>
+      </div>
+
+      <div className="grid gap-1.5">
+        <button
+          type="button"
+          aria-label="Contul meu"
+          aria-current={currentPath === "/profil" ? "page" : undefined}
+          onClick={() => onNavigate("/profil")}
+          className={actionClass(currentPath === "/profil")}
+        >
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--bg-muted)] text-[var(--text-muted)] group-hover:text-[var(--text)]">
+            <UserRound size={17} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[12.5px] font-semibold">Contul meu</span>
+            <span className="block truncate text-[10.5px] text-[var(--text-muted)]">Date personale și contact</span>
+          </span>
+          <ChevronRight size={14} className="shrink-0 text-[var(--text-faint)]" />
+        </button>
+
+        <button
+          type="button"
+          aria-label="Securitate"
+          aria-current={currentPath === "/securitate" ? "page" : undefined}
+          onClick={() => onNavigate("/securitate")}
+          className={actionClass(currentPath === "/securitate")}
+        >
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent-soft-foreground)]">
+            <ShieldCheck size={17} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[12.5px] font-semibold">Securitate</span>
+            <span className="block truncate text-[10.5px] text-[var(--text-muted)]">Parolă, MFA și sesiuni</span>
+          </span>
+          <ChevronRight size={14} className="shrink-0 text-[var(--text-faint)]" />
+        </button>
+      </div>
+
+      <div className="mt-2 border-t border-[var(--border)] pt-2">
+        <button
+          type="button"
+          aria-label="Deconectare"
+          onClick={onLogout}
+          className="flex min-h-9 w-full items-center justify-center gap-2 rounded-lg px-3 text-[12px] font-semibold text-[var(--danger)] transition-colors hover:bg-[var(--danger-soft)]"
+        >
+          <LogOut size={15} />
+          Deconectare
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const auth = useSession();
   const [dark, setDark] = useState(() => localStorage.getItem("billwise_theme") === "dark");
   const [activeId, setActiveId] = useState<string | null>(() => localStorage.getItem("billwise_active_company_id"));
 
@@ -114,11 +231,50 @@ export function AppShell() {
   });
   const readNotification = useMutation({
     mutationFn: (id: string) => api(`/notifications/${id}/read`, {method: "PATCH"}),
-    onSuccess: () => queryClient.invalidateQueries({queryKey: ["notifications"]}),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({queryKey: ["notifications"]});
+      const previous = queryClient.getQueryData<ApiEnvelope<ActivityNotificationFeed>>(["notifications"]);
+      queryClient.setQueryData<ApiEnvelope<ActivityNotificationFeed>>(["notifications"], (current) => {
+        if (!current) return current;
+        const wasUnread = current.data.items.some((item) => item.id === id && !item.read_at);
+        return {
+          ...current,
+          data: {
+            ...current.data,
+            unread_count: wasUnread ? Math.max(0, current.data.unread_count - 1) : current.data.unread_count,
+            items: current.data.items.map((item) => item.id === id && !item.read_at
+              ? {...item, read_at: new Date().toISOString()}
+              : item),
+          },
+        };
+      });
+      return {previous};
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previous) queryClient.setQueryData(["notifications"], context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({queryKey: ["notifications"]}),
   });
   const readAll = useMutation({
     mutationFn: () => api("/notifications/read-all", {method: "POST"}),
-    onSuccess: () => queryClient.invalidateQueries({queryKey: ["notifications"]}),
+    onMutate: async () => {
+      await queryClient.cancelQueries({queryKey: ["notifications"]});
+      const previous = queryClient.getQueryData<ApiEnvelope<ActivityNotificationFeed>>(["notifications"]);
+      const readAt = new Date().toISOString();
+      queryClient.setQueryData<ApiEnvelope<ActivityNotificationFeed>>(["notifications"], (current) => current ? {
+        ...current,
+        data: {
+          ...current.data,
+          unread_count: 0,
+          items: current.data.items.map((item) => item.read_at ? item : {...item, read_at: readAt}),
+        },
+      } : current);
+      return {previous};
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(["notifications"], context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({queryKey: ["notifications"]}),
   });
 
   const user = me.data?.data;
@@ -133,6 +289,7 @@ export function AppShell() {
   const visibleNavigation = NAV.filter((item) => (!item.permission || can(item.permission))
     && (!archivedCompany || ["/achizitii", "/seif-fiscal"].includes(item.to)));
   const [title, subtitle] = pageMeta(location.pathname);
+  const accountPath = location.pathname === "/profil" || location.pathname === "/securitate";
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -172,9 +329,8 @@ export function AppShell() {
 
   const logout = async () => {
     try {
-      await api("/auth/logout", {method: "POST"});
+      await auth.signOut();
     } finally {
-      session.clear();
       localStorage.removeItem("billwise_active_company_id");
       queryClient.clear();
       navigate("/login", {replace: true});
@@ -183,7 +339,7 @@ export function AppShell() {
 
   const groups = [...new Set(visibleNavigation.map((n) => n.group))];
 
-  if (companies.isLoading || me.isLoading) {
+  if (me.isLoading || (!accountPath && companies.isLoading)) {
     return (
       <div className="flex min-h-screen items-center justify-center gap-2.5 bg-[var(--bg-subtle)] text-sm text-[var(--text-muted)]">
         <Spinner size="sm" /> Se verifică firmele contului…
@@ -191,7 +347,7 @@ export function AppShell() {
     );
   }
 
-  if (companies.isError || me.isError) {
+  if (me.isError || (!accountPath && companies.isError)) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[var(--bg-subtle)] px-6 text-center">
         <p className="text-sm font-medium text-[var(--danger)]">Firmele contului nu au putut fi încărcate.</p>
@@ -205,7 +361,7 @@ export function AppShell() {
     );
   }
 
-  if (allCompanies.length === 0) {
+  if (allCompanies.length === 0 && !accountPath) {
     if (location.pathname !== "/onboarding/firma") {
       return <Navigate to="/onboarding/firma" replace />;
     }
@@ -217,7 +373,7 @@ export function AppShell() {
     );
   }
 
-  if (list.length === 0) {
+  if (list.length === 0 && !accountPath) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-subtle)] px-6 text-center">
         <p className="max-w-lg text-sm text-[var(--danger)]">
@@ -309,24 +465,13 @@ export function AppShell() {
           </Sidebar.Content>
 
           <Sidebar.Footer>
-            <div className="flex items-center gap-2.5 rounded-xl bg-[var(--bg-muted)] p-2.5">
-              <Avatar className="h-9 w-9 shrink-0 rounded-lg bg-[var(--accent)] text-white">
-                <Avatar.Fallback className="text-[13px] font-bold">{initials(me.data?.data.name)}</Avatar.Fallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-semibold">{me.data?.data.name ?? "Cont BillWise"}</div>
-                <div className="truncate text-[11.5px] text-[var(--text-muted)]">
-                  {company?.legal_name ?? me.data?.data.email}
-                </div>
-              </div>
-              <button
-                aria-label="Deconectare"
-                onClick={logout}
-                className="text-[var(--text-faint)] transition-colors hover:text-[var(--text)]"
-              >
-                <LogOut size={17} />
-              </button>
-            </div>
+            <AccountFooter
+              user={me.data?.data}
+              companyName={company?.legal_name}
+              currentPath={location.pathname}
+              onNavigate={navigate}
+              onLogout={() => void logout()}
+            />
           </Sidebar.Footer>
         </Sidebar>
 
@@ -405,24 +550,13 @@ export function AppShell() {
           </Sidebar.Content>
 
           <Sidebar.Footer>
-            <div className="flex items-center gap-2.5 rounded-xl bg-[var(--bg-muted)] p-2.5">
-              <Avatar className="h-9 w-9 shrink-0 rounded-lg bg-[var(--accent)] text-white">
-                <Avatar.Fallback className="text-[13px] font-bold">{initials(me.data?.data.name)}</Avatar.Fallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-semibold">{me.data?.data.name ?? "Cont BillWise"}</div>
-                <div className="truncate text-[11.5px] text-[var(--text-muted)]">
-                  {company?.legal_name ?? me.data?.data.email}
-                </div>
-              </div>
-              <button
-                aria-label="Deconectare"
-                onClick={logout}
-                className="text-[var(--text-faint)] transition-colors hover:text-[var(--text)]"
-              >
-                <LogOut size={17} />
-              </button>
-            </div>
+            <AccountFooter
+              user={me.data?.data}
+              companyName={company?.legal_name}
+              currentPath={location.pathname}
+              onNavigate={navigate}
+              onLogout={() => void logout()}
+            />
           </Sidebar.Footer>
         </Sidebar.Mobile>
 
@@ -448,9 +582,16 @@ export function AppShell() {
                 ) : null}
               </Dropdown.Trigger>
               <Dropdown.Popover className="w-[min(360px,calc(100vw-24px))]">
-                <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
-                  <b className="text-sm">Activitate</b>
-                  {(notifications.data?.data.unread_count ?? 0) > 0 ? <Button size="sm" variant="ghost" onPress={() => readAll.mutate()}>Marchează toate citite</Button> : null}
+                <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2.5">
+                  <div>
+                    <b className="text-sm">Activitate</b>
+                    <div className="mt-0.5 text-[10.5px] text-[var(--text-muted)]">
+                      {(notifications.data?.data.unread_count ?? 0) > 0
+                        ? `${notifications.data!.data.unread_count} necitite`
+                        : "Totul este citit"}
+                    </div>
+                  </div>
+                  {(notifications.data?.data.unread_count ?? 0) > 0 ? <Button size="sm" variant="ghost" isPending={readAll.isPending} onPress={() => readAll.mutate()}>Marchează tot ca citit</Button> : null}
                 </div>
                 <Dropdown.Menu aria-label="Notificări" onAction={(key) => {
                   const item = notifications.data?.data.items.find((notification) => notification.id === String(key));
@@ -461,10 +602,26 @@ export function AppShell() {
                   {(notifications.data?.data.items ?? []).length === 0 ? (
                     <Dropdown.Item id="empty" isDisabled textValue="Nicio notificare">Nu există notificări.</Dropdown.Item>
                   ) : (notifications.data?.data.items ?? []).map((notification) => (
-                    <Dropdown.Item key={notification.id} id={notification.id} textValue={notification.title}>
-                      <div className={`py-1 ${notification.read_at ? "opacity-65" : ""}`}>
-                        <div className="text-xs font-semibold">{notification.title}</div>
-                        <div className="mt-0.5 whitespace-normal text-[11px] text-[var(--text-muted)]">{notification.message}</div>
+                    <Dropdown.Item key={notification.id} id={notification.id} textValue={notification.title} className="p-1">
+                      <div className="flex w-full items-start gap-2.5 rounded-xl border border-transparent bg-transparent px-3 py-2.5 transition-colors">
+                        <span
+                          aria-label={notification.read_at ? "Citită" : "Necitită"}
+                          className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${notification.read_at ? "border border-[var(--text-faint)]" : "bg-[var(--accent)]"}`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className={`text-xs ${notification.read_at ? "font-semibold text-[var(--text-muted)]" : "font-bold text-[var(--text)]"}`}>{notification.title}</div>
+                          <div className="mt-1 whitespace-normal text-[11px] leading-relaxed text-[var(--text-muted)]">{notification.message}</div>
+                          <div className="mt-2 flex items-center justify-between gap-2">
+                            {!notification.read_at ? <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">Nou</span> : <span />}
+                            <time
+                              dateTime={notification.created_at}
+                              title={activityNotificationExactTime(notification.created_at)}
+                              className="text-[10px] font-medium text-[var(--text-faint)]"
+                            >
+                              {activityNotificationTime(notification.created_at)}
+                            </time>
+                          </div>
+                        </div>
                       </div>
                     </Dropdown.Item>
                   ))}

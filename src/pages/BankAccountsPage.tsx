@@ -304,10 +304,7 @@ export function BankAccountsPage() {
           </EmptyState.Content>
         </EmptyState>
       ) : (
-        <div
-          className="grid gap-4"
-          style={{gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))"}}
-        >
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
           {list.map((account) => {
             const id = accountIdentifier(account);
             const code = account.currency_id ? currencyCode.get(account.currency_id) : undefined;

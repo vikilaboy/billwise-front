@@ -27,6 +27,25 @@ export type AuthPayload = {
   user: User;
 };
 
+export type SessionPayload =
+  | {
+      status: "authenticated" | "exchange_pending_confirmation";
+      csrf_token?: string;
+      user: User;
+    }
+  | {
+      status: "mfa_required";
+      csrf_token: string;
+      expires_at: string;
+    }
+  | {
+      status: "mfa_reenrollment_required";
+      csrf_token: string;
+      factor_id: string;
+      secret: string;
+      provisioning_uri: string;
+    };
+
 export type Address = {
   id: string;
   country_code: string;
@@ -297,8 +316,9 @@ export type InvoiceDelivery = {
   cc: string[];
   subject: string;
   message: string | null;
-  status: "queued" | "sending" | "sent" | "failed";
+  status: "queued" | "preparing" | "sending" | "sent" | "failed" | "outcome_unknown";
   provider_message_id: string | null;
+  requires_duplicate_confirmation: boolean;
   error: string | null;
   sent_at: string | null;
   created_at: string | null;

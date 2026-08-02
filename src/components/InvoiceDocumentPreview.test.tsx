@@ -83,7 +83,7 @@ describe("InvoiceDocumentPreview", () => {
     expect(screen.getAllByText("119,00 EUR").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("1 EUR = 5 RON · 23.07.2026")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", {name: "Descriere Description"}).parentElement)
-      .toHaveStyle({background: "#46504b"});
+      .toHaveClass("bg-[#46504b]");
     expect(screen.getByText(/This invoice is valid without a signature or stamp/)).toBeInTheDocument();
   });
 });

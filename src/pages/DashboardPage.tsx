@@ -355,10 +355,10 @@ export function DashboardPage() {
               tone="warning"
               visual={(
                 <div>
-                  <div className="flex h-2 overflow-hidden rounded-full bg-[var(--bg-muted)]">
-                    <span className="bg-[var(--warning)]" style={{width: `${100 - overdueShare}%`}} />
-                    <span className="bg-[var(--danger)]" style={{width: `${overdueShare}%`}} />
-                  </div>
+                  <svg className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg-muted)]" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true">
+                    <rect width={100 - overdueShare} height="8" fill="var(--warning)" />
+                    <rect x={100 - overdueShare} width={overdueShare} height="8" fill="var(--danger)" />
+                  </svg>
                   <div className="mt-2 flex justify-between text-[10px] text-[var(--text-muted)]">
                     <span>În termen {100 - overdueShare}%</span>
                     <span>Restant {overdueShare}%</span>
@@ -414,7 +414,17 @@ export function DashboardPage() {
             {aging.isLoading ? <LoadingBlock /> : aging.isError ? <QueryError error={aging.error} retry={() => void aging.refetch()} /> : (
               <div className="mt-3">
                 <div className="mb-4 flex items-end justify-between"><div><div className="text-2xl font-bold">{money(aging.data?.data.total_balance_ron_cents)}</div><div className="text-xs text-[var(--text-muted)]">{aging.data?.data.invoice_count} facturi cu sold</div></div><span className="text-xs text-[var(--text-muted)]">la {date(aging.data?.data.as_of)}</span></div>
-                <div className="mb-4 flex h-3 overflow-hidden rounded-full bg-[var(--bg-muted)]">{aging.data?.data.buckets.filter((bucket) => bucket.balance_ron_cents > 0).map((bucket, index) => <div key={bucket.key} style={{width: `${bucket.share_percent}%`, background: ["var(--success)", "var(--warning)", "#f97316", "#ef4444", "#991b1b"][index]}} />)}</div>
+                <svg className="mb-4 h-3 w-full overflow-hidden rounded-full bg-[var(--bg-muted)]" viewBox="0 0 100 12" preserveAspectRatio="none" aria-label="Distribuția soldurilor după vechime">
+                  {aging.data?.data.buckets.filter((bucket) => bucket.balance_ron_cents > 0).map((bucket, index, buckets) => (
+                    <rect
+                      key={bucket.key}
+                      x={buckets.slice(0, index).reduce((sum, item) => sum + item.share_percent, 0)}
+                      width={bucket.share_percent}
+                      height="12"
+                      fill={["var(--success)", "var(--warning)", "#f97316", "#ef4444", "#991b1b"][index]}
+                    />
+                  ))}
+                </svg>
                 {aging.data?.data.buckets.map((bucket) => <button key={bucket.key} type="button" onClick={() => navigate(`/facturi?aging=${bucket.key}`)} className="flex w-full items-center gap-3 border-t border-[var(--border)] py-3 text-left hover:bg-[var(--bg-muted)]"><span className="flex-1 text-sm">{AGING_LABELS[bucket.key]}</span><span className="text-xs text-[var(--text-muted)]">{bucket.invoice_count} facturi</span><b className="min-w-32 text-right text-sm tabular-nums">{money(bucket.balance_ron_cents)}</b><ArrowRight size={15} className="text-[var(--faint)]" /></button>)}
               </div>
             )}

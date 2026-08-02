@@ -1,4 +1,5 @@
 import {dispatchApiError} from "./apiErrorPresentation";
+import {requestStepUp} from "./stepUpCoordinator";
 
 export type Pagination = {
   current_page: number;
@@ -13,6 +14,9 @@ export type ProblemDetails = {
   status: number;
   detail?: string;
   errors?: Record<string, string[]>;
+};
+export type ApiRequestOptions = {
+  silentStatuses?: readonly number[];
 };
 export class ApiError extends Error {
   constructor(public readonly problem: ProblemDetails) {
@@ -59,6 +63,10 @@ function apiBase(raw: string): string {
 export const API_URL = apiBase(__API_URL__ || import.meta.env.VITE_API_URL || "/v1");
 const TOKEN_KEY = "billwise_access_token";
 export const AUTH_EXPIRED_EVENT = "billwise:auth-expired";
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+let csrfToken: string | null = null;
+let csrfBootstrap: Promise<string> | null = null;
 
 export const session = {
   token: () => localStorage.getItem(TOKEN_KEY),
@@ -66,40 +74,133 @@ export const session = {
   clear: () => localStorage.removeItem(TOKEN_KEY),
 };
 
-function expireSessionOnUnauthorized(status: number, token: string | null): void {
-  if (status !== 401 || !token) return;
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token;
+}
+
+export function resetApiSecurityState(): void {
+  csrfToken = null;
+  csrfBootstrap = null;
+}
+
+export async function bootstrapCsrf(force = false): Promise<string> {
+  if (!force && csrfToken) return csrfToken;
+  if (!force && csrfBootstrap) return csrfBootstrap;
+
+  csrfBootstrap = (async () => {
+    let response: Response;
+    try {
+      response = await fetch(`${API_URL}/session/csrf`, {
+        credentials: "include",
+        headers: {
+          Accept: "application/json, application/problem+json",
+          "Accept-Language": "ro",
+        },
+      });
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
+      throw networkApiError(cause);
+    }
+
+    const payload = await response.json().catch(() => null) as ApiEnvelope<{csrf_token: string}> | null;
+    const token = payload?.data?.csrf_token;
+    if (!response.ok || typeof token !== "string" || token.length === 0) {
+      throw new ApiError({
+        title: "Sesiunea nu a putut fi inițializată",
+        status: response.status,
+        detail: "Tokenul de securitate al sesiunii lipsește sau este invalid.",
+      });
+    }
+
+    csrfToken = token;
+    return token;
+  })().finally(() => {
+    csrfBootstrap = null;
+  });
+
+  return csrfBootstrap;
+}
+
+function expireSessionOnUnauthorized(status: number, path: string, token: string | null): void {
+  if (status !== 401) return;
+  if (token && ["/session/me", "/session/exchange/confirm"].includes(path)) return;
   session.clear();
+  resetApiSecurityState();
   window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T>> {
+async function authenticatedHeaders(init: RequestInit): Promise<{headers: Headers; token: string | null}> {
   const headers = new Headers(init.headers);
-  headers.set("Accept", "application/json, application/problem+json");
-  headers.set("Accept-Language", "ro");
-  if (init.body) headers.set("Content-Type", "application/json");
+  headers.set("Accept", headers.get("Accept") ?? "application/json, application/problem+json");
+  headers.set("Accept-Language", headers.get("Accept-Language") ?? "ro");
+  if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
+
   const token = session.token();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  } else {
+    headers.set("X-CSRF-TOKEN", await bootstrapCsrf());
+  }
+
+  return {headers, token};
+}
+
+async function authenticatedFetch(path: string, init: RequestInit = {}, retried = false): Promise<Response> {
+  const {headers, token} = await authenticatedHeaders(init);
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, {...init, headers});
+    response = await fetch(`${API_URL}${path}`, {...init, credentials: "include", headers});
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
     throw networkApiError(cause);
   }
-  expireSessionOnUnauthorized(response.status, token);
+
+  expireSessionOnUnauthorized(response.status, path, token);
+  if (response.status !== 419 || (token && !headers.has("X-CSRF-TOKEN"))) return response;
+
+  resetApiSecurityState();
+  let refreshedCsrf: string;
+  try {
+    refreshedCsrf = await bootstrapCsrf(true);
+  } catch {
+    return response;
+  }
+
+  const method = (init.method ?? "GET").toUpperCase();
+  if (retried || !SAFE_METHODS.has(method)) return response;
+  const retryHeaders = new Headers(init.headers);
+  retryHeaders.set("X-CSRF-TOKEN", refreshedCsrf);
+  return authenticatedFetch(path, {...init, headers: retryHeaders}, true);
+}
+
+export async function api<T>(
+  path: string,
+  init: RequestInit = {},
+  options: ApiRequestOptions = {},
+): Promise<ApiEnvelope<T>> {
+  return apiRequest<T>(path, init, true, options);
+}
+
+async function apiRequest<T>(
+  path: string,
+  init: RequestInit,
+  allowStepUp: boolean,
+  options: ApiRequestOptions,
+): Promise<ApiEnvelope<T>> {
+  const response = await authenticatedFetch(path, init);
   if (response.status === 204) return {data: undefined as T};
   let payload: Record<string, unknown>;
   try {
     payload = await response.json() as Record<string, unknown>;
   } catch {
-    throw reportApiError({
+    throw apiProblem({
       title: response.ok ? "Răspuns invalid de la server" : "Cererea nu a putut fi procesată",
       status: response.status,
       detail: "Serverul nu a returnat un răspuns JSON valid.",
-    });
+    }, options);
   }
-  if (!response.ok)
-    throw reportApiError({
+  if (!response.ok) {
+    const problem = {
       title: typeof payload.title === "string" ? payload.title : "Cererea nu a putut fi procesată",
       status: response.status,
       detail: typeof payload.detail === "string"
@@ -107,23 +208,27 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiE
         : typeof payload.message === "string" ? payload.message : undefined,
       errors: payload.errors as Record<string, string[]> | undefined,
       type: typeof payload.type === "string" ? payload.type : undefined,
-    });
+    } satisfies ProblemDetails;
+
+    if (allowStepUp && path !== "/account/step-up" && problem.type?.endsWith("/step-up-required")) {
+      return requestStepUp(problem, () => apiRequest<T>(path, init, false, options));
+    }
+
+    throw apiProblem(problem, options);
+  }
   return payload as ApiEnvelope<T>;
 }
 
-export async function downloadApiFile(path: string, fallbackName: string): Promise<void> {
-  const headers = new Headers({Accept: "*/*", "Accept-Language": "ro"});
-  const token = session.token();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+function apiProblem(problem: ProblemDetails, options: ApiRequestOptions): ApiError {
+  return options.silentStatuses?.includes(problem.status)
+    ? new ApiError(problem)
+    : reportApiError(problem);
+}
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_URL}${path}`, {headers});
-  } catch (cause) {
-    if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
-    throw networkApiError(cause);
-  }
-  expireSessionOnUnauthorized(response.status, token);
+export async function downloadApiFile(path: string, fallbackName: string): Promise<void> {
+  const response = await authenticatedFetch(path, {
+    headers: {Accept: "*/*", "Accept-Language": "ro"},
+  });
   if (!response.ok) {
     throw await downloadResponseError(response);
   }
@@ -133,13 +238,11 @@ export async function downloadApiFile(path: string, fallbackName: string): Promi
 
 export async function openApiFile(path: string): Promise<void> {
   const preview = window.open("", "_blank");
-  const headers = new Headers({Accept: "application/pdf", "Accept-Language": "ro"});
-  const token = session.token();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
 
   try {
-    const response = await fetch(`${API_URL}${path}`, {headers});
-    expireSessionOnUnauthorized(response.status, token);
+    const response = await authenticatedFetch(path, {
+      headers: {Accept: "application/pdf", "Accept-Language": "ro"},
+    });
     if (!response.ok) throw await downloadResponseError(response);
 
     const url = URL.createObjectURL(await response.blob());
@@ -186,20 +289,12 @@ async function saveResponseBlob(response: Response, fallbackName: string): Promi
 }
 
 export async function downloadApiFileOrTemporaryUrl(path: string, fallbackName: string): Promise<void> {
-  const token = session.token();
-  let response: Response;
-  try {
-    response = await fetch(`${API_URL}${path}`, {
-      headers: {
-        Accept: "application/json, application/octet-stream",
-        "Accept-Language": "ro",
-        ...(token ? {Authorization: `Bearer ${token}`} : {}),
-      },
-    });
-  } catch (error) {
-    throw networkApiError(error);
-  }
-  expireSessionOnUnauthorized(response.status, token);
+  const response = await authenticatedFetch(path, {
+    headers: {
+      Accept: "application/json, application/octet-stream",
+      "Accept-Language": "ro",
+    },
+  });
   if (!response.ok) {
     throw await downloadResponseError(response);
   }

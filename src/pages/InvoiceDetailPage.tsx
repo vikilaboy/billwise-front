@@ -35,6 +35,7 @@ type Step = {title: string; sub: string; state: StepState};
 type DetailConfirmation =
   | {kind: "issue" | "delete" | "cancel" | "settle" | "submit-spv" | "retry-spv"}
   | {kind: "delete-payment"; payment: InvoicePayment}
+  | {kind: "retry-delivery"; delivery: InvoiceDelivery}
   | null;
 
 // Derive a 4-step e-Factura timeline from the latest submission (submissions[0]).
@@ -151,11 +152,14 @@ export function InvoiceDetailPage() {
     queryKey: ["invoice", company?.id, id, "deliveries"],
     queryFn: () => api<InvoiceDelivery[]>(`/companies/${company!.id}/invoices/${id}/deliveries`),
     enabled: Boolean(company?.id && id),
-    refetchInterval: (query) => query.state.data?.data.some((delivery) => ["queued", "sending"].includes(delivery.status)) ? 5000 : false,
+    refetchInterval: (query) => query.state.data?.data.some((delivery) => ["queued", "preparing", "sending"].includes(delivery.status)) ? 5000 : false,
   });
   const retryDelivery = useMutation({
-    mutationFn: (deliveryId: string) =>
-      api<InvoiceDelivery>(`/companies/${company!.id}/invoices/${id}/deliveries/${deliveryId}/retry`, {method: "POST"}),
+    mutationFn: ({deliveryId, confirmPossibleDuplicate}: {deliveryId: string; confirmPossibleDuplicate?: boolean}) =>
+      api<InvoiceDelivery>(`/companies/${company!.id}/invoices/${id}/deliveries/${deliveryId}/retry`, {
+        method: "POST",
+        body: JSON.stringify({confirmed_possible_duplicate: confirmPossibleDuplicate ?? false}),
+      }),
     onSuccess: () => queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "deliveries"]}),
   });
   const deletePayment = useMutation({
@@ -319,6 +323,11 @@ export function InvoiceDetailPage() {
       if (submittingRef.current) return;
       submittingRef.current = true;
       submitMutation.mutate(undefined, {onSuccess: () => setConfirmation(null)});
+    } else if (confirmation.kind === "retry-delivery") {
+      retryDelivery.mutate(
+        {deliveryId: confirmation.delivery.id, confirmPossibleDuplicate: true},
+        {onSuccess: () => setConfirmation(null)},
+      );
     } else if (latest) {
       retryUnknownMutation.mutate(latest.id, {onSuccess: () => setConfirmation(null)});
     }
@@ -468,12 +477,12 @@ export function InvoiceDetailPage() {
                         <div key={delivery.id} className="flex items-center gap-2 border-b border-[var(--border)] py-2.5 text-xs last:border-0">
                           <div className="min-w-0 flex-1">
                             <div className="truncate font-semibold">{delivery.recipient}</div>
-                            <div className={delivery.status === "failed" ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}>
-                              {delivery.status === "sent" ? `Trimisă ${delivery.sent_at ? date(delivery.sent_at) : ""}` : ["queued", "sending"].includes(delivery.status) ? "În curs de trimitere" : delivery.error ?? "Livrare eșuată"}
+                            <div className={["failed", "outcome_unknown"].includes(delivery.status) ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}>
+                              {delivery.status === "sent" ? `Trimisă ${delivery.sent_at ? date(delivery.sent_at) : ""}` : ["queued", "preparing", "sending"].includes(delivery.status) ? "În curs de trimitere" : delivery.status === "outcome_unknown" ? "Rezultat incert — verifică inboxul destinatarului înainte de retransmitere." : delivery.error ?? "Livrare eșuată"}
                             </div>
                           </div>
-                          {delivery.status === "failed" ? (
-                            <Button isIconOnly size="sm" variant="ghost" aria-label="Reîncearcă livrarea" onPress={() => retryDelivery.mutate(delivery.id)}><RefreshCw size={14} /></Button>
+                          {delivery.status === "failed" || delivery.status === "outcome_unknown" ? (
+                            <Button isIconOnly size="sm" variant="ghost" aria-label="Reîncearcă livrarea" onPress={() => delivery.status === "outcome_unknown" ? setConfirmation({kind: "retry-delivery", delivery}) : retryDelivery.mutate({deliveryId: delivery.id})}><RefreshCw size={14} /></Button>
                           ) : null}
                         </div>
                       ))}
@@ -692,6 +701,7 @@ export function InvoiceDetailPage() {
                 : confirmation?.kind === "settle" ? "Înregistrezi încasarea integrală?"
                   : confirmation?.kind === "delete-payment" ? "Ștergi această încasare?"
                     : confirmation?.kind === "retry-spv" ? "Confirmi absența facturii din SPV?"
+                      : confirmation?.kind === "retry-delivery" ? "Retrimiți un email cu rezultat incert?"
                       : "Trimiți factura în ANAF SPV?"
         }
         description={
@@ -707,6 +717,8 @@ export function InvoiceDetailPage() {
                     ? "Soldul facturii va fi recalculat imediat."
                     : confirmation?.kind === "retry-spv"
                       ? "Retransmite numai după ce ai verificat manual în SPV că ANAF nu a primit factura. Altfel poate apărea un duplicat."
+                      : confirmation?.kind === "retry-delivery"
+                        ? "Furnizorul poate să fi acceptat deja emailul. Confirmă numai după ce ai verificat că destinatarul nu l-a primit; retransmiterea poate crea un duplicat."
                       : "Aceasta este o acțiune explicită. Billwise va trimite factura în SPV numai după confirmarea ta."
         }
         confirmLabel={
@@ -715,10 +727,11 @@ export function InvoiceDetailPage() {
               : confirmation?.kind === "cancel" ? "Anulează factura"
                 : confirmation?.kind === "settle" ? "Încasează integral"
                   : confirmation?.kind === "retry-spv" ? "Confirmă și retransmite"
+                    : confirmation?.kind === "retry-delivery" ? "Confirmă și retrimite emailul"
                     : "Trimite în SPV"
         }
         tone={
-          confirmation?.kind === "delete" || confirmation?.kind === "delete-payment" || confirmation?.kind === "retry-spv"
+          confirmation?.kind === "delete" || confirmation?.kind === "delete-payment" || confirmation?.kind === "retry-spv" || confirmation?.kind === "retry-delivery"
             ? "danger"
             : confirmation?.kind === "settle" ? "success"
               : confirmation?.kind === "issue" || confirmation?.kind === "cancel" ? "warning" : "accent"
@@ -729,6 +742,7 @@ export function InvoiceDetailPage() {
           || deletePayment.isPending
           || submitMutation.isPending
           || retryUnknownMutation.isPending
+          || retryDelivery.isPending
         }
         isConfirmDisabled={confirmation?.kind === "cancel" && !cancellationReason.trim()}
         onOpenChange={(isOpen) => {

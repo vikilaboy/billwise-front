@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 @import "@heroui/styles";
 @import "@heroui-pro/react/css";
@@ -7,17 +6,22 @@
    token is --accent (there is no --primary); we set it green. The --border-strong /
    --text-faint / --bg-subtle / --bg-muted aliases map the design-mockup names onto
    the short token names, so both naming schemes resolve. */
-:root{font-family:Onest,system-ui,sans-serif;color:#18181b;background:#fafafa;--bg:#fff;--subtle:#fafafa;--surface:#fff;--border:#ececef;--strong:#dcdce1;--text:#18181b;--text-muted:#71717a;--faint:#a1a1aa;--accent:#15a34a;--accent-hover:#128a3f;--accent-foreground:#ffffff;--accent-soft:#e9f8ef;--accent-soft-foreground:#15803d;--accent-soft-hover:#d9f0e2;--focus:#15a34a;--link:#15a34a;--border-strong:var(--strong);--text-faint:var(--faint);--bg-subtle:var(--subtle);--bg-muted:#f4f4f5;--shadow-lg:0 16px 40px -18px rgba(24,24,27,.22);--success:#15a34a;--success-soft:#e9f8ef;--warning:#c2740c;--warning-soft:#fdf4e3;--danger:#dc2626;--danger-soft:#fdeeee;--shadow:0 1px 3px rgba(24,24,27,.06)}
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#18181b;background:var(--subtle);--bg:#fff;--subtle:#fafafa;--surface:#fff;--border:#ececef;--strong:#dcdce1;--text:#18181b;--text-muted:#71717a;--faint:#a1a1aa;--accent:#15a34a;--accent-hover:#128a3f;--accent-foreground:#ffffff;--accent-soft:#e9f8ef;--accent-soft-foreground:#15803d;--accent-soft-hover:#d9f0e2;--focus:#15a34a;--link:#15a34a;--border-strong:var(--strong);--text-faint:var(--faint);--bg-subtle:var(--subtle);--bg-muted:#f4f4f5;--shadow-lg:0 16px 40px -18px rgba(24,24,27,.22);--success:#15a34a;--success-soft:#e9f8ef;--warning:#c2740c;--warning-soft:#fdf4e3;--danger:#dc2626;--danger-soft:#fdeeee;--shadow:0 1px 3px rgba(24,24,27,.06)}
 .dark{color-scheme:dark;--bg:#09090b;--subtle:#0b0b0e;--bg-muted:#18181b;--surface:#141417;--border:#242428;--strong:#333338;--text:#fafafa;--text-muted:#a1a1aa;--faint:#6b6b73;--accent:#16a34a;--accent-hover:#15803d;--accent-foreground:#ffffff;--accent-soft:#12301f;--accent-soft-foreground:#4ade80;--accent-soft-hover:#173d27;--focus:#22c55e;--link:#4ade80;--shadow-lg:0 16px 40px -18px rgba(0,0,0,.7);--success:#22c55e;--success-soft:#10241a;--warning:#f0a83a;--warning-soft:#271d0e;--danger:#f05252;--danger-soft:#2a1416}
 
 /* Base resets — component styling lives in Tailwind classes + HeroUI/Pro components. */
 *{box-sizing:border-box}
 body{margin:0;background:var(--subtle);color:var(--text);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body.billwise-dialog-open{overflow:hidden}
 a{color:inherit;text-decoration:none}
 button,input,select,textarea{font:inherit}
 ::placeholder{color:var(--faint)}
+html{scrollbar-color:var(--border-strong) var(--bg-subtle);scrollbar-width:thin}
 ::-webkit-scrollbar{width:10px;height:10px}
-::-webkit-scrollbar-thumb{background:var(--strong);border-radius:8px;border:3px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-track{background:var(--bg-subtle)}
+::-webkit-scrollbar-thumb{min-height:40px;border:2px solid var(--bg-subtle);border-radius:999px;background:var(--border-strong);background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:var(--text-faint);background-clip:padding-box}
+::-webkit-scrollbar-corner{background:var(--bg-subtle)}
 
 /* API validation errors are projected globally from RFC7807 field keys. */
 [data-api-invalid="true"]{

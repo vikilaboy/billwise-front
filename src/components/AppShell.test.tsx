@@ -2,7 +2,7 @@ import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
 import {fireEvent, render, screen} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {AppShell, archivedCompanyLandingPath, canAccessArchivedCompanyPath, selectableCompanies} from "./AppShell";
+import {AppShell, activityNotificationTime, archivedCompanyLandingPath, canAccessArchivedCompanyPath, selectableCompanies} from "./AppShell";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -11,6 +11,14 @@ afterEach(() => {
 });
 
 describe("AppShell onboarding guard", () => {
+  it("formatează timpul notificărilor pentru scanare rapidă", () => {
+    const now = new Date(2026, 7, 2, 12, 0);
+
+    expect(activityNotificationTime("2026-08-02T11:55:00", now)).toBe("Acum 5 min");
+    expect(activityNotificationTime("2026-08-01T18:30:00", now)).toContain("Ieri");
+    expect(activityNotificationTime("2026-07-28T09:15:00", now)).toContain("28 iul.");
+  });
+
   it("alege o destinație accesibilă pentru firmele arhivate", () => {
     expect(archivedCompanyLandingPath((permission) => permission === "purchase_invoice.view")).toBe("/achizitii");
     expect(archivedCompanyLandingPath((permission) => permission === "fiscal_vault.view")).toBe("/seif-fiscal");
@@ -323,6 +331,10 @@ describe("AppShell onboarding guard", () => {
     await screen.findByText("Dashboard protejat");
     expect(screen.getByText("Facturi furnizori")).toBeInTheDocument();
     expect(screen.getByText("Seif fiscal")).toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Contul meu"})).toBeInTheDocument();
+    expect(screen.getByText("Date personale și contact")).toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Securitate"})).toBeInTheDocument();
+    expect(screen.getByText("Parolă, MFA și sesiuni")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {name: "Deconectare"}));
 
     expect(await screen.findByText("Sesiune închisă")).toBeInTheDocument();
