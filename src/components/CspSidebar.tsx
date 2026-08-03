@@ -40,7 +40,7 @@ function Provider({children, navigate}: ProviderProps) {
 function Root({className = "", ...props}: HTMLAttributes<HTMLElement>) {
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-[var(--border)] bg-[var(--bg)] md:flex ${className}`}
+      className={`fixed inset-y-0 left-0 z-30 hidden w-[240px] flex-col border-r border-[var(--border)] bg-[var(--bg)] md:flex ${className}`}
       {...props}
     />
   );
@@ -144,7 +144,7 @@ function Mobile({className = "", children, ...props}: HTMLAttributes<HTMLElement
 }
 
 function Main({className = "", ...props}: HTMLAttributes<HTMLDivElement>) {
-  return <div className={`md:pl-64 ${className}`} {...props} />;
+  return <div className={`md:pl-[240px] ${className}`} {...props} />;
 }
 
 function Trigger({className = "", ...props}: HTMLAttributes<HTMLButtonElement>) {
