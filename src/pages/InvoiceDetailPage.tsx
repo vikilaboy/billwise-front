@@ -766,23 +766,6 @@ export function InvoiceDetailPage() {
         ) : null}
       </ConfirmDialog>
 
-      {/* Scoped layout: responsive 2-col grid + sticky rail. */}
-      <style>{`
-        .invoice-detail-grid {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) 340px;
-          gap: 18px;
-          align-items: start;
-        }
-        .invoice-detail-rail {
-          position: sticky;
-          top: 16px;
-        }
-        @media (max-width: 900px) {
-          .invoice-detail-grid { grid-template-columns: 1fr; }
-          .invoice-detail-rail { position: static; }
-        }
-      `}</style>
     </div>
   );
 }

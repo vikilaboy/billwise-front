@@ -51,6 +51,30 @@ afterEach(() => {
 });
 
 describe("InvoiceDetailPage SPV", () => {
+  it("păstrează layoutul facturii fără stiluri inline incompatibile cu CSP", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/invoices/invoice-1")) return Promise.resolve(json(invoice));
+      if (url.endsWith("/payments") || url.endsWith("/deliveries") || url.endsWith("/efactura/submissions")) {
+        return Promise.resolve(json([]));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const {container} = render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/facturi/invoice-1"]}>
+          <Routes><Route path="/facturi/:id" element={<InvoiceDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect((await screen.findAllByText("INV-0001")).length).toBeGreaterThan(0);
+    expect(container.querySelector(".invoice-detail-grid")).toBeInTheDocument();
+    expect(container.querySelector("style")).not.toBeInTheDocument();
+  });
+
   it("cere confirmare și nu pornește două depuneri la click repetat", async () => {
     let submissions: unknown[] = [];
     let submitCount = 0;

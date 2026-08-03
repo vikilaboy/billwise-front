@@ -37,3 +37,20 @@ html{scrollbar-color:var(--border-strong) var(--bg-subtle);scrollbar-width:thin}
 .switch[data-api-invalid="true"] .switch__control{
   border-color:var(--danger)!important;
 }
+
+/* Invoice detail layout lives in the external stylesheet so it remains valid
+   under the application's strict Content Security Policy. */
+.invoice-detail-grid{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 340px;
+  gap:18px;
+  align-items:start;
+}
+.invoice-detail-rail{
+  position:sticky;
+  top:16px;
+}
+@media (max-width:900px){
+  .invoice-detail-grid{grid-template-columns:1fr}
+  .invoice-detail-rail{position:static}
+}
