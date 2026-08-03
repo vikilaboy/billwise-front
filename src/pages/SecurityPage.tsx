@@ -22,7 +22,6 @@ type AuthEvent = {
   outcome: string;
   device: string | null;
   ip_address: string | null;
-  ip_prefix: string | null;
   user_agent: string | null;
   request_id: string | null;
   context: Record<string, string | number | boolean | null> | null;
@@ -327,8 +326,8 @@ export function SecurityPage() {
             </div>
             <dl className="mt-3 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
               <div>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{event.ip_address ? "Adresă IP" : "Prefix IP (eveniment vechi)"}</dt>
-                <dd className="mt-1 font-mono text-xs">{event.ip_address ?? event.ip_prefix ?? "Indisponibil"}</dd>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Adresă IP</dt>
+                <dd className="mt-1 font-mono text-xs">{event.ip_address ?? "Indisponibilă pentru acest eveniment"}</dd>
               </div>
               <div>
                 <dt className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Browser și sistem</dt>

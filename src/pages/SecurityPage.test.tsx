@@ -15,19 +15,33 @@ describe("SecurityPage authentication history", () => {
       const url = String(input);
       if (url.includes("/account/auth-history")) {
         return Promise.resolve(new Response(JSON.stringify({
-          data: [{
-            id: "event-1",
-            type: "login",
-            outcome: "success",
-            device: "Chrome on macOS",
-            ip_address: "203.0.113.42",
-            ip_prefix: "203.0.113.0/24",
-            user_agent: "Mozilla/5.0 (Macintosh) Chrome/151.0",
-            request_id: "request-1",
-            context: {mfa: "totp"},
-            created_at: "2026-08-03T16:30:22Z",
-          }],
-          meta: {pagination: {current_page: 1, per_page: 10, total: 1, last_page: 1}},
+          data: [
+            {
+              id: "event-1",
+              type: "login",
+              outcome: "success",
+              device: "Chrome on macOS",
+              ip_address: "203.0.113.42",
+              ip_prefix: "203.0.113.0/24",
+              user_agent: "Mozilla/5.0 (Macintosh) Chrome/151.0",
+              request_id: "request-1",
+              context: {mfa: "totp"},
+              created_at: "2026-08-03T16:30:22Z",
+            },
+            {
+              id: "event-legacy",
+              type: "logout",
+              outcome: "success",
+              device: "Safari on macOS",
+              ip_address: null,
+              ip_prefix: "198.51.100.0/24",
+              user_agent: null,
+              request_id: null,
+              context: null,
+              created_at: "2026-08-02T12:00:00Z",
+            },
+          ],
+          meta: {pagination: {current_page: 1, per_page: 10, total: 2, last_page: 1}},
         }), {status: 200, headers: {"Content-Type": "application/json"}}));
       }
 
@@ -52,8 +66,11 @@ describe("SecurityPage authentication history", () => {
     );
 
     expect(await screen.findByRole("heading", {name: "Autentificare"})).toBeInTheDocument();
-    expect(screen.getByText("Reușit")).toBeInTheDocument();
+    expect(screen.getAllByText("Reușit")).toHaveLength(2);
     expect(screen.getByText("203.0.113.42")).toBeInTheDocument();
+    expect(screen.queryByText("203.0.113.0/24")).not.toBeInTheDocument();
+    expect(screen.queryByText("198.51.100.0/24")).not.toBeInTheDocument();
+    expect(screen.getByText("Indisponibilă pentru acest eveniment")).toBeInTheDocument();
     expect(screen.getByText("Chrome on macOS")).toBeInTheDocument();
     expect(screen.getByText("Mozilla/5.0 (Macintosh) Chrome/151.0")).toBeInTheDocument();
     expect(screen.getByText("Aplicație Authenticator (TOTP)")).toBeInTheDocument();
