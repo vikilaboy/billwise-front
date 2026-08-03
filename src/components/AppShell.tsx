@@ -6,7 +6,6 @@ import {CspSidebar as Sidebar} from "./CspSidebar";
 import {
   Check,
   Bell,
-  ChevronRight,
   ChevronsUpDown,
   CircleGauge,
   CreditCard,
@@ -145,25 +144,28 @@ type AccountFooterProps = {
 
 function AccountFooter({user, companyName, currentPath, onNavigate, onLogout}: AccountFooterProps) {
   const actionClass = (active: boolean) => [
-    "group flex min-h-12 w-full cursor-pointer items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors",
+    "group flex min-h-9 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] transition-colors",
     active
-      ? "border-[var(--accent)] bg-[var(--accent-soft)]"
-      : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)]",
+      ? "bg-[var(--bg-subtle)] font-semibold text-[var(--text)]"
+      : "text-[var(--text-muted)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text)]",
   ].join(" ");
+  const iconClass = (active: boolean) => active
+    ? "text-[var(--accent)]"
+    : "text-[var(--text-muted)] group-hover:text-[var(--text)]";
 
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-muted)] p-2.5 shadow-[var(--shadow)]">
-      <div className="flex items-center gap-2.5 px-1 pb-2.5">
-        <Avatar className="h-10 w-10 shrink-0 rounded-xl bg-[var(--accent)] text-white">
-          <Avatar.Fallback className="text-[13px] font-bold">{initials(user?.name)}</Avatar.Fallback>
+    <div className="px-1">
+      <div className="flex items-center gap-2.5 px-2 pb-2.5">
+        <Avatar className="h-8 w-8 shrink-0 rounded-lg bg-[var(--bg-muted)] text-[var(--text)]">
+          <Avatar.Fallback className="text-[11px] font-bold">{initials(user?.name)}</Avatar.Fallback>
         </Avatar>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-semibold">{user?.name ?? "Cont BillWise"}</div>
-          <div className="truncate text-[11px] text-[var(--text-muted)]">{companyName ?? user?.email}</div>
+          <div className="truncate text-[12.5px] font-semibold">{user?.name ?? "Cont BillWise"}</div>
+          <div className="truncate text-[10.5px] text-[var(--text-muted)]">{companyName ?? user?.email}</div>
         </div>
       </div>
 
-      <div className="grid gap-1.5">
+      <div className="grid gap-0.5 border-t border-[var(--border)] py-2">
         <button
           type="button"
           aria-label="Contul meu"
@@ -171,14 +173,10 @@ function AccountFooter({user, companyName, currentPath, onNavigate, onLogout}: A
           onClick={() => onNavigate("/profil")}
           className={actionClass(currentPath === "/profil")}
         >
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--bg-muted)] text-[var(--text-muted)] group-hover:text-[var(--text)]">
-            <UserRound size={17} />
+          <span className={`grid h-5 w-5 shrink-0 place-items-center ${iconClass(currentPath === "/profil")}`}>
+            <UserRound size={15} />
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[12.5px] font-semibold">Contul meu</span>
-            <span className="block truncate text-[10.5px] text-[var(--text-muted)]">Date personale și contact</span>
-          </span>
-          <ChevronRight size={14} className="shrink-0 text-[var(--text-faint)]" />
+          <span className="min-w-0 flex-1 truncate">Contul meu</span>
         </button>
 
         <button
@@ -188,25 +186,21 @@ function AccountFooter({user, companyName, currentPath, onNavigate, onLogout}: A
           onClick={() => onNavigate("/securitate")}
           className={actionClass(currentPath === "/securitate")}
         >
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent-soft-foreground)]">
-            <ShieldCheck size={17} />
+          <span className={`grid h-5 w-5 shrink-0 place-items-center ${iconClass(currentPath === "/securitate")}`}>
+            <ShieldCheck size={15} />
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[12.5px] font-semibold">Securitate</span>
-            <span className="block truncate text-[10.5px] text-[var(--text-muted)]">Parolă, MFA și sesiuni</span>
-          </span>
-          <ChevronRight size={14} className="shrink-0 text-[var(--text-faint)]" />
+          <span className="min-w-0 flex-1 truncate">Securitate</span>
         </button>
       </div>
 
-      <div className="mt-2 border-t border-[var(--border)] pt-2">
+      <div className="border-t border-[var(--border)] pt-2">
         <button
           type="button"
           aria-label="Deconectare"
           onClick={onLogout}
-          className="flex min-h-9 w-full items-center justify-center gap-2 rounded-lg px-3 text-[12px] font-semibold text-[var(--danger)] transition-colors hover:bg-[var(--danger-soft)]"
+          className="flex min-h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] font-medium text-[var(--danger)] opacity-80 transition-colors hover:bg-[var(--danger-soft)] hover:opacity-100"
         >
-          <LogOut size={15} />
+          <span className="grid h-5 w-5 shrink-0 place-items-center"><LogOut size={14} /></span>
           Deconectare
         </button>
       </div>

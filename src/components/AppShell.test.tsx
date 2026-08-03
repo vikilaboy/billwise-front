@@ -332,9 +332,9 @@ describe("AppShell onboarding guard", () => {
     expect(screen.getByText("Facturi furnizori")).toBeInTheDocument();
     expect(screen.getByText("Seif fiscal")).toBeInTheDocument();
     expect(screen.getByRole("button", {name: "Contul meu"})).toBeInTheDocument();
-    expect(screen.getByText("Date personale și contact")).toBeInTheDocument();
     expect(screen.getByRole("button", {name: "Securitate"})).toBeInTheDocument();
-    expect(screen.getByText("Parolă, MFA și sesiuni")).toBeInTheDocument();
+    expect(screen.queryByText("Date personale și contact")).not.toBeInTheDocument();
+    expect(screen.queryByText("Parolă, MFA și sesiuni")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {name: "Deconectare"}));
 
     expect(await screen.findByText("Sesiune închisă")).toBeInTheDocument();

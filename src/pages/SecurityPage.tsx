@@ -16,7 +16,18 @@ type BrowserSession = {
   id: string; current: boolean; device: string | null; ip_prefix: string | null;
   created_at: string; last_seen_at: string; absolute_expires_at: string;
 };
-type AuthEvent = {id: string; type: string; outcome: string; device: string | null; ip_prefix: string | null; created_at: string};
+type AuthEvent = {
+  id: string;
+  type: string;
+  outcome: string;
+  device: string | null;
+  ip_address: string | null;
+  ip_prefix: string | null;
+  user_agent: string | null;
+  request_id: string | null;
+  context: Record<string, string | number | boolean | null> | null;
+  created_at: string;
+};
 type MfaSetup = {factor_id: string; secret: string; provisioning_uri: string};
 type MobileGrant = {id: string; client_name: string | null; device_name: string | null; last_used_at: string | null; expires_at: string | null};
 type Confirmation = {action: "disable_mfa" | "regenerate_codes" | "logout_all" | "revoke_session" | "revoke_grant"; id?: string} | null;
@@ -30,6 +41,51 @@ const SECURITY_SECTIONS: Array<{id: SecuritySection; label: string}> = [
 
 const inputClass = "w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3.5 py-2.5 text-sm outline-none focus:border-[var(--accent)]";
 const cardClass = "rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-6";
+
+const AUTH_EVENT_LABELS: Record<string, string> = {
+  login: "Autentificare",
+  logout: "Deconectare",
+  session_revoked: "Sesiune revocată",
+  password_changed: "Parolă schimbată",
+  password_reset: "Parolă resetată",
+  email_change_requested: "Schimbare email solicitată",
+  email_changed: "Adresă de email schimbată",
+  mfa_challenge: "Verificare MFA",
+  mfa_enabled: "MFA activat",
+  mfa_disabled: "MFA dezactivat",
+  mfa_recovered: "MFA recuperat",
+  recovery_code_used: "Cod de recuperare utilizat",
+  recovery_codes_regenerated: "Coduri de recuperare regenerate",
+  token_exchanged: "Token transferat într-o sesiune",
+  mobile_grant_created: "Aplicație mobilă autorizată",
+  mobile_grant_revoked: "Acces mobil revocat",
+  refresh_token_replay: "Reutilizare refresh token detectată",
+};
+
+const AUTH_OUTCOME_LABELS: Record<string, string> = {
+  success: "Reușit",
+  failure: "Eșuat",
+  denied: "Respins",
+};
+
+const AUTH_CONTEXT_LABELS: Record<string, string> = {
+  mfa: "Metodă MFA",
+  scope: "Domeniu",
+  count: "Sesiuni afectate",
+  client_id: "Client OAuth",
+};
+
+function authEventLabel(type: string) {
+  return AUTH_EVENT_LABELS[type] ?? type.replaceAll("_", " ");
+}
+
+function authContextValue(key: string, value: string | number | boolean) {
+  if (key === "mfa" && value === "totp") return "Aplicație Authenticator (TOTP)";
+  if (key === "scope" && value === "session_limit") return "Limită de sesiuni active";
+  if (key === "scope" && value === "single") return "O singură sesiune";
+  if (typeof value === "boolean") return value ? "Da" : "Nu";
+  return String(value);
+}
 
 export function SecurityPage() {
   const queryClient = useQueryClient();
@@ -252,7 +308,51 @@ export function SecurityPage() {
       <div className={activeSection === "history" ? "space-y-6" : "hidden"}>
       <section className={cardClass}>
         <h2 className="text-lg font-bold">Istoric de autentificare</h2>
-        <div className="mt-4 divide-y divide-[var(--border)]">{history.data?.data.map((event) => <div key={event.id} className="grid gap-1 py-3 text-sm sm:grid-cols-[1fr_120px_180px]"><span className="font-semibold">{event.type.replaceAll("_", " ")}</span><span className={event.outcome === "success" ? "text-[var(--success)]" : "text-[var(--danger)]"}>{event.outcome}</span><span className="text-[var(--text-muted)]">{new Date(event.created_at).toLocaleString("ro-RO")}</span></div>)}</div>
+        <p className="mt-1 text-sm text-[var(--text-muted)]">Evenimentele contului includ sursa, dispozitivul și detaliile tehnice disponibile la momentul acțiunii.</p>
+        {history.isLoading ? <p className="py-6 text-sm text-[var(--text-muted)]">Se încarcă istoricul…</p> : null}
+        {history.isError ? <p className="py-6 text-sm text-[var(--danger)]">Istoricul nu a putut fi încărcat.</p> : null}
+        <div className="mt-4 divide-y divide-[var(--border)]">{history.data?.data.map((event) => {
+          const context = Object.entries(event.context ?? {}).filter((entry): entry is [string, string | number | boolean] => entry[1] !== null);
+          const successful = event.outcome === "success";
+
+          return <article key={event.id} className="py-4 first:pt-1">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-bold">{authEventLabel(event.type)}</h3>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${successful ? "bg-[var(--success-soft)] text-[var(--success)]" : "bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] text-[var(--danger)]"}`}>
+                  {AUTH_OUTCOME_LABELS[event.outcome] ?? event.outcome}
+                </span>
+              </div>
+              <time className="text-sm text-[var(--text-muted)]" dateTime={event.created_at}>{new Date(event.created_at).toLocaleString("ro-RO")}</time>
+            </div>
+            <dl className="mt-3 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{event.ip_address ? "Adresă IP" : "Prefix IP (eveniment vechi)"}</dt>
+                <dd className="mt-1 font-mono text-xs">{event.ip_address ?? event.ip_prefix ?? "Indisponibil"}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Browser și sistem</dt>
+                <dd className="mt-1">{event.device ?? "Dispozitiv necunoscut"}</dd>
+              </div>
+              <div className="sm:col-span-2">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">User agent</dt>
+                <dd className="mt-1 break-all font-mono text-xs text-[var(--text-muted)]">{event.user_agent ?? "Indisponibil pentru acest eveniment"}</dd>
+              </div>
+              {context.map(([key, value]) => <div key={key}>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{AUTH_CONTEXT_LABELS[key] ?? key.replaceAll("_", " ")}</dt>
+                <dd className="mt-1 break-all">{authContextValue(key, value)}</dd>
+              </div>)}
+            </dl>
+            <details className="mt-3 text-xs text-[var(--text-muted)]">
+              <summary className="w-fit cursor-pointer select-none font-semibold">Identificatori tehnici</summary>
+              <div className="mt-2 grid gap-1 font-mono">
+                <span className="break-all">Eveniment: {event.id}</span>
+                <span className="break-all">Cerere: {event.request_id ?? "indisponibilă"}</span>
+              </div>
+            </details>
+          </article>;
+        })}</div>
+        {!history.isLoading && history.data?.data.length === 0 ? <p className="py-6 text-sm text-[var(--text-muted)]">Nu există evenimente de autentificare în perioada păstrată.</p> : null}
         <DataTablePagination pagination={history.data?.meta?.pagination} onPageChange={setHistoryPage} />
       </section>
       </div>
