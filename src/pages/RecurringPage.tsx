@@ -8,7 +8,7 @@ import {useCompany} from "../components/AppShell";
 import {DataTablePagination} from "../components/DataTablePagination";
 import {AppCheckbox, AppSelect} from "../components/FormControls";
 import {api, listQuery, reportApiError} from "../lib/api";
-import type {Currency, Customer, RecurringInvoiceTemplate, VatProfile} from "../lib/types";
+import type {Contract, Currency, Customer, RecurringInvoiceTemplate, VatProfile} from "../lib/types";
 
 type Series = {id: string; name: string; is_active: boolean};
 type RecurringRunResult = {status: string; error: string | null; invoice_id: string | null};
@@ -24,6 +24,7 @@ type RecurringLineForm = {
   vat_exemption_reason: string | null;
 };
 type Form = {
+  billing_source: "custom" | "contract"; contract_id: string; contract_line_ids: string[];
   name: string; customer_id: string; invoice_series_id: string;
   cadence: "weekly" | "biweekly" | "monthly" | "twice_monthly" | "quarterly" | "custom_week" | "custom_month";
   cadence_interval: string; weekdays: number[]; month_days: Array<number | "last_day">;
@@ -63,6 +64,7 @@ const scheduleLabel = (template: RecurringInvoiceTemplate) => {
   return schedule.interval === 1 ? "Lunar" : schedule.interval === 3 ? "Trimestrial" : `La ${schedule.interval} luni`;
 };
 const EMPTY: Form = {
+  billing_source: "custom", contract_id: "", contract_line_ids: [],
   name: "", customer_id: "", invoice_series_id: "", cadence: "monthly", weekday: "1",
   cadence_interval: "1", weekdays: [1], month_days: [1],
   month_day: "1", month_day_second: "15", run_time: "09:00", start_date: today(), end_date: "",
@@ -133,7 +135,7 @@ export function RecurringPage() {
           : templates.isError ? <div className="py-20 text-center text-sm text-[var(--danger)]">Șabloanele nu au putut fi încărcate.</div>
           : rows.length === 0 ? <div className="flex flex-col items-center gap-2 py-20 text-center"><Repeat size={26} className="text-[var(--faint)]" /><b>Niciun șablon recurent</b><span className="text-sm text-[var(--text-muted)]">Configurează prima generare controlată de ciorne.</span></div>
           : <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="bg-[var(--bg-muted)] text-left text-xs uppercase text-[var(--text-muted)]"><tr><th className="p-3">Șablon</th><th className="p-3">Client</th><th className="p-3">Frecvență</th><th className="p-3">Următoarea rulare</th><th className="p-3">Status</th><th className="p-3 text-right">Acțiuni</th></tr></thead><tbody>
-            {rows.map((template) => <tr key={template.id} className="border-t border-[var(--border)]"><td className="p-3 font-semibold">{template.name}{template.is_locked ? <span className="ml-2 text-xs text-[var(--text-muted)]">versiune blocată</span> : null}</td><td className="p-3">{template.customer?.name ?? "—"}</td><td className="p-3">{scheduleLabel(template)}</td><td className="p-3">{recurringDate(template.next_run_at, template.schedule?.timezone ?? template.timezone)}</td><td className="p-3">{template.status === "active" ? "Activ" : template.status === "paused" ? "Pauzat" : "Arhivat"}</td><td className="p-3"><div className="flex justify-end gap-1">
+            {rows.map((template) => <tr key={template.id} className="border-t border-[var(--border)]"><td className="p-3 font-semibold">{template.name}{template.billing_source === "contract" ? <span className="ml-2 rounded bg-[var(--bg-muted)] px-2 py-0.5 text-xs">contract</span> : null}{template.is_locked ? <span className="ml-2 text-xs text-[var(--text-muted)]">versiune blocată</span> : null}</td><td className="p-3">{template.customer?.name ?? "—"}</td><td className="p-3">{scheduleLabel(template)}</td><td className="p-3">{recurringDate(template.next_run_at, template.schedule?.timezone ?? template.timezone)}</td><td className="p-3">{template.status === "active" ? "Activ" : template.status === "paused" ? "Pauzat" : "Arhivat"}</td><td className="p-3"><div className="flex justify-end gap-1">
               <Button isIconOnly size="sm" variant="ghost" aria-label={template.is_locked ? "Creează versiune nouă" : "Editează"} onPress={() => setEditing(template)}><Pencil size={14} /></Button>
               <Button isIconOnly size="sm" variant="ghost" aria-label={template.status === "active" ? "Pauză" : "Reia"} onPress={() => mutate.mutate({template, action: "toggle"})}>{template.status === "active" ? <Pause size={14} /> : <Play size={14} />}</Button>
               <Button size="sm" variant="outline" isDisabled={template.status !== "active"} onPress={() => {
@@ -163,6 +165,9 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
 }) {
   const [previewedPayload, setPreviewedPayload] = useState<string | null>(null);
   const [form, setForm] = useState<Form>(() => template ? {
+    billing_source: template.billing_source ?? "custom",
+    contract_id: template.contract_id ?? "",
+    contract_line_ids: template.contract_line_ids ?? [],
     name: template.name, customer_id: template.customer_id, invoice_series_id: template.invoice_series_id,
     cadence: template.schedule?.unit === "week"
       ? (template.schedule.interval === 1 && template.schedule.weekdays?.length === 1 ? "weekly"
@@ -205,7 +210,15 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
   const series = useQuery({queryKey: ["invoice-series", companyId, "recurring"], queryFn: () => api<Series[]>(`/companies/${companyId}/invoice-series?_per_page=100`)});
   const currencies = useQuery({queryKey: ["currencies", "active"], queryFn: () => api<Currency[]>("/settings/currencies?_per_page=100&_sort=code")});
   const vatProfiles = useQuery({queryKey: ["vat-profiles", companyId], queryFn: () => api<VatProfile[]>(`/companies/${companyId}/vat-profiles?_per_page=100`)});
+  const contracts = useQuery({queryKey: ["contracts", companyId, "recurring"], queryFn: () => api<Contract[]>(`/companies/${companyId}/contracts${listQuery({perPage: 100, filter: {status: {eq: "active"}}})}`)});
+  const selectedContract = (contracts.data?.data ?? []).find((item) => item.id === form.contract_id);
   const payload = () => ({
+    billing_source: form.billing_source,
+    ...(form.billing_source === "contract" ? {
+      contract_id: form.contract_id,
+      contract_version_id: selectedContract?.current_version?.id ?? template?.contract_version_id,
+      contract_line_ids: form.contract_line_ids,
+    } : {}),
     name: form.name.trim(), customer_id: form.customer_id, invoice_series_id: form.invoice_series_id,
     schedule: {
       unit: form.cadence === "weekly" || form.cadence === "biweekly" || form.cadence === "custom_week" ? "week" : "month",
@@ -247,7 +260,8 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
   const preview = useMutation({
     mutationFn: () => api<{
       scheduled_for: string; issue_date: string; due_date: string;
-      period: {start: string; end: string}; lines: Array<{description: string}>;
+      period: {start: string; end: string}; lines: Array<{description: string; quantity?: string}>;
+      working_days?: {working_days: number}; totals?: {total_cents: number};
     }>(`/companies/${companyId}/recurring-invoices/preview`, {
       method: "POST",
       body: JSON.stringify(payload()),
@@ -301,7 +315,14 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
       <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">{template?.is_locked ? "Versiune nouă a șablonului" : template ? "Editează șablonul" : "Șablon recurent nou"}</h2><p className="mt-1 text-xs text-[var(--text-muted)]">{template?.is_locked ? "Versiunea folosită la facturile emise rămâne neschimbată." : "Următoarea generare va crea numai o ciornă."}</p></div><Button isIconOnly variant="ghost" onPress={onClose}><X size={17} /></Button></header>
       <div className="grid flex-1 gap-4 overflow-y-auto p-5 sm:grid-cols-2">
         <Field label="Denumire"><input name="name" className={input} value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
-        <HeroSelectField name="customer_id" label="Client" value={form.customer_id} onChange={(value) => set("customer_id", value)} placeholder="Selectează clientul" options={(customers.data?.data ?? []).map((customer) => ({id: customer.id, label: customer.name}))} />
+        <HeroSelectField name="billing_source" label="Sursa valorilor" value={form.billing_source} onChange={(value) => setForm((current) => ({...current, billing_source: value as Form["billing_source"], contract_id: "", contract_line_ids: []}))} options={[{id:"custom",label:"Valori definite în șablon"},{id:"contract",label:"Contract activ"}]} />
+        {form.billing_source === "contract" ? <>
+          <HeroSelectField name="contract_id" label="Contract" value={form.contract_id} onChange={(value) => {
+            const next = (contracts.data?.data ?? []).find((item) => item.id === value);
+            setForm((current) => ({...current, contract_id: value, contract_line_ids: next?.current_version?.lines.map((line) => line.id) ?? [], customer_id: next?.customer_id ?? "", payment_terms_days: String(next?.current_version?.payment_terms_days ?? current.payment_terms_days), currency: next?.current_version?.currency ?? current.currency, locale: next?.current_version?.locale ?? current.locale}));
+          }} placeholder="Selectează contractul" options={(contracts.data?.data ?? []).map((item) => ({id:item.id,label:`${item.number} · ${item.name} · ${item.customer?.name ?? ""}`}))}/>
+          <div className="rounded-xl border border-[var(--border)] p-4 sm:col-span-2"><b className="text-sm">Poziții facturate</b><div className="mt-3 grid gap-2">{selectedContract?.current_version?.lines.map((line) => <AppCheckbox key={line.id} isSelected={form.contract_line_ids.includes(line.id)} onChange={(selected) => set("contract_line_ids", selected ? [...form.contract_line_ids,line.id] : form.contract_line_ids.filter((id)=>id!==line.id))}>{line.name} · {line.billing_model === "working_days_hours" ? `${line.hours_per_day ?? selectedContract.current_version?.default_hours_per_day} ore/zi × zile lucrătoare` : `${line.quantity} ${line.unit}`} · {line.unit_price_cents / 100} {selectedContract.current_version?.currency}</AppCheckbox>) ?? <span className="text-xs text-[var(--text-muted)]">Selectează un contract activ.</span>}</div></div>
+        </> : <HeroSelectField name="customer_id" label="Client" value={form.customer_id} onChange={(value) => set("customer_id", value)} placeholder="Selectează clientul" options={(customers.data?.data ?? []).map((customer) => ({id: customer.id, label: customer.name}))} />}
         <HeroSelectField name="invoice_series_id" label="Serie" value={form.invoice_series_id} onChange={(value) => set("invoice_series_id", value)} placeholder="Selectează seria" options={(series.data?.data ?? []).filter((item) => item.is_active).map((item) => ({id: item.id, label: item.name}))} />
         <HeroSelectField name="schedule.unit" label="Frecvență" value={form.cadence} onChange={(value) => set("cadence", value as Form["cadence"])} options={[
           {id: "weekly", label: "Săptămânal"},
@@ -333,7 +354,7 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
         <HeroDatePicker name="schedule.start_date" label="Prima rulare" value={form.start_date} onChange={(value) => set("start_date", value)} />
         <HeroDatePicker name="schedule.end_date" label="Data finală (opțional)" value={form.end_date} onChange={(value) => set("end_date", value)} />
         <Field label="Ora generării"><input name="schedule.run_time" type="time" className={input} value={form.run_time} onChange={(e) => set("run_time", e.target.value)} /></Field>
-        <Field label="Termen de plată (zile)"><input name="payment_terms_days" type="number" className={input} value={form.payment_terms_days} onChange={(e) => set("payment_terms_days", e.target.value)} /></Field>
+        {form.billing_source === "custom" ? <><Field label="Termen de plată (zile)"><input name="payment_terms_days" type="number" className={input} value={form.payment_terms_days} onChange={(e) => set("payment_terms_days", e.target.value)} /></Field>
         <HeroSelectField name="currency" label="Monedă" value={form.currency} onChange={(value) => set("currency", value)} options={(currencies.data?.data ?? []).filter((currency) => currency.is_active).map((currency) => ({id: currency.code, label: `${currency.code} — ${currency.name}`}))} />
         <Field label="Nr. contract"><input name="contract_number" className={input} value={form.contract_number} onChange={(e) => set("contract_number", e.target.value)} /></Field>
         <HeroDatePicker name="contract_date" label="Data contractului" value={form.contract_date} onChange={(value) => set("contract_date", value)} />
@@ -361,17 +382,18 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
             ))}
           </div>
         </div>
-        <HeroSelectField name="locale" label="Limbă" value={form.locale} onChange={(value) => set("locale", value as Form["locale"])} options={[{id: "ro", label: "Română"}, {id: "en", label: "Bilingv · română și engleză"}]} />
+        <HeroSelectField name="locale" label="Limbă" value={form.locale} onChange={(value) => set("locale", value as Form["locale"])} options={[{id: "ro", label: "Română"}, {id: "en", label: "Bilingv · română și engleză"}]} /></> : <div className="rounded-xl bg-[var(--bg-muted)] p-4 text-xs sm:col-span-2">Clientul, moneda, termenul, descrierea, cantitatea și tariful sunt preluate din versiunea contractuală selectată.</div>}
         {preview.data ? <div className="rounded-xl bg-[var(--bg-muted)] p-4 text-xs sm:col-span-2">
           <b>Previzualizare</b>
           <div className="mt-2">Generare: {recurringDate(preview.data.data.scheduled_for)} · perioadă: {preview.data.data.period.start} – {preview.data.data.period.end} · scadență: {preview.data.data.due_date}</div>
+          {preview.data.data.working_days ? <div className="mt-1 font-semibold">{preview.data.data.working_days.working_days} zile lucrătoare{preview.data.data.totals ? ` · total ${preview.data.data.totals.total_cents / 100} ${form.currency}` : ""}</div> : null}
           {preview.data.data.lines.map((line, index) => <pre key={index} className="mt-2 whitespace-pre-wrap font-sans">{line.description}</pre>)}
         </div> : null}
         {template && (detail.data?.data.runs ?? []).length > 0 ? <div className="sm:col-span-2"><b className="text-xs">Istoric rulări</b>{detail.data!.data.runs.map((run) => <div key={run.id} className="mt-2 flex items-center gap-2 rounded-lg bg-[var(--bg-muted)] px-3 py-2 text-xs"><button type="button" disabled={!run.invoice_id} onClick={() => run.invoice_id && onOpenInvoice(run.invoice_id)} className="flex flex-1 justify-between text-left"><span>{recurringDate(run.scheduled_for, template.timezone)}</span><span>{run.status === "created" ? "Ciornă creată" : run.error ?? run.status}</span></button>{run.status === "skipped" ? <Button size="sm" variant="outline" isDisabled={recover.isPending} onPress={() => {
           if (window.confirm(`Recuperezi perioada omisă din ${recurringDate(run.scheduled_for, template.timezone)}? Se va genera numai o ciornă.`)) recover.mutate(run.id);
         }}>Recuperează</Button> : null}</div>)}</div> : null}
       </div>
-      <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="outline" isDisabled={preview.isPending} onPress={() => preview.mutate()}>{preview.isPending ? <Spinner size="sm" /> : null} Previzualizează</Button><Button variant="primary" isDisabled={save.isPending || previewedPayload !== JSON.stringify(payload()) || !form.name.trim() || !form.customer_id || !form.invoice_series_id || (form.cadence === "custom_week" && form.weekdays.length === 0) || (form.cadence === "custom_month" && form.month_days.length === 0) || form.lines.some((line) => !line.description_template.trim() || !line.vat_option_id || Number(line.quantity) <= 0)} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null} {template?.is_locked ? "Creează versiunea" : "Salvează"}</Button></footer>
+      <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="outline" isDisabled={preview.isPending} onPress={() => preview.mutate()}>{preview.isPending ? <Spinner size="sm" /> : null} Previzualizează</Button><Button variant="primary" isDisabled={save.isPending || previewedPayload !== JSON.stringify(payload()) || !form.name.trim() || !form.customer_id || !form.invoice_series_id || (form.cadence === "custom_week" && form.weekdays.length === 0) || (form.cadence === "custom_month" && form.month_days.length === 0) || (form.billing_source === "contract" ? !form.contract_id || form.contract_line_ids.length === 0 : form.lines.some((line) => !line.description_template.trim() || !line.vat_option_id || Number(line.quantity) <= 0))} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null} {template?.is_locked ? "Creează versiunea" : "Salvează"}</Button></footer>
     </div>
   </div>;
 }

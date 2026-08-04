@@ -32,6 +32,7 @@ type ResolvedExchangeRate = {
 
 type LineRow = {
   key: string;
+  line_id?: string;
   description: string;
   unit: string;
   unit_code: string;
@@ -189,6 +190,7 @@ export function NewInvoicePage() {
     setNotes(invoice.notes ?? "");
     setRows(invoice.lines.map((line) => ({
       key: line.id,
+      line_id: line.id,
       description: line.description,
       unit: line.unit ?? UNIT_LABEL,
       unit_code: line.unit_code ?? UNIT_CODE,
@@ -272,6 +274,7 @@ export function NewInvoicePage() {
       locale,
       notes: notes.trim() ? notes.trim() : null,
       lines: rows.map((r) => ({
+        id: r.line_id,
         description: r.description,
         quantity: r.quantity,
         unit: r.unit,

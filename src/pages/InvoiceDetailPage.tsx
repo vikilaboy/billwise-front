@@ -426,6 +426,7 @@ export function InvoiceDetailPage() {
 
         {/* RIGHT — sticky rail */}
         <div className="invoice-detail-rail flex flex-col gap-4">
+          {invoice.contract_source ? <Card className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]"><Card.Content className="p-0"><div className="text-xs font-semibold uppercase text-[var(--text-muted)]">Sursă contractuală</div><button className="mt-2 text-left text-sm font-semibold text-[var(--accent)]" onClick={() => navigate("/contracte")}>{invoice.contract_source.number} · {invoice.contract_source.name} · v{invoice.contract_source.version}</button>{invoice.recurring_source?.render_context?.working_days ? <div className="mt-3 rounded-xl bg-[var(--bg-muted)] p-3 text-xs"><div>{invoice.recurring_source.render_context.period_start} – {invoice.recurring_source.render_context.period_end}</div><b className="mt-1 block">{invoice.recurring_source.render_context.working_days.working_days} zile lucrătoare</b>{invoice.recurring_source.render_context.lines?.map((line, index) => <div key={index} className="mt-1">{line.working_days} zile × {line.hours_per_day} ore = {line.quantity} ore</div>)}</div> : null}<p className="mt-2 text-xs text-[var(--text-muted)]">Ciorna rămâne editabilă; formula și versiunea sursă sunt păstrate pentru trasabilitate.</p></Card.Content></Card> : null}
           {/* Summary card */}
           <Card className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
             <Card.Content className="p-0">

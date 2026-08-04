@@ -370,9 +370,12 @@ export function InvoicesPage() {
               </Tooltip>
             ) : null}
             <Dropdown>
-              <Button isIconOnly size="sm" variant="ghost" aria-label={`Mai multe acțiuni pentru ${invoice.formatted_number}`}>
-                <MoreHorizontal size={16} />
-              </Button>
+              <Tooltip delay={300}>
+                <Button isIconOnly size="sm" variant="ghost" aria-label={`Mai multe acțiuni pentru ${invoice.formatted_number}`}>
+                  <MoreHorizontal size={16} />
+                </Button>
+                <Tooltip.Content>Mai multe acțiuni</Tooltip.Content>
+              </Tooltip>
               <Dropdown.Popover placement="bottom end" className="min-w-[200px]">
                 <Dropdown.Menu onAction={(key) => {
                   if (key === "open") navigate(`/facturi/${invoice.id}`);

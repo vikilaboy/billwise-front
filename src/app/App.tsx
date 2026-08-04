@@ -24,6 +24,7 @@ const InvoicesPage = lazyNamed(() => import("../pages/InvoicesPage"), "InvoicesP
 const InvoiceDetailPage = lazyNamed(() => import("../pages/InvoiceDetailPage"), "InvoiceDetailPage");
 const NewInvoicePage = lazyNamed(() => import("../pages/NewInvoicePage"), "NewInvoicePage");
 const RecurringPage = lazyNamed(() => import("../pages/RecurringPage"), "RecurringPage");
+const ContractsPage = lazyNamed(() => import("../pages/ContractsPage"), "ContractsPage");
 const CustomersPage = lazyNamed(() => import("../pages/CustomersPage"), "CustomersPage");
 const BankAccountsPage = lazyNamed(() => import("../pages/BankAccountsPage"), "BankAccountsPage");
 const InvoiceSeriesPage = lazyNamed(() => import("../pages/InvoiceSeriesPage"), "InvoiceSeriesPage");
@@ -79,6 +80,7 @@ export function App() {
           <Route path="/seif-fiscal" element={<FiscalVaultPage />} />
           <Route path="/seif-fiscal/:vaultItemId" element={<FiscalVaultDetailPage />} />
           <Route path="/recurente" element={<RecurringPage />} />
+          <Route path="/contracte" element={<ContractsPage />} />
           <Route path="/clienti" element={<CustomersPage />} />
           <Route path="/produse" element={<ProductsPage />} />
           <Route path="/conturi" element={<BankAccountsPage />} />

@@ -124,6 +124,7 @@ export function AppDatePicker({
   maxValue,
   className,
   isDisabled,
+  isRequired,
   onChange,
 }: {
   name: string;
@@ -134,6 +135,7 @@ export function AppDatePicker({
   maxValue?: string;
   className?: string;
   isDisabled?: boolean;
+  isRequired?: boolean;
   onChange: (value: string) => void;
 }) {
   return (
@@ -141,6 +143,7 @@ export function AppDatePicker({
       aria-label={ariaLabel}
       className={className}
       isDisabled={isDisabled}
+      isRequired={isRequired}
       name={name}
       minValue={minValue ? parseDate(minValue) : undefined}
       maxValue={maxValue ? parseDate(maxValue) : undefined}

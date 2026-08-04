@@ -29,6 +29,24 @@ afterEach(() => {
 });
 
 describe("InvoicesPage actions", () => {
+  it("păstrează funcțional meniul de acțiuni afișat sub tooltip", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: [invoice],
+      meta: {pagination: {current_page: 1, per_page: 20, total: 1, last_page: 1}},
+    }), {status: 200, headers: {"Content-Type": "application/json"}})));
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter><InvoicesPage /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Mai multe acțiuni pentru INV-0001"}));
+
+    expect(await screen.findByRole("menuitem", {name: "Deschide factura"})).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", {name: "Duplică"})).toBeInTheDocument();
+  });
+
   it("expune acțiunea bulk și marchează o factură ca încasată numai după confirmarea HeroUI", async () => {
     let paymentBody: Record<string, unknown> | null = null;
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {

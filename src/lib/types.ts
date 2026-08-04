@@ -200,6 +200,7 @@ export type InvoiceLine = {
   vat_category: VatCategory;
   vat_exemption_code: string | null;
   vat_exemption_reason: string | null;
+  source_contract_version_line_id: string | null;
   subtotal_cents: number;
   vat_cents: number;
   total_cents: number;
@@ -262,6 +263,9 @@ export type Invoice = {
   exchange_rate_source: string | null;
   source_type: "manual" | "recurring" | "duplicate" | string;
   source_recurring_run_id: string | null;
+  source_contract_id: string | null;
+  source_contract_version_id: string | null;
+  contract_source: {id: string; number: string; name: string; version_id: string | null; version: number | null} | null;
   recurring_source: {
     run_id: string;
     template_id: string;
@@ -269,6 +273,12 @@ export type Invoice = {
     version_id: string;
     version: number | null;
     scheduled_for: string;
+    render_context: {
+      period_start: string;
+      period_end: string;
+      working_days?: {working_days: number; excluded_holidays: Array<{day: string; name: string}>};
+      lines?: Array<{working_days: number | null; hours_per_day: string | null; quantity: string; unit_price_cents: number}>;
+    } | null;
   } | null;
   notes: string | null;
   locale: "ro" | "en";
@@ -463,6 +473,11 @@ export type DashboardAttention = {
 
 export type RecurringInvoiceTemplate = {
   id: string;
+  billing_source: "custom" | "contract";
+  contract_id: string | null;
+  contract_version_id: string | null;
+  contract_line_ids: string[];
+  contract: {id: string; number: string; name: string; version: number} | null;
   company_profile_id: string;
   customer_id: string;
   invoice_series_id: string;
@@ -515,6 +530,59 @@ export type RecurringInvoiceTemplate = {
     error: string | null;
     invoice_id: string | null;
   }>;
+};
+
+export type ContractBillingModel = "fixed_quantity" | "working_days_hours";
+
+export type ContractVersionLine = {
+  id: string;
+  product_id: string | null;
+  name: string;
+  description_template: string;
+  billing_model: ContractBillingModel;
+  quantity: string | null;
+  hours_per_day: string | null;
+  unit: string;
+  unit_code: string;
+  unit_price_cents: number;
+  vat_profile_id: string | null;
+  vat_rate: string;
+  vat_category: VatCategory;
+  vat_exemption_code: string | null;
+  vat_exemption_reason: string | null;
+  position: number;
+};
+
+export type ContractVersion = {
+  id: string;
+  version: number;
+  status: "draft" | "active" | "superseded";
+  effective_from: string;
+  currency: string;
+  payment_terms_days: number;
+  locale: "ro" | "en";
+  timezone: string;
+  working_weekdays: number[];
+  holiday_calendar_code: string | null;
+  default_hours_per_day: string | null;
+  notes: string | null;
+  lines: ContractVersionLine[];
+};
+
+export type Contract = {
+  id: string;
+  customer_id: string;
+  number: string;
+  name: string;
+  signed_on: string;
+  starts_on: string;
+  ends_on: string | null;
+  status: "draft" | "active" | "ended" | "archived";
+  archived_from_status: "draft" | "ended" | null;
+  customer: {id: string; name: string} | null;
+  current_version: ContractVersion | null;
+  versions: ContractVersion[];
+  recurring_templates_count: number | null;
 };
 
 export type ActivityNotification = {
