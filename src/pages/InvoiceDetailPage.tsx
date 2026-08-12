@@ -4,13 +4,13 @@ import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Card, Chip, Dropdown, Label, Spinner, Tooltip} from "@heroui/react";
 import {Timeline} from "@heroui-pro/react/timeline";
 import type {TimelineStatus} from "@heroui-pro/react/timeline";
-import {Ban, Check, ChevronLeft, Copy, Download, FileCode2, Mail, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X} from "lucide-react";
+import {Banknote, Ban, Check, ChevronLeft, Copy, Download, FileCode2, Mail, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X} from "lucide-react";
 import {useCompany} from "../components/AppShell";
 import {ConfirmDialog} from "../components/ConfirmDialog";
 import {AppDatePicker, AppSelect} from "../components/FormControls";
 import {InvoiceDocumentPreview} from "../components/InvoiceDocumentPreview";
-import {api, downloadApiFile} from "../lib/api";
-import type {EfacturaSubmission, EfacturaSubmissionEvent, Invoice, InvoiceDelivery, InvoicePayment, PaymentMethod} from "../lib/types";
+import {api, downloadApiFile, listQuery} from "../lib/api";
+import type {CustomerCreditUsage, EfacturaSubmission, EfacturaSubmissionEvent, Invoice, InvoiceAdjustmentReason, InvoiceDelivery, InvoicePayment, PaymentMethod} from "../lib/types";
 import {
   cents,
   date,
@@ -35,8 +35,35 @@ type Step = {title: string; sub: string; state: StepState};
 type DetailConfirmation =
   | {kind: "issue" | "delete" | "cancel" | "settle" | "submit-spv" | "retry-spv"}
   | {kind: "delete-payment"; payment: InvoicePayment}
+  | {kind: "delete-credit-usage"; usage: CustomerCreditUsage}
   | {kind: "retry-delivery"; delivery: InvoiceDelivery}
   | null;
+
+export function isCreditCancellationUnavailable(
+  documentType: Invoice["document_type"],
+  deliveries: Array<Pick<InvoiceDelivery, "status">> | undefined,
+  deliveriesUnavailable: boolean,
+) {
+  return documentType !== "invoice" && (
+    deliveriesUnavailable
+    || (deliveries ?? []).some((delivery) => ["queued", "preparing", "sending", "sent", "outcome_unknown"].includes(delivery.status))
+  );
+}
+
+export function isSpvCancellationUnavailable(
+  submissions: Array<Pick<EfacturaSubmission, "status">> | undefined,
+  submissionsUnavailable: boolean,
+) {
+  return submissionsUnavailable
+    || (submissions ?? []).some((submission) => [
+      "queued",
+      "sending",
+      "sent",
+      "processing",
+      "accepted",
+      "delivery_unknown",
+    ].includes(submission.status));
+}
 
 // Derive a 4-step e-Factura timeline from the latest submission (submissions[0]).
 function buildSteps(invoice: Invoice, latest: EfacturaSubmission | undefined): Step[] {
@@ -112,6 +139,7 @@ export function InvoiceDetailPage() {
   const [editingPayment, setEditingPayment] = useState<InvoicePayment | null | undefined>(undefined);
   const [emailOpen, setEmailOpen] = useState(false);
   const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [creditUsageMode, setCreditUsageMode] = useState<"allocation" | "refund" | null>(null);
   const [confirmation, setConfirmation] = useState<DetailConfirmation>(null);
   const [cancellationReason, setCancellationReason] = useState("");
 
@@ -148,6 +176,23 @@ export function InvoiceDetailPage() {
     queryFn: () => api<InvoicePayment[]>(`/companies/${company!.id}/invoices/${id}/payments`),
     enabled: Boolean(company?.id && id && invoiceQuery.data?.data.document_type === "invoice"),
   });
+  const creditSource = invoiceQuery.data?.data;
+  const hasCreditLedger = creditSource?.status === "issued" && (
+    creditSource.document_type === "credit_note"
+    || (creditSource.document_type === "invoice" && creditSource.overpaid_cents > 0)
+  );
+  const creditUsagesQuery = useQuery({
+    queryKey: ["customer-credit-usages", company?.id, id],
+    queryFn: () => api<CustomerCreditUsage[]>(
+      `/companies/${company!.id}/customer-credit-usages${listQuery({
+        perPage: 100,
+        filter: creditSource!.document_type === "credit_note"
+          ? {source_credit_note_id: {eq: creditSource!.id}}
+          : {source_overpaid_invoice_id: {eq: creditSource!.id}},
+      })}`,
+    ),
+    enabled: Boolean(company?.id && id && hasCreditLedger),
+  });
   const deliveriesQuery = useQuery({
     queryKey: ["invoice", company?.id, id, "deliveries"],
     queryFn: () => api<InvoiceDelivery[]>(`/companies/${company!.id}/invoices/${id}/deliveries`),
@@ -169,6 +214,16 @@ export function InvoiceDetailPage() {
       void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id]});
       void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id, "payments"]});
       void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+      void queryClient.invalidateQueries({queryKey: ["dashboard", company?.id]});
+    },
+  });
+  const deleteCreditUsage = useMutation({
+    mutationFn: (usageId: string) =>
+      api<void>(`/companies/${company!.id}/customer-credit-usages/${usageId}`, {method: "DELETE"}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id]});
+      void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
+      void queryClient.invalidateQueries({queryKey: ["customer-credit-usages", company?.id]});
       void queryClient.invalidateQueries({queryKey: ["dashboard", company?.id]});
     },
   });
@@ -279,9 +334,19 @@ export function InvoiceDetailPage() {
   const latest = submissions[0];
   const steps = buildSteps(invoice, latest);
   const payments = paymentsQuery.data?.data ?? [];
+  const creditUsages = creditUsagesQuery.data?.data ?? [];
   const isDraft = invoice.status === "draft";
   const formattedNumber = invoice.formatted_number;
   const hasBlockingSubmission = Boolean(latest && ["queued", "sending", "sent", "processing", "accepted", "delivery_unknown"].includes(latest.status));
+  const creditCancellationUnavailable = isCreditCancellationUnavailable(
+    invoice.document_type,
+    deliveriesQuery.data?.data,
+    deliveriesQuery.isPending || deliveriesQuery.isError,
+  );
+  const cancellationUnavailable = creditCancellationUnavailable || isSpvCancellationUnavailable(
+    submissions,
+    submissionsQuery.isPending || submissionsQuery.isError,
+  );
   const eligibilityMessages = {
     invoice_not_issued: "Factura trebuie emisă înainte de trimiterea în SPV.",
     customer_address_missing: "Completează adresa clientului înainte de trimitere.",
@@ -319,6 +384,8 @@ export function InvoiceDetailPage() {
       settleInvoice.mutate(undefined, {onSuccess: () => setConfirmation(null)});
     } else if (confirmation.kind === "delete-payment") {
       deletePayment.mutate(confirmation.payment.id, {onSuccess: () => setConfirmation(null)});
+    } else if (confirmation.kind === "delete-credit-usage") {
+      deleteCreditUsage.mutate(confirmation.usage.id, {onSuccess: () => setConfirmation(null)});
     } else if (confirmation.kind === "submit-spv") {
       if (submittingRef.current) return;
       submittingRef.current = true;
@@ -357,7 +424,7 @@ export function InvoiceDetailPage() {
         <div className="flex-1" />
         {isDraft ? (
           <>
-            <Button variant="outline" onPress={() => navigate(`/facturi/${id}/editeaza`)}>
+            <Button variant="outline" onPress={() => invoice.document_type === "correction" ? setCorrectionOpen(true) : navigate(`/facturi/${id}/editeaza`)}>
               <Pencil size={16} /> Editează
             </Button>
             <Button variant="primary" isDisabled={lifecycleMutation.isPending} onPress={() => setConfirmation({kind: "issue"})}>
@@ -403,9 +470,9 @@ export function InvoiceDetailPage() {
                   <RotateCcw size={15} /><Label>Creează corecție</Label>
                 </Dropdown.Item>
               ) : null}
-              {invoice.status === "issued" ? (
+              {invoice.status === "issued" && !cancellationUnavailable ? (
                 <Dropdown.Item id="cancel" textValue="Anulează" variant="danger">
-                  <Ban size={15} /><Label>Anulează factura</Label>
+                  <Ban size={15} /><Label>Anulează documentul</Label>
                 </Dropdown.Item>
               ) : null}
               {isDraft ? (
@@ -430,20 +497,56 @@ export function InvoiceDetailPage() {
           {/* Summary card */}
           <Card className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
             <Card.Content className="p-0">
-              <div className="text-[12px] font-medium text-[var(--text-muted)]">Total de plată</div>
+              <div className="text-[12px] font-medium text-[var(--text-muted)]">{invoice.financial_direction === "credit" ? "Credit acordat" : "Total emis"}</div>
               <div className="mt-1 text-[26px] font-extrabold tracking-tight tabular-nums">
-                {cents(invoice.total_cents)} {currency}
+                {cents(invoice.signed_total_cents)} {currency}
               </div>
               {!isDraft && invoice.document_type === "invoice" ? (
                 <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-[var(--bg-muted)] p-3 text-sm">
+                  <div>
+                    <div className="text-xs text-[var(--text-muted)]">Corecții emise</div>
+                    <div className="mt-1 font-semibold tabular-nums">−{money(invoice.issued_corrections_cents, currency)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[var(--text-muted)]">Total ajustat</div>
+                    <div className="mt-1 font-semibold tabular-nums">{money(invoice.adjusted_total_cents, currency)}</div>
+                  </div>
                   <div>
                     <div className="text-xs text-[var(--text-muted)]">Încasat</div>
                     <div className="mt-1 font-semibold tabular-nums">{money(invoice.paid_cents, currency)}</div>
                   </div>
                   <div>
+                    <div className="text-xs text-[var(--text-muted)]">Credit alocat</div>
+                    <div className="mt-1 font-semibold tabular-nums">{money(invoice.credit_allocations_cents, currency)}</div>
+                  </div>
+                  <div>
                     <div className="text-xs text-[var(--text-muted)]">Sold</div>
                     <div className="mt-1 font-semibold tabular-nums">{money(invoice.balance_cents, currency)}</div>
                   </div>
+                  {invoice.overpaid_cents > 0 ? <div><div className="text-xs text-[var(--text-muted)]">Supraplătit disponibil</div><div className="mt-1 font-semibold tabular-nums">{money(invoice.available_overpaid_cents, currency)}</div></div> : null}
+                </div>
+              ) : null}
+              {!isDraft && invoice.document_type === "credit_note" ? <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-[var(--bg-muted)] p-3 text-sm"><div><div className="text-xs text-[var(--text-muted)]">Alocat</div><b>{money(invoice.allocated_credit_cents, currency)}</b></div><div><div className="text-xs text-[var(--text-muted)]">Rambursat</div><b>{money(invoice.refunded_credit_cents, currency)}</b></div><div><div className="text-xs text-[var(--text-muted)]">Disponibil</div><b>{money(invoice.available_credit_cents, currency)}</b></div></div> : null}
+              {!isDraft && (
+                (invoice.document_type === "credit_note" && invoice.available_credit_cents > 0)
+                || (invoice.document_type === "invoice" && invoice.available_overpaid_cents > 0)
+              ) ? (
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <Button size="sm" variant="primary" onPress={() => setCreditUsageMode("allocation")}>
+                    <Plus size={14} /> Alocă pe factură
+                  </Button>
+                  <Button size="sm" variant="outline" onPress={() => setCreditUsageMode("refund")}>
+                    <Banknote size={14} /> Înregistrează rambursare
+                  </Button>
+                </div>
+              ) : null}
+              {invoice.adjustment_description ? <div className="mt-4 rounded-xl border border-[var(--border)] p-3 text-xs"><b>Motiv ajustare</b><p className="mt-1 text-[var(--text-muted)]">{invoice.adjustment_description}</p>{invoice.billing_period_start && invoice.billing_period_end ? <p className="mt-2">Perioadă: {date(invoice.billing_period_start)} – {date(invoice.billing_period_end)}</p> : null}{(invoice.references?.length ?? 0) > 0 ? <p className="mt-2">Referințe: {invoice.references.map((reference) => reference.formatted_number).filter(Boolean).join(", ")}</p> : null}</div> : null}
+              {hasCreditLedger ? (
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <div className="text-[12px] font-semibold">Utilizarea creditului</div>
+                  {creditUsagesQuery.isLoading ? <div className="mt-3 flex items-center gap-2 text-xs text-[var(--text-muted)]"><Spinner size="sm" /> Se încarcă…</div>
+                    : creditUsages.length === 0 ? <p className="mt-2 text-xs text-[var(--text-muted)]">Creditul nu a fost încă alocat sau rambursat.</p>
+                      : <div className="mt-2 flex flex-col">{creditUsages.map((usage) => <div key={usage.id} className="flex items-center gap-2 border-b border-[var(--border)] py-2.5 text-xs last:border-0"><div className="min-w-0 flex-1"><div className="font-semibold">{usage.type === "allocation" ? `Alocat către ${usage.target_document?.formatted_number ?? "factură"}` : "Rambursare"}</div><div className="truncate text-[var(--text-muted)]">{money(usage.amount_cents, usage.currency)} · {date(usage.occurred_at)}{usage.reference ? ` · ${usage.reference}` : ""}</div></div>{usage.type === "allocation" ? <Button isIconOnly size="sm" variant="ghost" aria-label="Anulează alocarea" onPress={() => setConfirmation({kind: "delete-credit-usage", usage})}><Trash2 size={14} className="text-[var(--danger)]" /></Button> : null}</div>)}</div>}
                 </div>
               ) : null}
               {(invoice.corrections?.length ?? 0) > 0 ? (
@@ -682,7 +785,18 @@ export function InvoiceDetailPage() {
           }}
         />
       ) : null}
-      {correctionOpen && company?.id ? (
+      {correctionOpen && company?.id ? invoice.document_type === "correction" && invoice.corrected_invoice ? (
+        <CorrectionEditModal
+          companyId={company.id}
+          invoice={invoice}
+          originalId={invoice.corrected_invoice.id}
+          onClose={() => setCorrectionOpen(false)}
+          onSaved={() => {
+            void queryClient.invalidateQueries({queryKey: ["invoice", company.id, id]});
+            setCorrectionOpen(false);
+          }}
+        />
+      ) : (
         <CorrectionModal
           companyId={company.id}
           invoice={invoice}
@@ -690,6 +804,21 @@ export function InvoiceDetailPage() {
           onCreated={(correction) => {
             void queryClient.invalidateQueries({queryKey: ["invoice", company.id, id]});
             navigate(`/facturi/${correction.id}`);
+          }}
+        />
+      ) : null}
+      {creditUsageMode && company?.id ? (
+        <CreditUsageModal
+          companyId={company.id}
+          source={invoice}
+          mode={creditUsageMode}
+          onClose={() => setCreditUsageMode(null)}
+          onSaved={() => {
+            void queryClient.invalidateQueries({queryKey: ["invoice", company.id]});
+            void queryClient.invalidateQueries({queryKey: ["invoices", company.id]});
+            void queryClient.invalidateQueries({queryKey: ["customer-credit-usages", company.id]});
+            void queryClient.invalidateQueries({queryKey: ["dashboard", company.id]});
+            setCreditUsageMode(null);
           }}
         />
       ) : null}
@@ -701,6 +830,7 @@ export function InvoiceDetailPage() {
               : confirmation?.kind === "cancel" ? "Anulezi factura emisă?"
                 : confirmation?.kind === "settle" ? "Înregistrezi încasarea integrală?"
                   : confirmation?.kind === "delete-payment" ? "Ștergi această încasare?"
+                    : confirmation?.kind === "delete-credit-usage" ? "Anulezi această alocare?"
                     : confirmation?.kind === "retry-spv" ? "Confirmi absența facturii din SPV?"
                       : confirmation?.kind === "retry-delivery" ? "Retrimiți un email cu rezultat incert?"
                       : "Trimiți factura în ANAF SPV?"
@@ -716,6 +846,8 @@ export function InvoiceDetailPage() {
                   ? `Se înregistrează soldul de ${money(invoice.balance_cents, currency)} ca transfer bancar, cu data de azi.`
                   : confirmation?.kind === "delete-payment"
                     ? "Soldul facturii va fi recalculat imediat."
+                    : confirmation?.kind === "delete-credit-usage"
+                      ? "Creditul va redeveni disponibil, iar soldul facturii țintă va fi recalculat. Rambursările înregistrate rămân ireversibile."
                     : confirmation?.kind === "retry-spv"
                       ? "Retransmite numai după ce ai verificat manual în SPV că ANAF nu a primit factura. Altfel poate apărea un duplicat."
                       : confirmation?.kind === "retry-delivery"
@@ -725,6 +857,7 @@ export function InvoiceDetailPage() {
         confirmLabel={
           confirmation?.kind === "issue" ? "Emite factura"
             : confirmation?.kind === "delete" || confirmation?.kind === "delete-payment" ? "Șterge"
+              : confirmation?.kind === "delete-credit-usage" ? "Anulează alocarea"
               : confirmation?.kind === "cancel" ? "Anulează factura"
                 : confirmation?.kind === "settle" ? "Încasează integral"
                   : confirmation?.kind === "retry-spv" ? "Confirmă și retransmite"
@@ -732,7 +865,7 @@ export function InvoiceDetailPage() {
                     : "Trimite în SPV"
         }
         tone={
-          confirmation?.kind === "delete" || confirmation?.kind === "delete-payment" || confirmation?.kind === "retry-spv" || confirmation?.kind === "retry-delivery"
+          confirmation?.kind === "delete" || confirmation?.kind === "delete-payment" || confirmation?.kind === "delete-credit-usage" || confirmation?.kind === "retry-spv" || confirmation?.kind === "retry-delivery"
             ? "danger"
             : confirmation?.kind === "settle" ? "success"
               : confirmation?.kind === "issue" || confirmation?.kind === "cancel" ? "warning" : "accent"
@@ -741,6 +874,7 @@ export function InvoiceDetailPage() {
           lifecycleMutation.isPending
           || settleInvoice.isPending
           || deletePayment.isPending
+          || deleteCreditUsage.isPending
           || submitMutation.isPending
           || retryUnknownMutation.isPending
           || retryDelivery.isPending
@@ -769,6 +903,116 @@ export function InvoiceDetailPage() {
 
     </div>
   );
+}
+
+function CreditUsageModal({companyId, source, mode, onClose, onSaved}: {
+  companyId: string;
+  source: Invoice;
+  mode: "allocation" | "refund";
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const availableCents = source.document_type === "credit_note" ? source.available_credit_cents : source.available_overpaid_cents;
+  const [targetId, setTargetId] = useState("");
+  const [amount, setAmount] = useState(String(availableCents / 100));
+  const [occurredAt, setOccurredAt] = useState(new Date().toISOString().slice(0, 10));
+  const [method, setMethod] = useState<PaymentMethod>("bank_transfer");
+  const [reference, setReference] = useState("");
+  const [notes, setNotes] = useState("");
+  const idempotencyKey = useRef(`credit-usage-${source.id}-${Date.now()}`);
+  const targets = useQuery({
+    queryKey: ["credit-usage-targets", companyId, source.customer?.id, source.currency],
+    queryFn: () => api<Invoice[]>(`/companies/${companyId}/invoices${listQuery({
+      perPage: 100,
+      sort: "issue_date",
+      filter: {
+        customer_id: {eq: source.customer!.id},
+        currency: {eq: source.currency},
+        document_type: {eq: "invoice"},
+        status: {eq: "issued"},
+        payment_status: {eq: "outstanding"},
+      },
+    })}`),
+    enabled: mode === "allocation" && Boolean(source.customer?.id),
+  });
+  const target = targets.data?.data.find((candidate) => candidate.id === targetId);
+  const maximumCents = target ? Math.min(availableCents, target.balance_cents) : availableCents;
+  const amountCents = Math.round(Number(amount) * 100);
+  const save = useMutation({
+    mutationFn: () => api<CustomerCreditUsage>(`/companies/${companyId}/customer-credit-usages`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...(source.document_type === "credit_note"
+          ? {source_credit_note_id: source.id}
+          : {source_overpaid_invoice_id: source.id}),
+        type: mode,
+        target_invoice_id: mode === "allocation" ? targetId : undefined,
+        amount_cents: amountCents,
+        currency: source.currency,
+        occurred_at: occurredAt,
+        method: mode === "refund" ? method : undefined,
+        reference: reference.trim() || null,
+        notes: notes.trim() || null,
+        idempotency_key: idempotencyKey.current,
+      }),
+    }),
+    onSuccess: onSaved,
+  });
+  const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
+
+  return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true" aria-label={mode === "allocation" ? "Alocă credit" : "Înregistrează rambursare"}>
+    <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
+      <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">{mode === "allocation" ? "Alocă credit pe factură" : "Înregistrează rambursarea creditului"}</h2><p className="mt-1 text-xs text-[var(--text-muted)]">Disponibil: {money(availableCents, source.currency)} din {source.formatted_number}</p></div><Button isIconOnly variant="ghost" aria-label="Închide" onPress={onClose}><X size={17} /></Button></header>
+      <div className="grid gap-4 p-5 sm:grid-cols-2">
+        {mode === "allocation" ? <div className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)] sm:col-span-2">Factura țintă{targets.isLoading ? <div className="flex h-10 items-center gap-2"><Spinner size="sm" /> Se încarcă…</div> : <AppSelect name="target_invoice_id" ariaLabel="Factura țintă" value={targetId} onChange={setTargetId} options={(targets.data?.data ?? []).map((candidate) => ({id: candidate.id, label: `${candidate.formatted_number} · sold ${money(candidate.balance_cents, candidate.currency)}`}))} />}{!targets.isLoading && (targets.data?.data.length ?? 0) === 0 ? <span className="font-normal text-[var(--text-muted)]">Nu există facturi eligibile cu sold pentru același client și aceeași monedă.</span> : null}</div> : null}
+        <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Sumă<input name="amount_cents" className={input} type="number" min="0.01" max={maximumCents / 100} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
+        <div className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Data<AppDatePicker name="occurred_at" ariaLabel="Data operației" value={occurredAt} onChange={setOccurredAt} /></div>
+        {mode === "refund" ? <div className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Metodă<AppSelect name="method" ariaLabel="Metoda rambursării" value={method} onChange={(value) => setMethod(value as PaymentMethod)} options={Object.entries(paymentMethodLabels).map(([value, label]) => ({id: value, label}))} /></div> : null}
+        <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Referință<input name="reference" className={input} value={reference} onChange={(event) => setReference(event.target.value)} /></label>
+        <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)] sm:col-span-2">Notițe<textarea name="notes" className="min-h-20 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+      </div>
+      <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={save.isPending || amountCents < 1 || amountCents > maximumCents || !occurredAt || (mode === "allocation" && !targetId)} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null}{mode === "allocation" ? "Alocă" : "Înregistrează rambursarea"}</Button></footer>
+    </div>
+  </div>;
+}
+
+function CorrectionEditModal({companyId, invoice, originalId, onClose, onSaved}: {
+  companyId: string;
+  invoice: Invoice;
+  originalId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const original = useQuery({queryKey: ["invoice", companyId, originalId, "correction-edit"], queryFn: () => api<Invoice>(`/companies/${companyId}/invoices/${originalId}`)});
+  const [issueDate, setIssueDate] = useState(invoice.issue_date ?? new Date().toISOString().slice(0, 10));
+  const [reason, setReason] = useState<InvoiceAdjustmentReason>(invoice.adjustment_reason ?? "other");
+  const [description, setDescription] = useState(invoice.adjustment_description ?? "");
+  const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(invoice.lines.filter((line) => line.corrects_invoice_line_id).map((line) => [line.corrects_invoice_line_id!, line.quantity])));
+  const save = useMutation({
+    mutationFn: () => api<Invoice>(`/companies/${companyId}/invoices/${originalId}/corrections/${invoice.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        issue_date: issueDate,
+        adjustment_reason: reason,
+        adjustment_description: description.trim(),
+        lines: Object.entries(quantities).filter(([, quantity]) => Number(quantity) > 0).map(([invoice_line_id, quantity]) => ({invoice_line_id, quantity: Number(quantity)})),
+      }),
+    }),
+    onSuccess: onSaved,
+  });
+  const originalLines = original.data?.data.lines ?? [];
+  return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="Editează storno">
+    <div className="w-full max-w-xl rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
+      <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">Editează ciorna storno</h2><p className="mt-1 text-xs text-[var(--text-muted)]">Clientul, moneda, TVA-ul și prețurile rămân cele din factura originală.</p></div><Button isIconOnly variant="ghost" onPress={onClose}><X size={17} /></Button></header>
+      <div className="grid gap-4 p-5">
+        <label className="text-xs font-semibold text-[var(--text-muted)]">Data emiterii<AppDatePicker name="issue_date" ariaLabel="Data emiterii" value={issueDate} onChange={setIssueDate} /></label>
+        <label className="text-xs font-semibold text-[var(--text-muted)]">Motiv<AppSelect name="adjustment_reason" ariaLabel="Motiv ajustare" value={reason} onChange={(value) => setReason(value as InvoiceAdjustmentReason)} options={[{id: "return", label: "Retur"}, {id: "price_correction", label: "Corecție de preț"}, {id: "post_sale_discount", label: "Reducere ulterioară"}, {id: "volume_rebate", label: "Rebate de volum"}, {id: "contract_adjustment", label: "Ajustare contractuală"}, {id: "cancellation", label: "Anulare"}, {id: "other", label: "Alt motiv"}]} /></label>
+        <label className="text-xs font-semibold text-[var(--text-muted)]">Explicație<textarea className="mt-1.5 min-h-24 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={description} onChange={(event) => setDescription(event.target.value)} /></label>
+        <div><div className="text-xs font-semibold text-[var(--text-muted)]">Cantități corectate</div><div className="mt-2 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">{original.isLoading ? <div className="p-4"><Spinner size="sm" /></div> : originalLines.map((line) => <label key={line.id} className="flex items-center gap-3 p-3 text-sm"><span className="min-w-0 flex-1 truncate">{line.description}</span><input className="h-9 w-24 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-2" type="number" min="0" max={Number(line.quantity)} step="0.01" value={quantities[line.id] ?? ""} onChange={(event) => setQuantities((current) => ({...current, [line.id]: event.target.value}))} /></label>)}</div></div>
+      </div>
+      <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={save.isPending || !description.trim() || !Object.values(quantities).some((value) => Number(value) > 0)} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : <Pencil size={15} />} Salvează</Button></footer>
+    </div>
+  </div>;
 }
 
 function CorrectionModal({companyId, invoice, onClose, onCreated}: {

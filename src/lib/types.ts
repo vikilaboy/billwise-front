@@ -137,10 +137,13 @@ export type Customer = {
     id: string;
     formatted_number: string;
     status: InvoiceStatus;
+    document_type?: InvoiceDocumentType;
+    financial_direction?: FinancialDirection;
     issue_date: string | null;
     due_date: string | null;
     currency: string;
     total_cents: number;
+    signed_total_cents?: number;
   }>;
   created_at: string | null;
   updated_at: string | null;
@@ -185,6 +188,10 @@ export type Product = {
 };
 
 export type InvoiceStatus = "draft" | "issued" | "cancelled";
+export type InvoiceDocumentType = "invoice" | "correction" | "credit_note";
+export type FinancialDirection = "debit" | "credit";
+export type InvoiceAdjustmentReason = "return" | "price_correction" | "post_sale_discount" | "volume_rebate" | "contract_adjustment" | "cancellation" | "other";
+export type InvoiceExchangeRateBasis = "issue_date" | "original_invoice" | "referenced_invoices" | "manual_documented";
 
 export type VatCategory = "S" | "AE" | "E" | "Z" | "K" | "G" | "O";
 
@@ -201,6 +208,7 @@ export type InvoiceLine = {
   vat_exemption_code: string | null;
   vat_exemption_reason: string | null;
   source_contract_version_line_id: string | null;
+  corrects_invoice_line_id: string | null;
   subtotal_cents: number;
   vat_cents: number;
   total_cents: number;
@@ -234,7 +242,10 @@ export type Invoice = {
   company_profile: CompanyProfile | null;
   customer: Customer | null;
   status: InvoiceStatus;
-  document_type: "invoice" | "correction";
+  document_type: InvoiceDocumentType;
+  financial_direction: FinancialDirection;
+  adjustment_reason: InvoiceAdjustmentReason | null;
+  adjustment_description: string | null;
   corrects_invoice_id: string | null;
   corrected_invoice: {
     id: string;
@@ -248,12 +259,16 @@ export type Invoice = {
     formatted_number: string;
     status: InvoiceStatus;
     total_cents: number;
+    signed_total_cents: number;
     currency: string;
   }>;
   number: number;
   formatted_number: string;
+  invoice_series_id?: string;
   issue_date: string | null;
   due_date: string | null;
+  billing_period_start: string | null;
+  billing_period_end: string | null;
   issued_at: string | null;
   cancelled_at: string | null;
   cancellation_reason: string | null;
@@ -261,6 +276,8 @@ export type Invoice = {
   exchange_rate: string | null; // decimal:6
   exchange_rate_day: string | null;
   exchange_rate_source: string | null;
+  exchange_rate_basis: InvoiceExchangeRateBasis | null;
+  exchange_rate_basis_note: string | null;
   source_type: "manual" | "recurring" | "duplicate" | string;
   source_recurring_run_id: string | null;
   source_contract_id: string | null;
@@ -286,20 +303,69 @@ export type Invoice = {
   subtotal_cents: number;
   vat_cents: number;
   total_cents: number;
+  signed_subtotal_cents: number;
+  signed_vat_cents: number;
+  signed_total_cents: number;
   subtotal_cents_ron: number | null;
   vat_cents_ron: number | null;
   total_cents_ron: number | null;
+  signed_subtotal_cents_ron: number | null;
+  signed_vat_cents_ron: number | null;
+  signed_total_cents_ron: number | null;
   paid_cents: number;
+  issued_corrections_cents: number;
+  adjusted_total_cents: number;
+  credit_allocations_cents: number;
   balance_cents: number;
+  overpaid_cents: number;
+  available_overpaid_cents: number;
+  allocated_credit_cents: number;
+  refunded_credit_cents: number;
+  available_credit_cents: number;
   payment_status: "unpaid" | "partial" | "paid" | "overdue" | "not_applicable";
   last_paid_at: string | null;
   lines: InvoiceLine[]; // [] in list, populated in show
   vat_breakdown: VatBreakdownGroup[]; // [] in list, populated in show
+  references: Array<{
+    id: string;
+    invoice_id: string;
+    formatted_number: string | null;
+    tax_groups: Array<{
+      vat_category: VatCategory;
+      vat_rate: string;
+      taxable_cents: number;
+      vat_cents: number;
+      total_cents: number;
+      taxable_cents_ron: number;
+      vat_cents_ron: number;
+      total_cents_ron: number;
+    }>;
+  }>;
   latest_efactura_submission: EfacturaSubmission | null;
   efactura_eligibility: {
     eligible: boolean;
     reason: "invoice_not_issued" | "customer_address_missing" | "outside_jurisdiction" | null;
   };
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type CustomerCreditUsage = {
+  id: string;
+  company_profile_id: string;
+  customer_id: string;
+  source_credit_note_id: string | null;
+  source_overpaid_invoice_id: string | null;
+  source_document: {id: string; formatted_number: string; document_type: InvoiceDocumentType} | null;
+  type: "allocation" | "refund";
+  target_invoice_id: string | null;
+  target_document: {id: string; formatted_number: string; document_type: InvoiceDocumentType} | null;
+  amount_cents: number;
+  currency: string;
+  occurred_at: string;
+  method: PaymentMethod | null;
+  reference: string | null;
+  notes: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -338,6 +404,9 @@ export type DashboardSummary = {
   total_invoiced_ron_cents: number;
   total_paid_ron_cents: number;
   balance_ron_cents: number;
+  available_credit_ron_cents: number;
+  available_overpayment_ron_cents: number;
+  net_customer_position_ron_cents: number;
   overdue_count: number;
   draft_count: number;
   billed_this_month_ron_cents: number;
@@ -385,12 +454,16 @@ export type DashboardPerformance = {
   summary: {
     invoiced_ron_cents: number;
     issued_document_count: number;
+    issued_invoice_count: number;
+    issued_credit_document_count: number;
     collected_ron_cents: number;
     invoice_with_payment_count: number;
   };
   comparison: {
     invoiced_ron_cents: number;
     issued_document_count: number;
+    issued_invoice_count: number;
+    issued_credit_document_count: number;
     collected_ron_cents: number;
     invoice_with_payment_count: number;
     invoiced_change_percent: number | null;

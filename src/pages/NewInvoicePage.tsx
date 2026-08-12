@@ -1,12 +1,12 @@
 import {useEffect, useMemo, useState} from "react";
-import {useNavigate, useParams} from "react-router";
+import {useNavigate, useParams, useSearchParams} from "react-router";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner, TextArea} from "@heroui/react";
 import {Loader2, Plus, Send, Trash2} from "lucide-react";
 import {useCompany} from "../components/AppShell";
-import {AppDatePicker, AppSelect} from "../components/FormControls";
+import {AppCheckbox, AppDatePicker, AppSelect} from "../components/FormControls";
 import {api, listQuery} from "../lib/api";
-import type {Currency, Customer, Invoice, Product, VatCategory, VatProfile} from "../lib/types";
+import type {Currency, Customer, Invoice, InvoiceAdjustmentReason, Product, VatCategory, VatProfile} from "../lib/types";
 import {exchangeRate, money} from "../lib/format";
 
 // The API create contract (StoreInvoiceRequest) accepts NO invoice_series_id — the
@@ -77,6 +77,34 @@ function lineVatCents(row: LineRow): number {
   return Math.round((lineNetCents(row) * row.vat_rate) / 100);
 }
 
+export function creditNoteSeriesPayload(id: string | undefined, seriesId: string | undefined) {
+  return !id && seriesId ? {invoice_series_id: seriesId} : {};
+}
+
+export function manualRonTotalsAreValid(
+  subtotalRon: string,
+  vatRon: string,
+  totalRon: string,
+  documentVatCents: number,
+  basisNote: string,
+  confirmed: boolean,
+): boolean {
+  const subtotalCents = Math.round(Number(subtotalRon) * 100);
+  const vatCents = Math.round(Number(vatRon) * 100);
+  const totalCents = Math.round(Number(totalRon) * 100);
+  const valuesAreFinite = [subtotalCents, vatCents, totalCents].every(Number.isFinite);
+  const vatPresenceMatchesDocument = documentVatCents === 0 ? vatCents === 0 : vatCents > 0;
+
+  return valuesAreFinite
+    && subtotalCents > 0
+    && vatCents >= 0
+    && totalCents > 0
+    && subtotalCents + vatCents === totalCents
+    && vatPresenceMatchesDocument
+    && Boolean(basisNote.trim())
+    && confirmed;
+}
+
 const cardClass =
   "bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-5 shadow-[var(--shadow)]";
 
@@ -118,6 +146,7 @@ function FieldLabel({children}: {children: React.ReactNode}) {
 export function NewInvoicePage() {
   const {company} = useCompany();
   const {id} = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -160,7 +189,20 @@ export function NewInvoicePage() {
   const [currency, setCurrency] = useState("RON");
   const [locale, setLocale] = useState<"ro" | "en">("ro");
   const [notes, setNotes] = useState("");
+  const [adjustmentReason, setAdjustmentReason] = useState<InvoiceAdjustmentReason>("volume_rebate");
+  const [adjustmentDescription, setAdjustmentDescription] = useState("");
+  const [billingPeriodStart, setBillingPeriodStart] = useState("");
+  const [billingPeriodEnd, setBillingPeriodEnd] = useState("");
+  const [exchangeRateBasisNote, setExchangeRateBasisNote] = useState("");
+  const [subtotalRon, setSubtotalRon] = useState("");
+  const [vatRon, setVatRon] = useState("");
+  const [totalRon, setTotalRon] = useState("");
+  const [confirmManualBasis, setConfirmManualBasis] = useState(false);
+  const [selectedReferenceIds, setSelectedReferenceIds] = useState<string[]>([]);
+  const [referenceTaxable, setReferenceTaxable] = useState<Record<string, Record<string, string>>>({});
   const [rows, setRows] = useState<LineRow[]>(() => [newRow()]);
+  const loadedInvoice = invoiceQuery.data?.data;
+  const isCreditNote = loadedInvoice?.document_type === "credit_note" || (!id && searchParams.get("type") === "credit_note");
 
   useEffect(() => {
     const profile = (vatProfiles.data?.data ?? []).find((item) => item.is_active && item.is_default);
@@ -183,11 +225,27 @@ export function NewInvoicePage() {
       return;
     }
     setCustomerId(invoice.customer?.id ?? "");
+    setSeriesId(invoice.invoice_series_id ?? "");
     setIssueDate(invoice.issue_date ?? todayIso());
     setDueDate(invoice.due_date ?? "");
     setCurrency(invoice.currency);
     setLocale(invoice.locale);
     setNotes(invoice.notes ?? "");
+    setAdjustmentReason(invoice.adjustment_reason ?? "volume_rebate");
+    setAdjustmentDescription(invoice.adjustment_description ?? "");
+    setBillingPeriodStart(invoice.billing_period_start ?? "");
+    setBillingPeriodEnd(invoice.billing_period_end ?? "");
+    setExchangeRateBasisNote(invoice.exchange_rate_basis_note ?? "");
+    setSubtotalRon(invoice.subtotal_cents_ron == null ? "" : String(invoice.subtotal_cents_ron / 100));
+    setVatRon(invoice.vat_cents_ron == null ? "" : String(invoice.vat_cents_ron / 100));
+    setTotalRon(invoice.total_cents_ron == null ? "" : String(invoice.total_cents_ron / 100));
+    setConfirmManualBasis(invoice.exchange_rate_basis === "manual_documented");
+    const references = invoice.references ?? [];
+    setSelectedReferenceIds(references.map((reference) => reference.invoice_id));
+    setReferenceTaxable(Object.fromEntries(references.map((reference) => [
+      reference.invoice_id,
+      Object.fromEntries(reference.tax_groups.map((group) => [`${group.vat_category}|${Number(group.vat_rate).toFixed(2)}`, String(group.taxable_cents / 100)])),
+    ])));
     setRows(invoice.lines.map((line) => ({
       key: line.id,
       line_id: line.id,
@@ -213,17 +271,33 @@ export function NewInvoicePage() {
     seriesList.find((s) => s.is_default) ??
     seriesList[0];
 
-  const numberPreview = selectedSeries
-    ? selectedSeries.formatted_next_number ?? `${selectedSeries.prefix}${selectedSeries.next_number}`
-    : "—";
+  const numberPreview = id && loadedInvoice
+    ? loadedInvoice.formatted_number
+    : selectedSeries
+      ? selectedSeries.formatted_next_number ?? `${selectedSeries.prefix}${selectedSeries.next_number}`
+      : "—";
 
   const isForeign = currency !== "RON";
+  const referenceCandidates = useQuery({
+    queryKey: ["credit-note-reference-candidates", company?.id, customerId, currency],
+    queryFn: () => api<Invoice[]>(`/companies/${company!.id}/invoices${listQuery({
+      perPage: 100,
+      sort: "-issue_date",
+      filter: {
+        customer_id: {eq: customerId},
+        currency: {eq: currency},
+        document_type: {eq: "invoice"},
+        status: {eq: "issued"},
+      },
+    })}`),
+    enabled: isCreditNote && Boolean(company?.id && customerId && currency),
+  });
   const exchangeRatePreview = useQuery({
     queryKey: ["exchange-rate-preview", currency, issueDate],
     queryFn: () => api<ResolvedExchangeRate>(
       `/exchange-rates/resolve?currency=${encodeURIComponent(currency)}&date=${encodeURIComponent(issueDate)}`,
     ),
-    enabled: isForeign && Boolean(issueDate),
+    enabled: isForeign && !isCreditNote && Boolean(issueDate),
     retry: false,
   });
 
@@ -232,6 +306,27 @@ export function NewInvoicePage() {
     const vat = rows.reduce((sum, r) => sum + lineVatCents(r), 0);
     return {subtotal, vat, total: subtotal + vat};
   }, [rows]);
+  const creditTaxableByGroup = useMemo(() => rows.reduce<Record<string, number>>((groups, row) => {
+    const key = `${row.vat_category}|${Number(row.vat_rate).toFixed(2)}`;
+    groups[key] = (groups[key] ?? 0) + lineNetCents(row);
+    return groups;
+  }, {}), [rows]);
+  const referencesPayload = selectedReferenceIds.map((invoiceId) => ({
+    invoice_id: invoiceId,
+    tax_groups: Object.entries(referenceTaxable[invoiceId] ?? {})
+      .map(([key, value]) => {
+        const [vat_category, vat_rate] = key.split("|");
+        return {vat_category, vat_rate: Number(vat_rate), taxable_cents: Math.round(Number(value) * 100)};
+      })
+      .filter((group) => group.taxable_cents > 0),
+  }));
+  const referencesValid = selectedReferenceIds.length === 0 || (
+    referencesPayload.every((reference) => reference.tax_groups.length > 0)
+    && Object.entries(creditTaxableByGroup).every(([key, expected]) => referencesPayload.reduce(
+      (sum, reference) => sum + (reference.tax_groups.find((group) => `${group.vat_category}|${Number(group.vat_rate).toFixed(2)}` === key)?.taxable_cents ?? 0),
+      0,
+    ) === expected)
+  );
 
   function updateRow(key: string, patch: Partial<LineRow>) {
     setRows((prev) => prev.map((r) => (r.key === key ? {...r, ...patch} : r)));
@@ -264,12 +359,25 @@ export function NewInvoicePage() {
     setRows((prev) => (prev.length === 1 ? prev : prev.filter((r) => r.key !== key)));
   }
 
+  function toggleReference(invoiceId: string, selected: boolean) {
+    setSelectedReferenceIds((current) => selected
+      ? [...current.filter((id) => id !== invoiceId), invoiceId]
+      : current.filter((id) => id !== invoiceId));
+    if (!selected) setReferenceTaxable((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== invoiceId)));
+  }
+
+  function setReferenceAmount(invoiceId: string, groupKey: string, value: string) {
+    setReferenceTaxable((current) => ({
+      ...current,
+      [invoiceId]: {...(current[invoiceId] ?? {}), [groupKey]: value},
+    }));
+  }
+
   function buildPayload() {
-    return {
+    const common = {
       customer_id: customerId,
       status: "draft" as const,
       issue_date: issueDate,
-      due_date: dueDate || null,
       currency,
       locale,
       notes: notes.trim() ? notes.trim() : null,
@@ -287,11 +395,33 @@ export function NewInvoicePage() {
         vat_exemption_reason: r.vat_exemption_reason,
       })),
     };
+    if (!isCreditNote) return {...common, due_date: dueDate || null};
+
+    return {
+      ...common,
+      adjustment_reason: adjustmentReason,
+      adjustment_description: adjustmentDescription.trim(),
+      billing_period_start: billingPeriodStart || null,
+      billing_period_end: billingPeriodEnd || null,
+      references: referencesPayload,
+      ...creditNoteSeriesPayload(id, selectedSeries?.id),
+      ...(isForeign && selectedReferenceIds.length > 0 ? {
+        exchange_rate_basis: "referenced_invoices",
+      } : isForeign ? {
+        exchange_rate_basis: "manual_documented",
+        exchange_rate_basis_note: exchangeRateBasisNote.trim(),
+        subtotal_cents_ron: Math.round(Number(subtotalRon) * 100),
+        vat_cents_ron: Math.round(Number(vatRon) * 100),
+        total_cents_ron: Math.round(Number(totalRon) * 100),
+        confirm_manual_exchange_basis: confirmManualBasis,
+      } : {}),
+    };
   }
 
   const mutation = useMutation({
     mutationFn: async (opts: {issue: boolean}) => {
-      const created = await api<Invoice>(`/companies/${company!.id}/invoices${id ? `/${id}` : ""}`, {
+      const collection = isCreditNote ? "credit-notes" : "invoices";
+      const created = await api<Invoice>(`/companies/${company!.id}/${collection}${id ? `/${id}` : ""}`, {
         method: id ? "PUT" : "POST",
         body: JSON.stringify(buildPayload()),
       });
@@ -316,7 +446,17 @@ export function NewInvoicePage() {
   }
 
   const pending = mutation.isPending;
-  const disabled = pending || !company?.id;
+  const manualRonValid = !isForeign || selectedReferenceIds.length > 0 || manualRonTotalsAreValid(
+    subtotalRon,
+    vatRon,
+    totalRon,
+    totals.vat,
+    exchangeRateBasisNote,
+    confirmManualBasis,
+  );
+  const hasPeriod = Boolean(billingPeriodStart) && Boolean(billingPeriodEnd) && billingPeriodEnd >= billingPeriodStart;
+  const creditContextValid = !isCreditNote || (Boolean(adjustmentDescription.trim()) && (hasPeriod || selectedReferenceIds.length > 0) && referencesValid && manualRonValid);
+  const disabled = pending || !company?.id || !customerId || rows.some((row) => !row.description.trim() || row.quantity <= 0 || row.unit_price < 0 || !row.vat_profile_id) || !creditContextValid;
 
   return (
     <div className="flex flex-col gap-5">
@@ -325,7 +465,8 @@ export function NewInvoicePage() {
         <div className="flex flex-col gap-5">
           {/* 1. Invoice details */}
           <section className={cardClass}>
-            <h2 className="mb-4 text-[15px] font-bold tracking-tight">{id ? "Editează ciorna" : "Detalii factură"}</h2>
+            <h2 className="mb-4 text-[15px] font-bold tracking-tight">{id ? "Editează ciorna" : isCreditNote ? "Detalii notă de credit" : "Detalii factură"}</h2>
+            {isCreditNote ? <div className="mb-4 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] px-4 py-3 text-sm"><b>Acest document acordă un credit clientului.</b><span className="mt-1 block text-xs text-[var(--text-muted)]">Introdu valorile ca magnitudini pozitive; efectul financiar va fi afișat cu minus.</span></div> : null}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <FieldLabel>Client</FieldLabel>
@@ -335,6 +476,8 @@ export function NewInvoicePage() {
                   value={customerId}
                   onChange={(value) => {
                     setCustomerId(value);
+                    setSelectedReferenceIds([]);
+                    setReferenceTaxable({});
                     setLocale(customerList.find((customer) => customer.id === value)?.locale ?? "ro");
                   }}
                   disabled={customers.isLoading}
@@ -350,7 +493,7 @@ export function NewInvoicePage() {
                   ariaLabel="Serie"
                   value={selectedSeries?.id ?? ""}
                   onChange={setSeriesId}
-                  disabled={series.isLoading}
+                  disabled={series.isLoading || Boolean(id)}
                   placeholder={series.isLoading ? "Se încarcă…" : "Selectează seria"}
                   options={seriesList.map((item) => ({id: item.id, label: `${item.name} (${item.prefix})`}))}
                 />
@@ -373,14 +516,14 @@ export function NewInvoicePage() {
                 <AppDatePicker name="issue_date" ariaLabel="Data emiterii" value={issueDate} onChange={setIssueDate} />
               </div>
 
-              <div>
+              {!isCreditNote ? <div>
                 <FieldLabel>Scadență</FieldLabel>
                 <AppDatePicker name="due_date" ariaLabel="Scadență" value={dueDate} minValue={issueDate} onChange={setDueDate} />
-              </div>
+              </div> : null}
 
               <div>
                 <FieldLabel>Monedă</FieldLabel>
-                <SelectBox name="currency" ariaLabel="Monedă" value={currency} onChange={setCurrency} options={(currencies.data?.data ?? []).filter((item) => item.is_active).map((item) => ({id: item.code, label: `${item.code} — ${item.name}`}))} />
+                <SelectBox name="currency" ariaLabel="Monedă" value={currency} onChange={(value) => { setCurrency(value); setSelectedReferenceIds([]); setReferenceTaxable({}); }} options={(currencies.data?.data ?? []).filter((item) => item.is_active).map((item) => ({id: item.code, label: `${item.code} — ${item.name}`}))} />
               </div>
 
               <div>
@@ -388,7 +531,7 @@ export function NewInvoicePage() {
                 <SelectBox name="locale" ariaLabel="Limba documentului" value={locale} onChange={(value) => setLocale(value as "ro" | "en")} options={[{id: "ro", label: "Română"}, {id: "en", label: "Română + Engleză"}]} />
               </div>
 
-              {isForeign && <div className="self-end text-xs text-[var(--text-muted)]">
+              {isForeign && !isCreditNote && <div className="self-end text-xs text-[var(--text-muted)]">
                 {exchangeRatePreview.isPending
                   ? "Se verifică cursul care ar fi folosit…"
                   : exchangeRatePreview.data
@@ -398,6 +541,33 @@ export function NewInvoicePage() {
               </div>}
             </div>
           </section>
+
+          {isCreditNote ? <section className={cardClass}>
+            <h2 className="mb-4 text-[15px] font-bold tracking-tight">Motiv și context fiscal</h2>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div><FieldLabel>Motiv ajustare</FieldLabel><SelectBox name="adjustment_reason" ariaLabel="Motiv ajustare" value={adjustmentReason} onChange={(value) => setAdjustmentReason(value as InvoiceAdjustmentReason)} options={[
+                {id: "return", label: "Retur"}, {id: "price_correction", label: "Corecție de preț"}, {id: "post_sale_discount", label: "Reducere ulterioară"}, {id: "volume_rebate", label: "Rebate de volum"}, {id: "contract_adjustment", label: "Ajustare contractuală"}, {id: "cancellation", label: "Anulare"}, {id: "other", label: "Alt motiv"},
+              ]} /></div>
+              <div className="sm:col-span-2"><FieldLabel>Explicație publică</FieldLabel><TextArea name="adjustment_description" value={adjustmentDescription} onChange={(event) => setAdjustmentDescription(event.target.value)} rows={3} /></div>
+              <div><FieldLabel>Început perioadă</FieldLabel><AppDatePicker name="billing_period_start" ariaLabel="Început perioadă" value={billingPeriodStart} onChange={setBillingPeriodStart} /></div>
+              <div><FieldLabel>Sfârșit perioadă</FieldLabel><AppDatePicker name="billing_period_end" ariaLabel="Sfârșit perioadă" value={billingPeriodEnd} minValue={billingPeriodStart || undefined} onChange={setBillingPeriodEnd} /></div>
+              <div className="sm:col-span-2">
+                <FieldLabel>Facturi de referință (opțional)</FieldLabel>
+                <p className="mb-2 text-xs text-[var(--text-muted)]">Poți folosi perioada de mai sus, una sau mai multe facturi, ori ambele. Referința fiscală nu alocă automat creditul.</p>
+                {referenceCandidates.isLoading ? <div className="flex items-center gap-2 py-3 text-xs text-[var(--text-muted)]"><Spinner size="sm" /> Se încarcă facturile eligibile…</div> : (referenceCandidates.data?.data.length ?? 0) === 0 ? <div className="rounded-xl bg-[var(--bg-muted)] p-3 text-xs text-[var(--text-muted)]">Nu există facturi emise pentru acest client în {currency}.</div> : <div className="grid gap-2">{referenceCandidates.data!.data.map((candidate) => <AppCheckbox key={candidate.id} className="rounded-xl border border-[var(--border)] p-3 text-sm" name="reference_invoice_ids" value={candidate.id} isSelected={selectedReferenceIds.includes(candidate.id)} onChange={(selected) => toggleReference(candidate.id, selected)}><b>{candidate.formatted_number}</b><span className="ml-2 text-xs text-[var(--text-muted)]">{candidate.issue_date} · {money(candidate.total_cents, candidate.currency)}</span></AppCheckbox>)}</div>}
+              </div>
+              {selectedReferenceIds.map((referenceId) => <ReferenceTaxGroupEditor key={referenceId} companyId={company!.id} invoiceId={referenceId} desiredByGroup={creditTaxableByGroup} values={referenceTaxable[referenceId] ?? {}} onChange={(key, value) => setReferenceAmount(referenceId, key, value)} />)}
+              {selectedReferenceIds.length > 0 && !referencesValid ? <div className="sm:col-span-2 rounded-xl bg-[var(--warning-soft)] p-3 text-xs text-[var(--warning)]">Distribuția pe grupele TVA trebuie să acopere exact baza notei de credit: {Object.entries(creditTaxableByGroup).map(([key, value]) => `${key.replace("|", " · ")}%: ${money(value, currency)}`).join("; ")}.</div> : null}
+              {isForeign && selectedReferenceIds.length === 0 ? <>
+                <div className="sm:col-span-2 rounded-xl bg-[var(--bg-muted)] p-3 text-xs text-[var(--text-muted)]">Pentru o ajustare în valută fără facturi Billwise de referință, totalurile RON istorice sunt obligatorii și trebuie documentate de contabilitate.</div>
+                <div className="sm:col-span-2"><FieldLabel>Justificarea bazei de curs</FieldLabel><TextArea name="exchange_rate_basis_note" value={exchangeRateBasisNote} onChange={(event) => setExchangeRateBasisNote(event.target.value)} rows={3} /></div>
+                <div><FieldLabel>Subtotal RON</FieldLabel><Input name="subtotal_cents_ron" type="number" min="0" step="0.01" value={subtotalRon} onChange={(event) => setSubtotalRon(event.target.value)} /></div>
+                <div><FieldLabel>TVA RON</FieldLabel><Input name="vat_cents_ron" type="number" min="0" step="0.01" value={vatRon} onChange={(event) => setVatRon(event.target.value)} /></div>
+                <div><FieldLabel>Total RON</FieldLabel><Input name="total_cents_ron" type="number" min="0.01" step="0.01" value={totalRon} onChange={(event) => setTotalRon(event.target.value)} /></div>
+                <AppCheckbox className="self-end text-sm" name="confirm_manual_exchange_basis" isSelected={confirmManualBasis} onChange={setConfirmManualBasis}>Confirm baza de curs documentată</AppCheckbox>
+              </> : null}
+            </div>
+          </section> : null}
 
           {/* 2. Line items */}
           <section className={cardClass}>
@@ -553,20 +723,29 @@ export function NewInvoicePage() {
             <dl className="space-y-2.5 text-[13.5px]">
               <div className="flex items-center justify-between">
                 <dt className="text-[var(--text-muted)]">Subtotal</dt>
-                <dd className="font-semibold tabular-nums">{money(totals.subtotal, currency)}</dd>
+                <dd className="font-semibold tabular-nums">{money(isCreditNote ? -totals.subtotal : totals.subtotal, currency)}</dd>
               </div>
               <div className="flex items-center justify-between">
                 <dt className="text-[var(--text-muted)]">TVA</dt>
-                <dd className="font-semibold tabular-nums">{money(totals.vat, currency)}</dd>
+                <dd className="font-semibold tabular-nums">{money(isCreditNote ? -totals.vat : totals.vat, currency)}</dd>
               </div>
               <div className="my-1 h-px bg-[var(--border)]" />
               <div className="flex items-center justify-between">
-                <dt className="text-[15px] font-bold">Total</dt>
+                <dt className="text-[15px] font-bold">{isCreditNote ? "Credit acordat" : "Total"}</dt>
                 <dd className="text-[15px] font-bold tabular-nums text-[var(--accent)]">
-                  {money(totals.total, currency)}
+                  {money(isCreditNote ? -totals.total : totals.total, currency)}
                 </dd>
               </div>
-              {isForeign && exchangeRatePreview.data ? <>
+              {isForeign && isCreditNote && selectedReferenceIds.length === 0 && Number(totalRon) > 0 ? <>
+                <div className="flex items-center justify-between text-[12px] text-[var(--text-muted)]">
+                  <dt>Subtotal documentat RON</dt>
+                  <dd>{money(-Math.round(Number(subtotalRon) * 100), "RON")}</dd>
+                </div>
+                <div className="flex items-center justify-between text-[12px] text-[var(--text-muted)]">
+                  <dt>Total documentat RON</dt>
+                  <dd>{money(-Math.round(Number(totalRon) * 100), "RON")}</dd>
+                </div>
+              </> : isForeign && exchangeRatePreview.data ? <>
                 <div className="flex items-center justify-between text-[12px] text-[var(--text-muted)]">
                   <dt>Subtotal estimat RON</dt>
                   <dd>{money(Math.round(totals.subtotal * Number(exchangeRatePreview.data.data.rate)), "RON")}</dd>
@@ -576,7 +755,9 @@ export function NewInvoicePage() {
                   <dd>{money(Math.round(totals.total * Number(exchangeRatePreview.data.data.rate)), "RON")}</dd>
                 </div>
               </> : isForeign ? <div className="text-right text-[12px] text-[var(--text-muted)]">
-                Echivalentul RON va apărea după emitere.
+                {isCreditNote && selectedReferenceIds.length > 0
+                  ? "Echivalentul RON va fi reconciliat din facturile de referință."
+                  : "Echivalentul RON va apărea după emitere."}
               </div> : null}
             </dl>
 
@@ -587,7 +768,7 @@ export function NewInvoicePage() {
                 isDisabled={disabled}
                 onPress={() => submit(true)}
               >
-                {pending ? <Spinner size="sm" /> : <Send size={16} />} Emite factura
+                {pending ? <Spinner size="sm" /> : <Send size={16} />} {isCreditNote ? "Emite nota de credit" : "Emite factura"}
               </Button>
               <Button
                 variant="outline"
@@ -607,4 +788,28 @@ export function NewInvoicePage() {
       </div>
     </div>
   );
+}
+
+function ReferenceTaxGroupEditor({companyId, invoiceId, desiredByGroup, values, onChange}: {
+  companyId: string;
+  invoiceId: string;
+  desiredByGroup: Record<string, number>;
+  values: Record<string, string>;
+  onChange: (groupKey: string, value: string) => void;
+}) {
+  const invoice = useQuery({
+    queryKey: ["invoice", companyId, invoiceId, "credit-reference"],
+    queryFn: () => api<Invoice>(`/companies/${companyId}/invoices/${invoiceId}`),
+  });
+  const groups = (invoice.data?.data.vat_breakdown ?? []).filter((group) => (
+    `${group.vat_category}|${Number(group.vat_rate).toFixed(2)}` in desiredByGroup
+  ));
+
+  return <div className="sm:col-span-2 rounded-xl border border-[var(--border)] p-3">
+    <div className="text-xs font-semibold">Distribuție pentru {invoice.data?.data.formatted_number ?? invoiceId}</div>
+    {invoice.isLoading ? <div className="mt-2 flex items-center gap-2 text-xs text-[var(--text-muted)]"><Spinner size="sm" /> Se încarcă grupele TVA…</div> : groups.length === 0 ? <p className="mt-2 text-xs text-[var(--danger)]">Factura nu conține aceleași grupe TVA ca nota de credit.</p> : <div className="mt-2 grid gap-2 sm:grid-cols-2">{groups.map((group) => {
+      const key = `${group.vat_category}|${Number(group.vat_rate).toFixed(2)}`;
+      return <label key={key} className="text-xs text-[var(--text-muted)]">{group.vat_category} · {Number(group.vat_rate)}% <span className="block text-[10px]">Bază originală: {money(group.taxable_cents, invoice.data!.data.currency)}</span><Input type="number" min="0" step="0.01" value={values[key] ?? ""} onChange={(event) => onChange(key, event.target.value)} /></label>;
+    })}</div>}
+  </div>;
 }

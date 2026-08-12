@@ -1,8 +1,15 @@
 import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
-import {fireEvent, render, screen} from "@testing-library/react";
-import {MemoryRouter, Route, Routes} from "react-router";
+import {fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {MemoryRouter, Route, Routes, useLocation} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {AppShell, activityNotificationTime, archivedCompanyLandingPath, canAccessArchivedCompanyPath, selectableCompanies} from "./AppShell";
+import {AppShell, activityNotificationTime, archivedCompanyLandingPath, canAccessArchivedCompanyPath, selectableCompanies, useCompany} from "./AppShell";
+
+function CompanyLinkProbe() {
+  const {company} = useCompany();
+  const location = useLocation();
+
+  return <div>{company?.legal_name} · {location.search}</div>;
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -45,6 +52,62 @@ describe("AppShell onboarding guard", () => {
     expect(selectableCompanies(companies, () => false).map((company) => company.id)).toEqual(["active"]);
     expect(selectableCompanies(companies, (permission) => permission === "fiscal_vault.view").map((company) => company.id))
       .toEqual(["active", "archived"]);
+  });
+
+  it("selectează firma din linkul emailului și păstrează ceilalți parametri", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    localStorage.setItem("billwise_active_company_id", "company-1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = String(input);
+        const data = url.includes("/companies")
+          ? [
+              {id: "company-1", legal_name: "Prima SRL", tax_id: "12345674", archived_at: null},
+              {id: "company-2", legal_name: "A Doua SRL", tax_id: "1590082", archived_at: null},
+            ]
+          : url.includes("/notifications")
+            ? {items: [], unread_count: 0}
+            : {
+                id: "user-1",
+                name: "Andrei",
+                email: "andrei@example.test",
+                phone: null,
+                email_verified_at: "2026-07-24T10:00:00Z",
+                tenant: {id: "tenant-1", name: "ACME", slug: "acme"},
+                roles: ["accountant"],
+                permissions: ["purchase_invoice.view"],
+              };
+
+        return Promise.resolve(new Response(JSON.stringify({data}), {
+          status: 200,
+          headers: {"Content-Type": "application/json"},
+        }));
+      }),
+    );
+
+    const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/achizitii?company_id=company-2&filter=unread"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/achizitii" element={<CompanyLinkProbe />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("A Doua SRL · ?filter=unread")).toBeInTheDocument();
+    await waitFor(() => expect(localStorage.getItem("billwise_active_company_id")).toBe("company-2"));
   });
 
   it.each([

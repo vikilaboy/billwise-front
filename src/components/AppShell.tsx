@@ -279,7 +279,12 @@ export function AppShell() {
   const can = (permission: string) => !hasConfiguredAccess || Boolean(user?.permissions.includes(permission));
   const allCompanies = companies.data?.data ?? [];
   const list = selectableCompanies(allCompanies, can);
-  const company = list.find((c) => c.id === activeId) ?? list.find((c) => !c.archived_at) ?? list[0];
+  const requestedCompanyId = new URLSearchParams(location.search).get("company_id");
+  const requestedCompany = requestedCompanyId ? list.find((item) => item.id === requestedCompanyId) : undefined;
+  const company = requestedCompany
+    ?? list.find((c) => c.id === activeId)
+    ?? list.find((c) => !c.archived_at)
+    ?? list[0];
   const archivedCompany = Boolean(company?.archived_at);
   const archivedLanding = archivedCompanyLandingPath(can);
   const archivedPathAllowed = canAccessArchivedCompanyPath(location.pathname, can);
@@ -287,6 +292,23 @@ export function AppShell() {
     && (!archivedCompany || ["/achizitii", "/seif-fiscal"].includes(item.to)));
   const [title, subtitle] = pageMeta(location.pathname);
   const accountPath = location.pathname === "/profil" || location.pathname === "/securitate";
+
+  useEffect(() => {
+    if (!requestedCompanyId || !companies.isSuccess) return;
+
+    if (requestedCompany && activeId !== requestedCompany.id) {
+      setActiveId(requestedCompany.id);
+      localStorage.setItem("billwise_active_company_id", requestedCompany.id);
+      void queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] !== "me" && query.queryKey[0] !== "companies",
+      });
+    }
+
+    const params = new URLSearchParams(location.search);
+    params.delete("company_id");
+    const search = params.toString();
+    navigate({pathname: location.pathname, search: search ? `?${search}` : ""}, {replace: true});
+  }, [activeId, companies.isSuccess, location.pathname, location.search, navigate, queryClient, requestedCompany, requestedCompanyId]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);

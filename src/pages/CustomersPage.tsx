@@ -602,13 +602,13 @@ function AddCustomerModal({
 
           {customer && (detail.data?.data.recent_invoices?.length ?? 0) > 0 ? (
             <div>
-              <div className="text-[12.5px] font-semibold text-[var(--text-muted)]">Facturi recente</div>
+              <div className="text-[12.5px] font-semibold text-[var(--text-muted)]">Documente recente</div>
               <div className="mt-2 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
                 {detail.data!.data.recent_invoices!.map((invoice) => (
                   <div key={invoice.id} className="flex justify-between gap-3 px-3 py-2 text-xs">
-                    <span className="font-semibold">{invoice.formatted_number}</span>
+                    <span className="font-semibold">{invoice.formatted_number} · {invoice.document_type === "credit_note" ? "Notă de credit" : invoice.document_type === "correction" ? "Storno" : "Factură"}</span>
                     <span>{invoice.issue_date ?? "—"}</span>
-                    <span>{(invoice.total_cents / 100).toLocaleString("ro-RO", {minimumFractionDigits: 2})} {invoice.currency}</span>
+                    <span>{((invoice.signed_total_cents ?? (Math.abs(invoice.total_cents) * (invoice.financial_direction === "credit" ? -1 : 1))) / 100).toLocaleString("ro-RO", {minimumFractionDigits: 2})} {invoice.currency}</span>
                   </div>
                 ))}
               </div>

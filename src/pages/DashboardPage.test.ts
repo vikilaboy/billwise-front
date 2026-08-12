@@ -6,7 +6,7 @@ import {
   readDashboardPeriod,
   writeDashboardPeriod,
 } from "../lib/dashboardPeriods";
-import {balanceRonCents, isOverdue} from "./DashboardPage";
+import {balanceRonCents, isOverdue, performanceDocumentDetail} from "./DashboardPage";
 
 function invoice(attributes: Partial<Invoice>): Invoice {
   return {
@@ -31,6 +31,13 @@ describe("Dashboard payment-aware calculations", () => {
 });
 
 describe("Dashboard period controls", () => {
+  it("shows invoices and credit documents separately with correct Romanian plurals", () => {
+    expect(performanceDocumentDetail(2, 1, "2026-07-01", "2026-07-26"))
+      .toBe("2 facturi · 1 document de credit · 01.07.2026 – 26.07.2026");
+    expect(performanceDocumentDetail(1, 2, "2026-07-01", "2026-07-01"))
+      .toBe("1 factură · 2 documente de credit · 01.07.2026");
+  });
+
   it("keeps each dashboard section independent in the URL", () => {
     let params = writeDashboardPeriod(new URLSearchParams(), "performance", {
       preset: "current_quarter",

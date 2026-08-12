@@ -2,7 +2,11 @@ import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {InvoiceDetailPage} from "./InvoiceDetailPage";
+import {
+  InvoiceDetailPage,
+  isCreditCancellationUnavailable,
+  isSpvCancellationUnavailable,
+} from "./InvoiceDetailPage";
 
 vi.mock("../components/AppShell", () => ({
   useCompany: () => ({company: {id: "company-1", legal_name: "ACME SRL"}}),
@@ -14,9 +18,12 @@ const json = (data: unknown, status = 200) =>
 const invoice = {
   id: "invoice-1",
   company_profile: {id: "company-1", legal_name: "ACME SRL", tax_id: "12345674", address: null},
-  customer: {name: "CLIENT SRL", tax_id: "34567894", registration_number: null, address: null},
+  customer: {id: "customer-1", name: "CLIENT SRL", tax_id: "34567894", registration_number: null, address: null},
   status: "issued",
   document_type: "invoice",
+  financial_direction: "debit",
+  adjustment_reason: null,
+  adjustment_description: null,
   corrects_invoice_id: null,
   corrected_invoice: null,
   corrections: [],
@@ -24,6 +31,8 @@ const invoice = {
   formatted_number: "INV-0001",
   issue_date: "2026-07-24",
   due_date: "2026-08-24",
+  billing_period_start: null,
+  billing_period_end: null,
   issued_at: "2026-07-24T10:00:00Z",
   cancelled_at: null,
   cancellation_reason: null,
@@ -34,9 +43,26 @@ const invoice = {
   subtotal_cents: 10000,
   vat_cents: 1900,
   total_cents: 11900,
+  signed_subtotal_cents: 10000,
+  signed_vat_cents: 1900,
+  signed_total_cents: 11900,
   subtotal_cents_ron: 10000,
   vat_cents_ron: 1900,
   total_cents_ron: 11900,
+  signed_subtotal_cents_ron: 10000,
+  signed_vat_cents_ron: 1900,
+  signed_total_cents_ron: 11900,
+  paid_cents: 0,
+  issued_corrections_cents: 0,
+  adjusted_total_cents: 11900,
+  credit_allocations_cents: 0,
+  balance_cents: 11900,
+  overpaid_cents: 0,
+  available_overpaid_cents: 0,
+  allocated_credit_cents: 0,
+  refunded_credit_cents: 0,
+  available_credit_cents: 0,
+  references: [],
   lines: [],
   vat_breakdown: [],
   latest_efactura_submission: null,
@@ -48,6 +74,27 @@ const invoice = {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+describe("InvoiceDetailPage credit cancellation", () => {
+  it("nu promite anularea unui document de credit deja comunicat", () => {
+    expect(isCreditCancellationUnavailable("credit_note", [{status: "sent"}], false)).toBe(true);
+    expect(isCreditCancellationUnavailable("correction", [{status: "outcome_unknown"}], false)).toBe(true);
+    expect(isCreditCancellationUnavailable("credit_note", [], true)).toBe(true);
+    expect(isCreditCancellationUnavailable("credit_note", [{status: "failed"}], false)).toBe(false);
+    expect(isCreditCancellationUnavailable("invoice", [{status: "sent"}], false)).toBe(false);
+  });
+
+  it("nu promite anularea cât timp starea SPV o interzice sau nu poate fi verificată", () => {
+    for (const status of ["queued", "sending", "sent", "processing", "accepted", "delivery_unknown"] as const) {
+      expect(isSpvCancellationUnavailable([{status}], false)).toBe(true);
+    }
+
+    expect(isSpvCancellationUnavailable([], true)).toBe(true);
+    expect(isSpvCancellationUnavailable([{status: "rejected"}], false)).toBe(false);
+    expect(isSpvCancellationUnavailable([{status: "failed"}], false)).toBe(false);
+    expect(isSpvCancellationUnavailable([], false)).toBe(false);
+  });
 });
 
 describe("InvoiceDetailPage SPV", () => {
@@ -195,5 +242,57 @@ describe("InvoiceDetailPage SPV", () => {
 
     fireEvent.click(await screen.findByRole("button", {name: "Verifică acum în ANAF"}));
     await waitFor(() => expect(syncCount).toBe(1));
+  });
+
+  it("înregistrează explicit rambursarea unei note de credit și păstrează registrul separat de încasări", async () => {
+    const creditNote = {
+      ...invoice,
+      id: "credit-1",
+      formatted_number: "NC-0001",
+      document_type: "credit_note",
+      financial_direction: "credit",
+      signed_subtotal_cents: -10000,
+      signed_vat_cents: -1900,
+      signed_total_cents: -11900,
+      payment_status: "not_applicable",
+      balance_cents: 0,
+      available_credit_cents: 11900,
+      efactura_eligibility: {eligible: false, reason: "outside_jurisdiction"},
+    };
+    let refundBody: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/invoices/credit-1")) return Promise.resolve(json(creditNote));
+      if (url.includes("/customer-credit-usages?") && !init?.method) return Promise.resolve(json([]));
+      if (url.endsWith("/customer-credit-usages") && init?.method === "POST") {
+        refundBody = JSON.parse(String(init.body));
+        return Promise.resolve(json({id: "usage-1", ...refundBody}, 201));
+      }
+      if (url.endsWith("/deliveries") || url.endsWith("/efactura/submissions")) return Promise.resolve(json([]));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/facturi/credit-1"]}>
+          <Routes><Route path="/facturi/:id" element={<InvoiceDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Înregistrează rambursare"}));
+    fireEvent.change(screen.getByRole("spinbutton", {name: "Sumă"}), {target: {value: "25"}});
+    fireEvent.click(screen.getByRole("button", {name: "Înregistrează rambursarea"}));
+
+    await waitFor(() => expect(refundBody).not.toBeNull());
+    expect(refundBody).toMatchObject({
+      source_credit_note_id: "credit-1",
+      type: "refund",
+      amount_cents: 2500,
+      currency: "RON",
+      method: "bank_transfer",
+    });
+    expect(refundBody).not.toHaveProperty("target_invoice_id");
   });
 });

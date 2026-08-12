@@ -101,6 +101,13 @@ function periodLabel(from: string, to: string): string {
   return from === to ? date(from) : `${date(from)} – ${date(to)}`;
 }
 
+export function performanceDocumentDetail(invoiceCount: number, creditDocumentCount: number, from: string, to: string): string {
+  const invoices = `${invoiceCount} ${invoiceCount === 1 ? "factură" : "facturi"}`;
+  const credits = `${creditDocumentCount} ${creditDocumentCount === 1 ? "document de credit" : "documente de credit"}`;
+
+  return `${invoices} · ${credits} · ${periodLabel(from, to)}`;
+}
+
 function seriesLabel(from: string, to: string): string {
   const first = date(from).slice(0, 5);
   const last = date(to).slice(0, 5);
@@ -108,7 +115,8 @@ function seriesLabel(from: string, to: string): string {
 }
 
 function paymentLabel(invoice: Invoice): string {
-  if (invoice.document_type !== "invoice") return "Corecție";
+  if (invoice.document_type === "credit_note") return "Notă de credit";
+  if (invoice.document_type === "correction") return "Storno";
   return {
     paid: "Încasată",
     partial: "Parțial încasată",
@@ -341,7 +349,7 @@ export function DashboardPage() {
       <section className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
         {performance.isLoading ? <LoadingBlock /> : performance.isError ? <QueryError error={performance.error} retry={() => void performance.refetch()} /> : (
           <>
-            <MetricCard icon={<TrendingUp size={17} />} label="Facturat" value={money(performanceData?.summary.invoiced_ron_cents)} detail={`${performanceData?.summary.issued_document_count ?? 0} documente · ${periodLabel(performanceData!.period.from, performanceData!.period.to)}`} tone="success" chart={invoicedSparkline} />
+            <MetricCard icon={<TrendingUp size={17} />} label="Facturat" value={money(performanceData?.summary.invoiced_ron_cents)} detail={performanceDocumentDetail(performanceData?.summary.issued_invoice_count ?? 0, performanceData?.summary.issued_credit_document_count ?? 0, performanceData!.period.from, performanceData!.period.to)} tone="success" chart={invoicedSparkline} />
             <MetricCard icon={<Banknote size={17} />} label="Încasat" value={money(performanceData?.summary.collected_ron_cents)} detail={`${performanceData?.summary.invoice_with_payment_count ?? 0} facturi cu încasări`} tone="success" chart={collectedSparkline} />
           </>
         )}
@@ -387,6 +395,21 @@ export function DashboardPage() {
           </>
         )}
       </section>
+
+      {!overview.isLoading && !overview.isError ? (
+        <Card className="p-5">
+          <Card.Header>
+            <div><Card.Title>Poziția financiară a clienților</Card.Title><Card.Description>Creanțe și credite disponibile, păstrate separat pentru audit</Card.Description></div>
+          </Card.Header>
+          <Card.Content>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="rounded-xl bg-[var(--bg-muted)] p-4"><div className="text-xs text-[var(--text-muted)]">Note de credit disponibile</div><div className="mt-2 text-xl font-bold tabular-nums">{money(overviewData?.available_credit_ron_cents)}</div></div>
+              <div className="rounded-xl bg-[var(--bg-muted)] p-4"><div className="text-xs text-[var(--text-muted)]">Supraplăți disponibile</div><div className="mt-2 text-xl font-bold tabular-nums">{money(overviewData?.available_overpayment_ron_cents)}</div></div>
+              <div className="rounded-xl bg-[var(--accent-soft)] p-4"><div className="text-xs text-[var(--text-muted)]">Poziție netă</div><div className="mt-2 text-xl font-bold tabular-nums">{money(overviewData?.net_customer_position_ron_cents)}</div><div className="mt-1 text-xs text-[var(--text-muted)]">creanțe minus credite și supraplăți</div></div>
+            </div>
+          </Card.Content>
+        </Card>
+      ) : null}
 
       <Card className="p-5">
         <Card.Header className="flex flex-wrap items-start justify-between gap-3">
@@ -490,7 +513,12 @@ export function DashboardPage() {
         <Card.Header className="flex items-center justify-between px-5 py-4"><div><Card.Title>Facturi recente</Card.Title><Card.Description>Ultimele 5 documente</Card.Description></div><Button size="sm" variant="ghost" onPress={() => navigate("/facturi")}>Vezi toate <ArrowRight size={15} /></Button></Card.Header>
         <Card.Content className="p-0">
           {overview.isLoading ? <LoadingBlock /> : overview.isError ? <QueryError error={overview.error} retry={() => void overview.refetch()} /> : overviewData?.recent_invoices.length ? (
-            <div className="overflow-x-auto"><table className="w-full min-w-[720px] border-collapse text-sm"><thead><tr className="text-left text-xs text-[var(--text-muted)]"><th className="border-b border-[var(--border)] px-5 py-3">Număr</th><th className="border-b border-[var(--border)] px-5 py-3">Client</th><th className="border-b border-[var(--border)] px-5 py-3">Scadență</th><th className="border-b border-[var(--border)] px-5 py-3 text-right">Valoare</th><th className="border-b border-[var(--border)] px-5 py-3">Încasare</th></tr></thead><tbody>{overviewData.recent_invoices.map((invoice) => <tr key={invoice.id} onClick={() => navigate(`/facturi/${invoice.id}`)} className="cursor-pointer hover:bg-[var(--bg-muted)]"><td className="border-b border-[var(--border)] px-5 py-3 font-semibold">{invoice.formatted_number}</td><td className="border-b border-[var(--border)] px-5 py-3">{invoice.customer?.name ?? "—"}</td><td className="border-b border-[var(--border)] px-5 py-3">{date(invoice.due_date)}</td><td className="border-b border-[var(--border)] px-5 py-3 text-right">{money(invoice.total_cents, invoice.currency)}</td><td className="border-b border-[var(--border)] px-5 py-3"><Chip size="sm" variant="soft" color={paymentTone(invoice)}><Chip.Label>{paymentLabel(invoice)}</Chip.Label></Chip></td></tr>)}</tbody></table></div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] border-collapse text-sm">
+                <thead><tr className="text-left text-xs text-[var(--text-muted)]"><th className="border-b border-[var(--border)] px-5 py-3">Număr</th><th className="border-b border-[var(--border)] px-5 py-3">Client</th><th className="border-b border-[var(--border)] px-5 py-3">Scadență</th><th className="border-b border-[var(--border)] px-5 py-3 text-right">Valoare</th><th className="border-b border-[var(--border)] px-5 py-3">Încasare</th></tr></thead>
+                <tbody>{overviewData.recent_invoices.map((invoice) => <tr key={invoice.id} onClick={() => navigate(`/facturi/${invoice.id}`)} className="cursor-pointer hover:bg-[var(--bg-muted)]"><td className="border-b border-[var(--border)] px-5 py-3 font-semibold">{invoice.formatted_number}</td><td className="border-b border-[var(--border)] px-5 py-3">{invoice.customer?.name ?? "—"}</td><td className="border-b border-[var(--border)] px-5 py-3">{date(invoice.due_date)}</td><td className="border-b border-[var(--border)] px-5 py-3 text-right">{money(invoice.signed_total_cents, invoice.currency)}</td><td className="border-b border-[var(--border)] px-5 py-3"><Chip size="sm" variant="soft" color={paymentTone(invoice)}><Chip.Label>{paymentLabel(invoice)}</Chip.Label></Chip></td></tr>)}</tbody>
+              </table>
+            </div>
           ) : <p className="px-5 py-12 text-center text-sm text-[var(--text-muted)]">Nu există facturi încă.</p>}
         </Card.Content>
       </Card>

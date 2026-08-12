@@ -92,4 +92,33 @@ describe("InvoicesPage actions", () => {
       method: "bank_transfer",
     }));
   });
+
+  it("resetează pagina când schimbă tipul documentului și include filtrul în resetarea globală", async () => {
+    const requestUrls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request) => {
+      requestUrls.push(String(input));
+      return Promise.resolve(new Response(JSON.stringify({
+        data: [],
+        meta: {pagination: {current_page: 1, per_page: 20, total: 0, last_page: 1}},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    }));
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/facturi?page=4"]}><InvoicesPage /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Nicio factură aici");
+    fireEvent.click(screen.getByRole("button", {name: "Note de credit"}));
+
+    await waitFor(() => expect(requestUrls.at(-1)).toContain("credit_note"));
+    expect(requestUrls.at(-1)).not.toContain("_page=4");
+
+    const reset = screen.getByRole("button", {name: "Resetează"});
+    expect(reset).toBeEnabled();
+    fireEvent.click(reset);
+
+    await waitFor(() => expect(requestUrls.at(-1)).not.toContain("credit_note"));
+  });
 });

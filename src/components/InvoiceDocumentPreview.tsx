@@ -4,7 +4,8 @@ import {date, exchangeRate, money} from "../lib/format";
 
 const LABELS = {
   invoice: ["Factură", "Invoice"],
-  correctionInvoice: ["Factură de corecție", "Credit note"],
+  correctionInvoice: ["Factură de corecție", "Correction invoice"],
+  creditNote: ["Notă de credit", "Credit note"],
   corrects: ["Corectează", "Corrects"],
   supplier: ["Furnizor", "Supplier"],
   customer: ["Client", "Customer"],
@@ -20,6 +21,10 @@ const LABELS = {
   subtotal: ["Subtotal", "Subtotal"],
   totalVat: ["Total TVA", "Total VAT"],
   totalDue: ["Total de plată", "Total due"],
+  creditGranted: ["Credit acordat", "Credit granted"],
+  billingPeriod: ["Perioada ajustată", "Adjustment period"],
+  references: ["Facturi de referință", "Referenced invoices"],
+  adjustment: ["Motivul ajustării", "Adjustment reason"],
   ronEquivalent: ["Echivalent RON", "RON equivalent"],
   bnrRate: ["Curs BNR", "NBR exchange rate"],
   bankAccounts: ["Conturi bancare", "Bank accounts"],
@@ -89,7 +94,9 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
   const bilingual = invoice.locale === "en";
   const currency = invoice.currency;
   const isForeign = currency !== "RON";
-  const documentTitle = invoice.document_type === "correction" ? "correctionInvoice" : "invoice";
+  const directionSign = invoice.financial_direction === "credit" ? -1 : 1;
+  const signed = (value: number | null | undefined) => Math.abs(value ?? 0) * directionSign;
+  const documentTitle = invoice.document_type === "correction" ? "correctionInvoice" : invoice.document_type === "credit_note" ? "creditNote" : "invoice";
   const sellerDisplayName = seller?.trade_name || seller?.legal_name || "—";
   const sellerInitial = sellerDisplayName.slice(0, 1).toUpperCase();
 
@@ -172,6 +179,9 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
         </PartyCard>
       </section>
 
+      {invoice.billing_period_start && invoice.billing_period_end ? <section className="mt-4 rounded-md bg-[#f4f7f5] px-3 py-2"><SectionTitle name="billingPeriod" bilingual={bilingual} />{date(invoice.billing_period_start)} – {date(invoice.billing_period_end)}</section> : null}
+      {(invoice.references?.length ?? 0) > 0 ? <section className="mt-4 rounded-md bg-[#f4f7f5] px-3 py-2"><SectionTitle name="references" bilingual={bilingual} />{invoice.references.map((reference) => reference.formatted_number).filter(Boolean).join(", ")}</section> : null}
+
       <div className="mt-5">
         <table className="w-full table-fixed border-collapse text-[9px] tabular-nums">
           <thead>
@@ -210,10 +220,10 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
                   <span className="block text-[#64716a]">{line.vat_category}</span>
                 </td>
                 <td className="border-b border-[#dfe5e1] px-1.5 py-2 text-right align-top font-bold">
-                  {money(line.total_cents, currency)}
+                  {money(signed(line.total_cents), currency)}
                   {isForeign && invoice.exchange_rate ? (
                     <span className="block text-[9px] font-normal text-[#8a958f]">
-                      {money(Math.round(line.total_cents * Number(invoice.exchange_rate)), "RON")}
+                      {money(signed(Math.round(line.total_cents * Number(invoice.exchange_rate))), "RON")}
                     </span>
                   ) : null}
                 </td>
@@ -229,7 +239,7 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
           {invoice.vat_breakdown.map((group) => (
             <div key={`${group.vat_category}-${group.vat_rate}`} className="mt-1.5 border-l-[3px] border-[#16a34a] bg-[#f4f7f5] px-2.5 py-2">
               <strong>{group.vat_category} · {Number(group.vat_rate)}%</strong><br />
-              {money(group.taxable_cents, currency)} + {money(group.vat_cents, currency)} {LABELS.vat[0]}
+              {money(signed(group.taxable_cents), currency)} + {money(signed(group.vat_cents), currency)} {LABELS.vat[0]}
               {group.vat_exemption_code || group.vat_exemption_reason ? (
                 <span className="block text-[#64716a]">
                   {[group.vat_exemption_code, group.vat_exemption_reason].filter(Boolean).join(" ")}
@@ -248,14 +258,14 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
         </div>
         <table className="h-fit w-full border-collapse tabular-nums">
           <tbody>
-            <SummaryRow label={<LabelPair name="subtotal" bilingual={bilingual} />} value={money(invoice.subtotal_cents, currency)} />
-            <SummaryRow label={<LabelPair name="totalVat" bilingual={bilingual} />} value={money(invoice.vat_cents, currency)} />
-            <SummaryRow label={<LabelPair name="totalDue" bilingual={bilingual} />} value={money(invoice.total_cents, currency)} grand />
+            <SummaryRow label={<LabelPair name="subtotal" bilingual={bilingual} />} value={money(invoice.signed_subtotal_cents ?? signed(invoice.subtotal_cents), currency)} />
+            <SummaryRow label={<LabelPair name="totalVat" bilingual={bilingual} />} value={money(invoice.signed_vat_cents ?? signed(invoice.vat_cents), currency)} />
+            <SummaryRow label={<LabelPair name={invoice.financial_direction === "credit" ? "creditGranted" : "totalDue"} bilingual={bilingual} />} value={money(invoice.signed_total_cents ?? signed(invoice.total_cents), currency)} grand />
             {isForeign ? (
               <>
-                <SummaryRow label={<><LabelPair name="subtotal" bilingual={bilingual} /> RON</>} value={money(invoice.subtotal_cents_ron, "RON")} ronStart />
-                <SummaryRow label={<><LabelPair name="totalVat" bilingual={bilingual} /> RON</>} value={money(invoice.vat_cents_ron, "RON")} />
-                <SummaryRow label={<LabelPair name="ronEquivalent" bilingual={bilingual} />} value={money(invoice.total_cents_ron, "RON")} strong />
+                <SummaryRow label={<><LabelPair name="subtotal" bilingual={bilingual} /> RON</>} value={money(invoice.signed_subtotal_cents_ron ?? signed(invoice.subtotal_cents_ron), "RON")} ronStart />
+                <SummaryRow label={<><LabelPair name="totalVat" bilingual={bilingual} /> RON</>} value={money(invoice.signed_vat_cents_ron ?? signed(invoice.vat_cents_ron), "RON")} />
+                <SummaryRow label={<LabelPair name="ronEquivalent" bilingual={bilingual} />} value={money(invoice.signed_total_cents_ron ?? signed(invoice.total_cents_ron), "RON")} strong />
               </>
             ) : null}
           </tbody>
@@ -283,6 +293,7 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
           {invoice.notes}
         </section>
       ) : null}
+      {invoice.adjustment_description ? <section className="mt-5 whitespace-pre-line"><SectionTitle name="adjustment" bilingual={bilingual} />{invoice.adjustment_description}</section> : null}
 
       <footer className="mt-6 border-t border-[#dfe5e1] pt-2.5 text-[9px] text-[#64716a]">
         <div>Factura este valabilă fără semnătură și ștampilă, conform art. 319 alin. (29) din Legea nr. 227/2015 privind Codul fiscal.</div>

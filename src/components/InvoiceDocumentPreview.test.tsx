@@ -22,6 +22,7 @@ const invoice = {
   },
   status: "issued",
   document_type: "invoice",
+  financial_direction: "debit",
   corrected_invoice: null,
   formatted_number: "INV-0001",
   issue_date: "2026-07-24",
@@ -35,9 +36,16 @@ const invoice = {
   subtotal_cents: 10000,
   vat_cents: 1900,
   total_cents: 11900,
+  signed_subtotal_cents: 10000,
+  signed_vat_cents: 1900,
+  signed_total_cents: 11900,
   subtotal_cents_ron: 50000,
   vat_cents_ron: 9500,
   total_cents_ron: 59500,
+  signed_subtotal_cents_ron: 50000,
+  signed_vat_cents_ron: 9500,
+  signed_total_cents_ron: 59500,
+  references: [],
   bank_accounts_snapshot: [{
     bank_name: "Example Bank",
     scheme: "iban",
@@ -69,7 +77,7 @@ const invoice = {
     vat_exemption_code: null,
     vat_exemption_reason: null,
   }],
-} as Invoice;
+} as unknown as Invoice;
 
 describe("InvoiceDocumentPreview", () => {
   it("reproduce structura și traducerile documentului PDF bilingv", () => {
@@ -85,5 +93,40 @@ describe("InvoiceDocumentPreview", () => {
     expect(screen.getByRole("columnheader", {name: "Descriere Description"}).parentElement)
       .toHaveClass("bg-[#46504b]");
     expect(screen.getByText(/This invoice is valid without a signature or stamp/)).toBeInTheDocument();
+  });
+
+  it("afișează nota de credit cu semn financiar și contextul ajustării", () => {
+    render(<InvoiceDocumentPreview invoice={{
+      ...invoice,
+      document_type: "credit_note",
+      financial_direction: "credit",
+      signed_subtotal_cents: -10000,
+      signed_vat_cents: -1900,
+      signed_total_cents: -11900,
+      adjustment_description: "Reducere comercială trimestrială",
+      billing_period_start: "2026-04-01",
+      billing_period_end: "2026-06-30",
+      references: [{id: "reference-1", invoice_id: "invoice-2", formatted_number: "INV-0002", tax_groups: []}],
+    }} />);
+
+    expect(screen.getByText("Notă de credit")).toBeInTheDocument();
+    expect(screen.getByText("Credit granted")).toBeInTheDocument();
+    expect(screen.getAllByText("-119,00 EUR").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Reducere comercială trimestrială")).toBeInTheDocument();
+    expect(screen.getByText("INV-0002")).toBeInTheDocument();
+  });
+
+  it("distinge în engleză factura de corecție 380 de nota de credit 381", () => {
+    render(<InvoiceDocumentPreview invoice={{
+      ...invoice,
+      document_type: "correction",
+      financial_direction: "credit",
+      signed_subtotal_cents: -10000,
+      signed_vat_cents: -1900,
+      signed_total_cents: -11900,
+    }} />);
+
+    expect(screen.getByText("Factură de corecție")).toBeInTheDocument();
+    expect(screen.getByText("Correction invoice")).toBeInTheDocument();
   });
 });

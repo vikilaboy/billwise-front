@@ -12,7 +12,7 @@ import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
 import {AppCheckbox} from "../components/FormControls";
 import {api, downloadApiFile, listQuery, openApiFile, type ListParams} from "../lib/api";
-import type {Invoice, InvoicePayment} from "../lib/types";
+import type {Invoice, InvoiceDocumentType, InvoicePayment} from "../lib/types";
 import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
 import {useServerDataGridState} from "../lib/useServerDataGridState";
 
@@ -28,6 +28,13 @@ const FILTERS: {key: FilterKey; label: string}[] = [
   {key: "restante", label: "Restante"},
   {key: "anulate", label: "Anulate"},
 ];
+const DOCUMENT_FILTERS: Array<{key: "all" | InvoiceDocumentType; label: string}> = [
+  {key: "all", label: "Toate documentele"},
+  {key: "invoice", label: "Facturi"},
+  {key: "correction", label: "Storno"},
+  {key: "credit_note", label: "Note de credit"},
+];
+const DOCUMENT_LABELS: Record<InvoiceDocumentType, string> = {invoice: "Factură", correction: "Storno", credit_note: "Notă de credit"};
 
 const PER_PAGE = 20;
 const DEFAULT_SORT: DataGridSortDescriptor = {column: "issue_date", direction: "descending"};
@@ -73,7 +80,7 @@ function canSettle(invoice: Invoice): boolean {
 export function InvoicesPage() {
   const {company} = useCompany();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmation, setConfirmation] = useState<Confirmation>(null);
@@ -83,7 +90,7 @@ export function InvoicesPage() {
     defaultSort: DEFAULT_SORT,
     sortColumns: SORT_COLUMNS,
     filter: FILTER_CONFIG,
-    extraParams: ["payment_status", "efactura_status", "issue_from", "issue_to", "aging"],
+    extraParams: ["payment_status", "efactura_status", "issue_from", "issue_to", "aging", "document_type"],
   });
   const filter = grid.filter ?? "toate";
   const dashboardPaymentStatus = searchParams.get("payment_status");
@@ -91,6 +98,8 @@ export function InvoicesPage() {
   const issueFrom = searchParams.get("issue_from");
   const issueTo = searchParams.get("issue_to");
   const agingBucket = searchParams.get("aging");
+  const requestedDocumentType = searchParams.get("document_type");
+  const documentType = DOCUMENT_FILTERS.some((item) => item.key === requestedDocumentType) ? requestedDocumentType as "all" | InvoiceDocumentType : "all";
   const issueDateFilter: Record<string, string | number> = {};
   if (issueFrom) issueDateFilter.gte = issueFrom;
   if (issueTo) issueDateFilter.lte = issueTo;
@@ -98,7 +107,8 @@ export function InvoicesPage() {
     ...(dashboardPaymentStatus ? {payment_status: dashboardPaymentStatus} : {}),
     ...(efacturaStatus ? {efactura_status: efacturaStatus} : {}),
     ...(issueFrom || issueTo ? {issue_date: issueDateFilter} : {}),
-    ...(agingBucket ? {receivables_age: agingBucket} : {}),
+      ...(agingBucket ? {receivables_age: agingBucket} : {}),
+      ...(documentType !== "all" ? {document_type: documentType} : {}),
   };
   const exportQuery = listQuery({
     sort: grid.apiSort,
@@ -111,7 +121,7 @@ export function InvoicesPage() {
   });
 
   const invoices = useQuery({
-    queryKey: ["invoices", company?.id, "list", grid.page, filter, grid.debouncedSearch, grid.apiSort, dashboardPaymentStatus, efacturaStatus, issueFrom, issueTo, agingBucket],
+    queryKey: ["invoices", company?.id, "list", grid.page, filter, documentType, grid.debouncedSearch, grid.apiSort, dashboardPaymentStatus, efacturaStatus, issueFrom, issueTo, agingBucket],
     queryFn: () =>
       api<Invoice[]>(
         `/companies/${company!.id}/invoices${listQuery({
@@ -283,6 +293,12 @@ export function InvoicesPage() {
         cell: (invoice) => invoice.customer?.name ?? "—",
       },
       {
+        id: "document_type",
+        header: "Tip",
+        minWidth: 130,
+        cell: (invoice) => <Chip size="sm" variant="soft" color={invoice.document_type === "invoice" ? "default" : "accent"}><Chip.Label>{DOCUMENT_LABELS[invoice.document_type]}</Chip.Label></Chip>,
+      },
+      {
         id: "issue_date",
         header: "Emitere",
         accessorKey: "issue_date",
@@ -308,7 +324,7 @@ export function InvoicesPage() {
         align: "end",
         minWidth: 160,
         cellClassName: "font-semibold tabular-nums",
-        cell: (invoice) => money(invoice.total_cents, invoice.currency),
+        cell: (invoice) => <span className={invoice.financial_direction === "credit" ? "text-[var(--accent)]" : undefined}>{money(invoice.signed_total_cents, invoice.currency)}</span>,
       },
       {
         id: "balance",
@@ -324,7 +340,7 @@ export function InvoicesPage() {
         minWidth: 130,
         cell: (invoice) => {
           const status = displayStatus(invoice);
-          const paymentLabels = {unpaid: "Neîncasată", partial: "Parțial încasată", paid: "Încasată", overdue: "Restantă", not_applicable: "Corecție"};
+          const paymentLabels = {unpaid: "Neîncasată", partial: "Parțial încasată", paid: "Încasată", overdue: "Restantă", not_applicable: DOCUMENT_LABELS[invoice.document_type]};
           const label = invoice.status === "issued" ? paymentLabels[invoice.payment_status] : displayStatusLabels[status];
           return (
             <Chip size="sm" color={invoice.payment_status === "paid" ? "success" : statusTone[status]} variant="soft">
@@ -379,7 +395,7 @@ export function InvoicesPage() {
               <Dropdown.Popover placement="bottom end" className="min-w-[200px]">
                 <Dropdown.Menu onAction={(key) => {
                   if (key === "open") navigate(`/facturi/${invoice.id}`);
-                  if (key === "edit") navigate(`/facturi/${invoice.id}/editeaza`);
+                  if (key === "edit") navigate(invoice.document_type === "correction" ? `/facturi/${invoice.id}` : `/facturi/${invoice.id}/editeaza`);
                   if (key === "issue") setConfirmation({kind: "issue", invoice});
                   if (key === "duplicate") action.mutate({invoice, kind: "duplicate"});
                   if (key === "delete") setConfirmation({kind: "delete", invoice});
@@ -464,7 +480,18 @@ export function InvoicesPage() {
           <Button variant="primary" onPress={() => navigate("/facturi/noi")}>
             <Plus size={17} /> Emite factură
           </Button>
+          <Button variant="outline" onPress={() => navigate("/facturi/noi?type=credit_note")}>
+            <Plus size={17} /> Notă de credit
+          </Button>
         </div>
+      </div>
+      <div className="flex flex-wrap gap-2" aria-label="Filtru tip document">
+        {DOCUMENT_FILTERS.map((item) => <button key={item.key} type="button" aria-pressed={documentType === item.key} className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${documentType === item.key ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--text-muted)]"}`} onClick={() => {
+          const next = new URLSearchParams(searchParams);
+          if (item.key === "all") next.delete("document_type"); else next.set("document_type", item.key);
+          next.delete("page");
+          setSearchParams(next);
+        }}>{item.label}</button>)}
       </div>
       {batchResult ? (
         <p role="status" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--text-muted)]">
@@ -501,6 +528,9 @@ export function InvoicesPage() {
             <EmptyState.Content>
               <Button variant="primary" onPress={() => navigate("/facturi/noi")}>
                 <Plus size={17} /> Emite factură
+              </Button>
+              <Button variant="outline" onPress={() => navigate("/facturi/noi?type=credit_note")}>
+                <Plus size={17} /> Creează notă de credit
               </Button>
             </EmptyState.Content>
           </EmptyState>
