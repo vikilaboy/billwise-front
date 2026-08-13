@@ -3,6 +3,7 @@ import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Spinner} from "@heroui/react";
 import {AlertTriangle, Building2, CheckCircle2, Search} from "lucide-react";
 import {useNavigate} from "react-router";
+import {ActionTooltip} from "../components/ActionTooltip";
 import {AppCheckbox, AppSelect} from "../components/FormControls";
 import {api, apiErrorMessage, listQuery} from "../lib/api";
 import {suggestAnafAddress} from "../lib/anafAddress";
@@ -464,14 +465,16 @@ export function CompanyOnboardingPage({mode = "first"}: {mode?: "first" | "addit
                 >
                   Schimbă CUI-ul
                 </Button>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  isPending={create.isPending}
-                  isDisabled={!form.confirmed}
-                >
-                  Salvează firma și continuă
-                </Button>
+                <ActionTooltip content={!form.confirmed ? "Bifează confirmarea datelor firmei și a adresei structurate." : "Salvează firma și continuă"} isDisabled={!form.confirmed}>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    isPending={create.isPending}
+                    isDisabled={!form.confirmed}
+                  >
+                    Salvează firma și continuă
+                  </Button>
+                </ActionTooltip>
               </div>
             </form>
           )}

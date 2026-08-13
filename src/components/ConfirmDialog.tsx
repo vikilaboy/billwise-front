@@ -1,6 +1,7 @@
 import {type MouseEvent, type ReactNode, useEffect, useId, useRef} from "react";
 import {createPortal} from "react-dom";
 import {Button, Spinner} from "@heroui/react";
+import {ActionTooltip} from "./ActionTooltip";
 
 type ConfirmDialogProps = {
   isOpen: boolean;
@@ -10,6 +11,7 @@ type ConfirmDialogProps = {
   tone?: "accent" | "success" | "warning" | "danger";
   isPending?: boolean;
   isConfirmDisabled?: boolean;
+  confirmDisabledReason?: string;
   children?: ReactNode;
   onOpenChange: (isOpen: boolean) => void;
   onConfirm: () => void;
@@ -23,6 +25,7 @@ export function ConfirmDialog({
   tone = "accent",
   isPending = false,
   isConfirmDisabled = false,
+  confirmDisabledReason,
   children,
   onOpenChange,
   onConfirm,
@@ -100,14 +103,16 @@ export function ConfirmDialog({
           >
             Renunță
           </button>
-          <Button
-            variant={tone === "danger" ? "danger" : "primary"}
-            isDisabled={isPending || isConfirmDisabled}
-            onPress={onConfirm}
-          >
-            {isPending ? <Spinner size="sm" /> : null}
-            {confirmLabel}
-          </Button>
+          <ActionTooltip content={isPending ? "Operația este în curs." : confirmDisabledReason ?? confirmLabel} isDisabled={isPending || isConfirmDisabled}>
+            <Button
+              variant={tone === "danger" ? "danger" : "primary"}
+              isDisabled={isPending || isConfirmDisabled}
+              onPress={onConfirm}
+            >
+              {isPending ? <Spinner size="sm" /> : null}
+              {confirmLabel}
+            </Button>
+          </ActionTooltip>
         </div>
       </div>
     </div>,

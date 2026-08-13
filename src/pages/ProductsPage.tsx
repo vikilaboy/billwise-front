@@ -2,6 +2,7 @@ import {useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner} from "@heroui/react";
 import {Package, Pencil, Plus, RotateCcw, Search, Trash2, X} from "lucide-react";
+import {ActionTooltip, requiredFieldsReason} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
@@ -161,7 +162,7 @@ function ProductModal({companyId, product, onClose, onSaved}: {companyId: string
           }} options={(vatProfiles.data?.data ?? []).filter((profile) => profile.is_active).map((profile) => ({id: profile.id, label: `${profile.name} · ${Number(profile.rate)}%`}))} /></Field>
           <AppCheckbox name="is_active" isSelected={form.is_active} onChange={(selected) => set("is_active", selected)}>Activ</AppCheckbox>
         </div>
-        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={!form.name.trim() || !form.vat_profile_id || save.isPending} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null} Salvează</Button></footer>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><ActionTooltip content={save.isPending ? "Salvarea este în curs." : requiredFieldsReason([{label: "denumire", missing: !form.name.trim()}, {label: "profil TVA", missing: !form.vat_profile_id}]) ?? "Salvează produsul sau serviciul"} isDisabled={!form.name.trim() || !form.vat_profile_id || save.isPending}><Button variant="primary" isDisabled={!form.name.trim() || !form.vat_profile_id || save.isPending} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null} Salvează</Button></ActionTooltip></footer>
       </div>
     </div>
   );

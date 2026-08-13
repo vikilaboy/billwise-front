@@ -3,6 +3,7 @@ import {useNavigate, useParams, useSearchParams} from "react-router";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner, TextArea} from "@heroui/react";
 import {Loader2, Plus, Send, Trash2} from "lucide-react";
+import {ActionTooltip, combineDisabledReasons, requiredFieldsReason} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {AppCheckbox, AppDatePicker, AppSelect} from "../components/FormControls";
 import {api, listQuery} from "../lib/api";
@@ -470,6 +471,27 @@ export function NewInvoicePage() {
   const creditContextValid = !isCreditNote || (Boolean(adjustmentDescription.trim()) && (hasPeriod || selectedReferenceIds.length > 0) && referencesValid && manualRonValid);
   const baseInvalid = pending || !company?.id || !customerId || rows.some((row) => !row.description.trim() || row.quantity <= 0 || row.unit_price < 0 || !row.vat_profile_id);
   const disabled = submissionDisabledState(baseInvalid, isCreditNote, creditContextValid, referencesValid);
+  const baseDisabledReason = combineDisabledReasons(
+    requiredFieldsReason([
+      {label: "firmă", missing: !company?.id},
+      {label: "client", missing: !customerId},
+      {label: "descrierea fiecărei linii", missing: rows.some((row) => !row.description.trim())},
+      {label: "profilul TVA pentru fiecare linie", missing: rows.some((row) => !row.vat_profile_id)},
+    ]),
+    rows.some((row) => row.quantity <= 0) && "Cantitatea fiecărei linii trebuie să fie mai mare decât zero.",
+    rows.some((row) => row.unit_price < 0) && "Prețul unitar nu poate fi negativ.",
+  );
+  const referencesDisabledReason = !referencesValid
+    ? "Repartizează integral valorile pe cote TVA între facturile de referință selectate."
+    : null;
+  const creditIssueDisabledReason = isCreditNote ? combineDisabledReasons(
+    requiredFieldsReason([{label: "descrierea ajustării", missing: !adjustmentDescription.trim()}]),
+    !hasPeriod && selectedReferenceIds.length === 0 && "Completează perioada de facturare sau selectează cel puțin o factură de referință.",
+    referencesDisabledReason,
+    !manualRonValid && "Completează și confirmă baza RON documentată pentru nota de credit în valută.",
+  ) : null;
+  const issueDisabledReason = pending ? "Salvarea este în curs." : combineDisabledReasons(baseDisabledReason, creditIssueDisabledReason);
+  const draftDisabledReason = pending ? "Salvarea este în curs." : combineDisabledReasons(baseDisabledReason, isCreditNote && referencesDisabledReason);
 
   return (
     <div className="flex flex-col gap-5">
@@ -688,16 +710,18 @@ export function NewInvoicePage() {
                         {money(lineNetCents(row), currency)}
                       </td>
                       <td className="py-2.5 pl-1 text-right align-middle">
-                        <Button
-                          isIconOnly
-                          variant="ghost"
-                          size="sm"
-                          aria-label="Șterge linia"
-                          isDisabled={rows.length === 1}
-                          onPress={() => removeRow(row.key)}
-                        >
-                          <Trash2 size={16} className="text-[var(--danger)]" />
-                        </Button>
+                        <ActionTooltip content={rows.length === 1 ? "Factura trebuie să conțină cel puțin o linie." : "Șterge linia"} isDisabled={rows.length === 1}>
+                          <Button
+                            isIconOnly
+                            variant="ghost"
+                            size="sm"
+                            aria-label="Șterge linia"
+                            isDisabled={rows.length === 1}
+                            onPress={() => removeRow(row.key)}
+                          >
+                            <Trash2 size={16} className="text-[var(--danger)]" />
+                          </Button>
+                        </ActionTooltip>
                       </td>
                     </tr>
                   ))}
@@ -775,22 +799,26 @@ export function NewInvoicePage() {
             </dl>
 
             <div className="mt-4 flex flex-col gap-2.5">
-              <Button
-                variant="primary"
-                fullWidth
-                isDisabled={disabled.issue}
-                onPress={() => submit(true)}
-              >
-                {pending ? <Spinner size="sm" /> : <Send size={16} />} {isCreditNote ? "Emite nota de credit" : "Emite factura"}
-              </Button>
-              <Button
-                variant="outline"
-                fullWidth
-                isDisabled={disabled.draft}
-                onPress={() => submit(false)}
-              >
-                {pending ? <Loader2 size={16} className="animate-spin" /> : null} Salvează ca ciornă
-              </Button>
+              <ActionTooltip content={issueDisabledReason ?? "Emite documentul fiscal"} isDisabled={disabled.issue} className="w-full">
+                <Button
+                  variant="primary"
+                  fullWidth
+                  isDisabled={disabled.issue}
+                  onPress={() => submit(true)}
+                >
+                  {pending ? <Spinner size="sm" /> : <Send size={16} />} {isCreditNote ? "Emite nota de credit" : "Emite factura"}
+                </Button>
+              </ActionTooltip>
+              <ActionTooltip content={draftDisabledReason ?? "Salvează documentul ca ciornă"} isDisabled={disabled.draft} className="w-full">
+                <Button
+                  variant="outline"
+                  fullWidth
+                  isDisabled={disabled.draft}
+                  onPress={() => submit(false)}
+                >
+                  {pending ? <Loader2 size={16} className="animate-spin" /> : null} Salvează ca ciornă
+                </Button>
+              </ActionTooltip>
             </div>
 
             <p className="mt-3 text-center text-[11px] text-[var(--text-faint)]">

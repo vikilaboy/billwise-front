@@ -5,6 +5,7 @@ import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@herou
 import {EmptyState} from "@heroui-pro/react/empty-state";
 import {Archive, Download, Eye, RotateCcw, Search, Shield, ShieldOff} from "lucide-react";
 import {useNavigate} from "react-router";
+import {ActionTooltip} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
@@ -118,10 +119,31 @@ export function FiscalVaultPage() {
     {id: "status", header: "Status", minWidth: 150, cell: (item) => { const status = VAULT_STATUS[item.status]; return <Chip size="sm" variant="soft" color={status.color}><Chip.Label>{status.label}</Chip.Label></Chip>; }},
     {id: "signature_status", header: "Sigiliu MF", minWidth: 180, cell: () => <Chip size="sm" variant="soft" color="warning"><Chip.Label>Păstrat, neverificat</Chip.Label></Chip>},
     {id: "size", header: "Mărime", align: "end", minWidth: 110, cell: (item) => `${integer(Math.ceil((item.original?.size_bytes ?? 0) / 1024))} KB`},
-    {id: "actions", header: "", align: "end", minWidth: 150, cell: (item) => <div className="flex justify-end gap-1"><Button isIconOnly size="sm" variant="ghost" aria-label={`Vezi detalii ${item.document_number ?? "document ANAF"}`} onPress={() => navigate(`/seif-fiscal/${item.id}`)}><Eye size={16}/></Button>{can("fiscal_vault.manage_retention") ? <Button isIconOnly size="sm" variant="ghost" aria-label={item.legal_hold_at ? "Elimină blocajul legal" : "Activează blocajul legal"} isDisabled={legalHold.isPending && legalHoldBelongsToCurrentCompany} onPress={() => {
-      if (item.legal_hold_at && !window.confirm("Elimini blocajul legal pentru acest document? Acțiunea va fi înregistrată în audit.")) return;
-      if (company) legalHold.mutate({companyId: company.id, item});
-    }}>{item.legal_hold_at ? <ShieldOff size={16}/> : <Shield size={16}/>}</Button> : null}{can("fiscal_vault.download") ? <Button isIconOnly size="sm" variant="ghost" aria-label={`Descarcă ${item.document_number ?? "documentul"}`} isDisabled={!item.original || (download.isPending && downloadBelongsToCurrentCompany)} onPress={() => company && download.mutate({companyId: company.id, item})}><Download size={16}/></Button> : null}</div>},
+    {id: "actions", header: "", align: "end", minWidth: 150, cell: (item) => {
+      const retentionPending = legalHold.isPending && legalHoldBelongsToCurrentCompany;
+      const downloadDisabled = !item.original || (download.isPending && downloadBelongsToCurrentCompany);
+      const retentionLabel = retentionPending
+        ? "Așteaptă finalizarea actualizării retenției."
+        : item.legal_hold_at ? "Elimină blocajul legal" : "Activează blocajul legal";
+      const downloadLabel = !item.original
+        ? "Originalul ANAF nu este disponibil pentru acest document."
+        : downloadDisabled ? "Așteaptă finalizarea descărcării curente." : "Descarcă originalul ANAF";
+
+      return <div className="flex justify-end gap-1">
+        <ActionTooltip content="Vezi detaliile documentului">
+          <Button isIconOnly size="sm" variant="ghost" aria-label={`Vezi detalii ${item.document_number ?? "document ANAF"}`} onPress={() => navigate(`/seif-fiscal/${item.id}`)}><Eye size={16}/></Button>
+        </ActionTooltip>
+        {can("fiscal_vault.manage_retention") ? <ActionTooltip content={retentionLabel} isDisabled={retentionPending}>
+          <Button isIconOnly size="sm" variant="ghost" aria-label={item.legal_hold_at ? "Elimină blocajul legal" : "Activează blocajul legal"} isDisabled={retentionPending} onPress={() => {
+            if (item.legal_hold_at && !window.confirm("Elimini blocajul legal pentru acest document? Acțiunea va fi înregistrată în audit.")) return;
+            if (company) legalHold.mutate({companyId: company.id, item});
+          }}>{item.legal_hold_at ? <ShieldOff size={16}/> : <Shield size={16}/>}</Button>
+        </ActionTooltip> : null}
+        {can("fiscal_vault.download") ? <ActionTooltip content={downloadLabel} isDisabled={downloadDisabled}>
+          <Button isIconOnly size="sm" variant="ghost" aria-label={`Descarcă ${item.document_number ?? "documentul"}`} isDisabled={downloadDisabled} onPress={() => company && download.mutate({companyId: company.id, item})}><Download size={16}/></Button>
+        </ActionTooltip> : null}
+      </div>;
+    }},
   ], [can, company, download, downloadBelongsToCurrentCompany, legalHold, legalHoldBelongsToCurrentCompany, navigate]);
   if (!can("fiscal_vault.view")) return <p className="text-[var(--danger)]">Nu ai permisiunea necesară pentru Seiful fiscal.</p>;
   return <div className="flex flex-col gap-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="text-sm font-semibold">Spațiu utilizat: {integer(Math.ceil((storage?.used_bytes ?? 0) / 1024 / 1024))} MB</div><div className="text-xs text-[var(--text-muted)]">Originalele ZIP sunt read-only, cu hash SHA-256 și retenție fiscală.</div></div><div className="flex flex-wrap gap-2"><label className="flex h-10 min-w-[240px] items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] px-3"><Search size={16}/><input className="w-full bg-transparent text-sm outline-none" placeholder="Caută numărul documentului…" value={grid.search} onChange={(event) => grid.setSearch(event.target.value)}/></label><Button size="sm" variant="outline" isDisabled={!grid.isDirty} onPress={grid.reset}><RotateCcw size={15}/> Resetează</Button></div></div>

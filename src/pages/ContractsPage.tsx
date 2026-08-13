@@ -2,6 +2,7 @@ import {useEffect, useMemo, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Spinner, TextArea, Tooltip} from "@heroui/react";
 import {Archive, ArchiveRestore, FileSignature, GitBranch, Pencil, Play, Plus, Search, Square} from "lucide-react";
+import {ActionTooltip, combineDisabledReasons, requiredFieldsReason} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {ConfirmDialog} from "../components/ConfirmDialog";
 import {AppDatePicker, AppSelect} from "../components/FormControls";
@@ -145,6 +146,14 @@ function ContractVersionEditor({companyId, companyIsVatPayer, contract, version,
     await api<ContractVersion>(`/companies/${companyId}/contracts/${contract.id}/versions/${version.id}`, {method: "PUT", body: JSON.stringify(payload)});
     return api<Contract>(`/companies/${companyId}/contracts/${contract.id}/versions/${version.id}/activate`, {method: "POST"});
   }, onSuccess: onSaved});
+  const versionRequiredReason = requiredFieldsReason([
+    {label: "profil TVA", missing: !form.vat_profile_id},
+    {label: "data intrării în vigoare", missing: !form.starts_on},
+    {label: "denumire poziție", missing: !form.line_name.trim()},
+  ]);
+  const saveDisabled = save.isPending || missingVatConfiguration;
+  const activateDisabled = save.isPending || activate.isPending || missingVatConfiguration || versionRequiredReason !== null;
+  const configurationReason = missingVatConfiguration ? "Configurează cel puțin un profil TVA activ în Setări." : null;
   return <><div className="grid gap-4 p-5 sm:grid-cols-2">
     <div className="rounded-xl bg-[var(--bg-muted)] p-3 text-sm sm:col-span-2"><b>Ciornă v{version.version}</b><span className="ml-2 text-[var(--text-muted)]">bazată pe v{contract.current_version?.version}</span></div>
     <Field label="Intră în vigoare la"><AppDatePicker name="effective_from" ariaLabel="Intră în vigoare la" value={form.starts_on} minValue={contract.starts_on} maxValue={contract.ends_on ?? undefined} onChange={(value) => set("starts_on", value)}/></Field>
@@ -156,7 +165,7 @@ function ContractVersionEditor({companyId, companyIsVatPayer, contract, version,
     <Field label="Descriere dinamică" className="sm:col-span-2"><TextArea value={form.description_template} onChange={(e) => set("description_template", e.target.value)}/></Field>
     <Field label="Profil TVA"><AppSelect ariaLabel="TVA" value={form.vat_profile_id} onChange={(value) => {if(value===NO_VAT_PROFILE){setForm((current)=>({...current,vat_profile_id:NO_VAT_PROFILE,vat_rate:"0.00",vat_category:"O",vat_exemption_code:null,vat_exemption_reason:"Neînregistrat în scopuri de TVA / Not registered for VAT"}));return;} const profile=activeVatProfiles.find((item)=>item.id===value); if(profile) setForm((current)=>({...current,vat_profile_id:profile.id,vat_rate:profile.rate,vat_category:profile.vat_category,vat_exemption_code:profile.vat_exemption_code,vat_exemption_reason:profile.vat_exemption_reason}));}} options={[...(!companyIsVatPayer ? [{id:NO_VAT_PROFILE,label:"Fără TVA · 0%"}] : []),...activeVatProfiles.map((item)=>({id:item.id,label:`${item.name} · ${Number(item.rate)}%`}))]}/></Field>
     {missingVatConfiguration ? <div className="rounded-xl bg-[var(--warning-soft)] p-3 text-sm text-[var(--warning)] sm:col-span-2">Firma este plătitoare de TVA, dar nu are niciun profil TVA activ. Configurează profilurile în Setări înainte de salvare.</div> : null}
-  </div><footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" isDisabled={save.isPending || missingVatConfiguration} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm"/> : null} Salvează ciorna</Button><Button variant="primary" isDisabled={save.isPending || activate.isPending || missingVatConfiguration || !form.vat_profile_id || !form.starts_on || !form.line_name.trim()} onPress={() => setConfirmActivation(true)}>{activate.isPending ? <Spinner size="sm"/> : <Play size={14}/>} Activează v{version.version}</Button></footer><ConfirmDialog isOpen={confirmActivation} title={`Activezi versiunea v${version.version}?`} description={`Versiunea v${version.version} va deveni sursa contractuală activă de la ${form.starts_on}. Versiunea curentă rămâne în istoric și această activare nu poate fi anulată.`} confirmLabel="Activează versiunea" tone="warning" isPending={activate.isPending} onOpenChange={setConfirmActivation} onConfirm={() => activate.mutate()}/></>;
+  </div><footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><ActionTooltip content={save.isPending ? "Salvarea este în curs." : configurationReason ?? "Salvează ciorna versiunii"} isDisabled={saveDisabled}><Button variant="outline" isDisabled={saveDisabled} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm"/> : null} Salvează ciorna</Button></ActionTooltip><ActionTooltip content={activate.isPending || save.isPending ? "Salvarea sau activarea este în curs." : combineDisabledReasons(configurationReason, versionRequiredReason) ?? `Activează versiunea v${version.version}`} isDisabled={activateDisabled}><Button variant="primary" isDisabled={activateDisabled} onPress={() => setConfirmActivation(true)}>{activate.isPending ? <Spinner size="sm"/> : <Play size={14}/>} Activează v{version.version}</Button></ActionTooltip></footer><ConfirmDialog isOpen={confirmActivation} title={`Activezi versiunea v${version.version}?`} description={`Versiunea v${version.version} va deveni sursa contractuală activă de la ${form.starts_on}. Versiunea curentă rămâne în istoric și această activare nu poate fi anulată.`} confirmLabel="Activează versiunea" tone="warning" isPending={activate.isPending} onOpenChange={setConfirmActivation} onConfirm={() => activate.mutate()}/></>;
 }
 
 function ContractModal({companyId, companyIsVatPayer, contract, onClose, onSaved}: {companyId: string; companyIsVatPayer: boolean; contract: Contract | null; onClose: () => void; onSaved: () => void}) {
@@ -192,6 +201,20 @@ function ContractModal({companyId, companyIsVatPayer, contract, onClose, onSaved
   const save = useMutation({mutationFn: () => api<Contract>(`/companies/${companyId}/contracts${contract ? `/${contract.id}` : ""}`, {method: contract ? "PUT" : "POST", body: JSON.stringify(payload)}), onSuccess: onSaved});
   const preview = useMutation({mutationFn: () => api<{working_days: {working_days: number}; lines: Array<{quantity: string; description: string}>; totals: {total_cents: number}}>(`/companies/${companyId}/contracts/${contract!.id}/versions/${contract!.current_version!.id}/preview`, {method: "POST", body: JSON.stringify({period_start: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2,"0")}-01`, period_end: today()})})});
   const editable = !contract || contract.status === "draft";
+  const contractRequiredReason = requiredFieldsReason([
+    {label: "client", missing: !form.customer_id},
+    {label: "număr", missing: !form.number.trim()},
+    {label: "denumire", missing: !form.name.trim()},
+    {label: "data semnării", missing: !form.signed_on},
+    {label: "data începerii", missing: !form.starts_on},
+    {label: "monedă", missing: !form.currency},
+    {label: "denumire poziție", missing: !form.line_name.trim()},
+    {label: "profil TVA", missing: !form.vat_profile_id},
+  ]);
+  const contractSaveDisabled = save.isPending || missingVatConfiguration || contractRequiredReason !== null;
+  const contractSaveReason = save.isPending
+    ? "Salvarea este în curs."
+    : combineDisabledReasons(missingVatConfiguration && "Configurează cel puțin un profil TVA activ în Setări.", contractRequiredReason);
   return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-3xl rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]"><header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">{contract ? `${contract.number} · ${contract.name}` : "Contract nou"}</h2><p className="text-xs text-[var(--text-muted)]">Termenii activi sunt versionați; recurența păstrează versiunea exactă.</p></div><Button isIconOnly variant="ghost" onPress={onClose}>×</Button></header>
     <div className="grid gap-4 p-5 sm:grid-cols-2">
       <Field label="Client"><AppSelect ariaLabel="Client" value={form.customer_id} isDisabled={!editable} onChange={(value) => set("customer_id", value)} options={(customers.data?.data ?? []).map((item) => ({id: item.id, label: item.name}))}/></Field>
@@ -205,7 +228,7 @@ function ContractModal({companyId, companyIsVatPayer, contract, onClose, onSaved
       <Field label="Profil TVA"><AppSelect ariaLabel="TVA" value={form.vat_profile_id} isDisabled={!editable} onChange={(value) => {if(value===NO_VAT_PROFILE){setForm((current)=>({...current,vat_profile_id:NO_VAT_PROFILE,vat_rate:"0.00",vat_category:"O",vat_exemption_code:null,vat_exemption_reason:"Neînregistrat în scopuri de TVA / Not registered for VAT"}));return;} const profile=activeVatProfiles.find((item)=>item.id===value); if(profile) setForm((current)=>({...current,vat_profile_id:profile.id,vat_rate:profile.rate,vat_category:profile.vat_category,vat_exemption_code:profile.vat_exemption_code,vat_exemption_reason:profile.vat_exemption_reason}));}} options={[...(!companyIsVatPayer ? [{id:NO_VAT_PROFILE,label:"Fără TVA · 0%"}] : []),...activeVatProfiles.map((item)=>({id:item.id,label:`${item.name} · ${Number(item.rate)}%`}))]}/></Field>
       {missingVatConfiguration ? <div className="rounded-xl bg-[var(--warning-soft)] p-3 text-sm text-[var(--warning)] sm:col-span-2">Firma este plătitoare de TVA, dar nu are niciun profil TVA activ. Configurează profilurile în Setări înainte de salvare.</div> : null}
       {preview.data ? <div className="rounded-xl bg-[var(--bg-muted)] p-4 text-sm sm:col-span-2"><b>Calcul curent</b><div>{preview.data.data.working_days.working_days} zile lucrătoare · {preview.data.data.lines[0]?.quantity} ore/unități · {money(preview.data.data.totals.total_cents, form.currency)}</div><p className="mt-1 text-xs">{preview.data.data.lines[0]?.description}</p></div> : null}
-    </div>{save.isError ? <p role="alert" className="mx-5 mb-4 rounded-xl bg-[var(--danger-soft)] p-3 text-sm text-[var(--danger)]">{apiErrorMessage(save.error, "Contractul nu a putut fi salvat.")}</p> : null}<footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Închide</Button>{contract?.status === "active" ? <Button variant="outline" isDisabled={preview.isPending} onPress={() => preview.mutate()}>Simulează luna curentă</Button> : null}{editable ? <Button variant="primary" isDisabled={save.isPending || missingVatConfiguration || !form.vat_profile_id || !form.currency || !form.customer_id || !form.number.trim() || !form.name.trim() || !form.signed_on || !form.starts_on || !form.line_name.trim()} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm"/> : null} Salvează ciorna</Button> : null}</footer>
+    </div>{save.isError ? <p role="alert" className="mx-5 mb-4 rounded-xl bg-[var(--danger-soft)] p-3 text-sm text-[var(--danger)]">{apiErrorMessage(save.error, "Contractul nu a putut fi salvat.")}</p> : null}<footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Închide</Button>{contract?.status === "active" ? <Button variant="outline" isDisabled={preview.isPending} onPress={() => preview.mutate()}>Simulează luna curentă</Button> : null}{editable ? <ActionTooltip content={contractSaveReason ?? "Salvează ciorna contractului"} isDisabled={contractSaveDisabled}><Button variant="primary" isDisabled={contractSaveDisabled} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm"/> : null} Salvează ciorna</Button></ActionTooltip> : null}</footer>
   </div></div>;
 }
 

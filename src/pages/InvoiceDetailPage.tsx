@@ -5,6 +5,7 @@ import {Button, Card, Chip, Dropdown, Label, Spinner, Tooltip} from "@heroui/rea
 import {Timeline} from "@heroui-pro/react/timeline";
 import type {TimelineStatus} from "@heroui-pro/react/timeline";
 import {Banknote, Ban, Check, ChevronLeft, Copy, Download, FileCode2, Mail, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X} from "lucide-react";
+import {ActionTooltip, combineDisabledReasons, requiredFieldsReason} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {ConfirmDialog} from "../components/ConfirmDialog";
 import {AppDatePicker, AppSelect} from "../components/FormControls";
@@ -880,6 +881,7 @@ export function InvoiceDetailPage() {
           || retryDelivery.isPending
         }
         isConfirmDisabled={confirmation?.kind === "cancel" && !cancellationReason.trim()}
+        confirmDisabledReason={confirmation?.kind === "cancel" ? "Completează câmpul obligatoriu: motivul anulării." : undefined}
         onOpenChange={(isOpen) => {
           if (!isOpen) {
             setConfirmation(null);
@@ -959,6 +961,15 @@ function CreditUsageModal({companyId, source, mode, onClose, onSaved}: {
     onSuccess: onSaved,
   });
   const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
+  const creditUsageReason = save.isPending ? "Salvarea este în curs." : combineDisabledReasons(
+    requiredFieldsReason([
+      {label: "data operației", missing: !occurredAt},
+      {label: "factura țintă", missing: mode === "allocation" && !targetId},
+    ]),
+    amountCents < 1 && "Suma trebuie să fie mai mare decât zero.",
+    amountCents > maximumCents && `Suma nu poate depăși disponibilul de ${money(maximumCents, source.currency)}.`,
+  );
+  const creditUsageDisabled = save.isPending || creditUsageReason !== null;
 
   return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true" aria-label={mode === "allocation" ? "Alocă credit" : "Înregistrează rambursare"}>
     <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
@@ -971,7 +982,7 @@ function CreditUsageModal({companyId, source, mode, onClose, onSaved}: {
         <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)]">Referință<input name="reference" className={input} value={reference} onChange={(event) => setReference(event.target.value)} /></label>
         <label className="flex flex-col gap-1.5 text-xs font-semibold text-[var(--text-muted)] sm:col-span-2">Notițe<textarea name="notes" className="min-h-20 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
       </div>
-      <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={save.isPending || amountCents < 1 || amountCents > maximumCents || !occurredAt || (mode === "allocation" && !targetId)} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null}{mode === "allocation" ? "Alocă" : "Înregistrează rambursarea"}</Button></footer>
+      <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><ActionTooltip content={creditUsageReason ?? (mode === "allocation" ? "Alocă creditul" : "Înregistrează rambursarea")} isDisabled={creditUsageDisabled}><Button variant="primary" isDisabled={creditUsageDisabled} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null}{mode === "allocation" ? "Alocă" : "Înregistrează rambursarea"}</Button></ActionTooltip></footer>
     </div>
   </div>;
 }
@@ -1001,6 +1012,11 @@ function CorrectionEditModal({companyId, invoice, originalId, onClose, onSaved}:
     onSuccess: onSaved,
   });
   const originalLines = original.data?.data.lines ?? [];
+  const correctionEditReason = save.isPending ? "Salvarea este în curs." : combineDisabledReasons(
+    requiredFieldsReason([{label: "explicație", missing: !description.trim()}]),
+    !Object.values(quantities).some((value) => Number(value) > 0) && "Introdu o cantitate mai mare decât zero pentru cel puțin o linie.",
+  );
+  const correctionEditDisabled = save.isPending || correctionEditReason !== null;
   return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="Editează storno">
     <div className="w-full max-w-xl rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
       <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">Editează ciorna storno</h2><p className="mt-1 text-xs text-[var(--text-muted)]">Clientul, moneda, TVA-ul și prețurile rămân cele din factura originală.</p></div><Button isIconOnly variant="ghost" onPress={onClose}><X size={17} /></Button></header>
@@ -1010,7 +1026,7 @@ function CorrectionEditModal({companyId, invoice, originalId, onClose, onSaved}:
         <label className="text-xs font-semibold text-[var(--text-muted)]">Explicație<textarea className="mt-1.5 min-h-24 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={description} onChange={(event) => setDescription(event.target.value)} /></label>
         <div><div className="text-xs font-semibold text-[var(--text-muted)]">Cantități corectate</div><div className="mt-2 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">{original.isLoading ? <div className="p-4"><Spinner size="sm" /></div> : originalLines.map((line) => <label key={line.id} className="flex items-center gap-3 p-3 text-sm"><span className="min-w-0 flex-1 truncate">{line.description}</span><input className="h-9 w-24 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-2" type="number" min="0" max={Number(line.quantity)} step="0.01" value={quantities[line.id] ?? ""} onChange={(event) => setQuantities((current) => ({...current, [line.id]: event.target.value}))} /></label>)}</div></div>
       </div>
-      <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={save.isPending || !description.trim() || !Object.values(quantities).some((value) => Number(value) > 0)} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : <Pencil size={15} />} Salvează</Button></footer>
+      <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><ActionTooltip content={correctionEditReason ?? "Salvează ciorna storno"} isDisabled={correctionEditDisabled}><Button variant="primary" isDisabled={correctionEditDisabled} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : <Pencil size={15} />} Salvează</Button></ActionTooltip></footer>
     </div>
   </div>;
 }
@@ -1040,6 +1056,12 @@ function CorrectionModal({companyId, invoice, onClose, onCreated}: {
     }),
     onSuccess: ({data}) => onCreated(data),
   });
+  const correctionReason = create.isPending ? "Crearea este în curs." : combineDisabledReasons(
+    requiredFieldsReason([{label: "motiv", missing: !reason.trim()}]),
+    mode === "partial" && !Object.values(quantities).some((value) => Number(value) > 0)
+      && "Introdu o cantitate mai mare decât zero pentru cel puțin o linie.",
+  );
+  const correctionDisabled = create.isPending || correctionReason !== null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="Creează factură de corecție">
       <div className="w-full max-w-xl rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
@@ -1066,9 +1088,9 @@ function CorrectionModal({companyId, invoice, onClose, onCreated}: {
           ) : null}
           <label className="text-xs font-semibold text-[var(--text-muted)]">Motiv<textarea name="reason" className="mt-1.5 min-h-24 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
         </div>
-        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={create.isPending || !reason.trim() || (mode === "partial" && !Object.values(quantities).some((value) => Number(value) > 0))} onPress={() => create.mutate()}>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><ActionTooltip content={correctionReason ?? "Creează ciorna de corecție"} isDisabled={correctionDisabled}><Button variant="primary" isDisabled={correctionDisabled} onPress={() => create.mutate()}>
           {create.isPending ? <Spinner size="sm" /> : <RotateCcw size={15} />} Creează ciorna
-        </Button></footer>
+        </Button></ActionTooltip></footer>
       </div>
     </div>
   );
@@ -1100,6 +1122,11 @@ function EmailDeliveryModal({companyId, invoice, onClose, onSaved}: {
     onSuccess: onSaved,
   });
   const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
+  const emailReason = send.isPending ? "Trimiterea este în curs." : requiredFieldsReason([
+    {label: "destinatar", missing: !recipient.trim()},
+    {label: "subiect", missing: !subject.trim()},
+  ]);
+  const emailDisabled = send.isPending || emailReason !== null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="Trimite factura pe email">
       <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
@@ -1110,9 +1137,9 @@ function EmailDeliveryModal({companyId, invoice, onClose, onSaved}: {
           <label className="text-xs font-semibold text-[var(--text-muted)]">Subiect<input name="subject" className={`${input} mt-1.5`} value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
           <label className="text-xs font-semibold text-[var(--text-muted)]">Mesaj suplimentar (opțional)<textarea name="message" className="mt-1.5 min-h-28 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={message} onChange={(event) => setMessage(event.target.value)} /></label>
         </div>
-        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="primary" isDisabled={send.isPending || !recipient.trim() || !subject.trim()} onPress={() => send.mutate()}>
+        <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><ActionTooltip content={emailReason ?? "Trimite factura pe email"} isDisabled={emailDisabled}><Button variant="primary" isDisabled={emailDisabled} onPress={() => send.mutate()}>
           {send.isPending ? <Spinner size="sm" /> : <Mail size={15} />} Trimite explicit
-        </Button></footer>
+        </Button></ActionTooltip></footer>
       </div>
     </div>
   );
@@ -1159,6 +1186,11 @@ function PaymentModal({companyId, invoice, payment, onClose, onSaved}: {
     onSuccess: onSaved,
   });
   const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
+  const paymentReason = save.isPending ? "Salvarea este în curs." : combineDisabledReasons(
+    requiredFieldsReason([{label: "data încasării", missing: !paidAt}]),
+    Number(amount) <= 0 && "Suma trebuie să fie mai mare decât zero.",
+  );
+  const paymentDisabled = save.isPending || paymentReason !== null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-label={payment ? "Editează încasarea" : "Încasare nouă"}>
@@ -1186,9 +1218,11 @@ function PaymentModal({companyId, invoice, payment, onClose, onSaved}: {
         </div>
         <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4">
           <Button variant="outline" onPress={onClose}>Anulează</Button>
-          <Button variant="primary" isDisabled={save.isPending || Number(amount) <= 0 || !paidAt} onPress={() => save.mutate()}>
-            {save.isPending ? <Spinner size="sm" /> : null} Salvează
-          </Button>
+          <ActionTooltip content={paymentReason ?? "Salvează încasarea"} isDisabled={paymentDisabled}>
+            <Button variant="primary" isDisabled={paymentDisabled} onPress={() => save.mutate()}>
+              {save.isPending ? <Spinner size="sm" /> : null} Salvează
+            </Button>
+          </ActionTooltip>
         </footer>
       </div>
     </div>

@@ -4,6 +4,7 @@ import {Button, Chip, Input, Spinner, Switch} from "@heroui/react";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
 import {Hash, Pencil, Plus, RotateCcw, Search, Trash2, X} from "lucide-react";
+import {ActionTooltip} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
@@ -433,13 +434,15 @@ function SeriesModal({
           <Button variant="outline" onPress={onClose}>
             Anulează
           </Button>
-          <Button
-            variant="primary"
-            onPress={submit}
-            isDisabled={mutation.isPending || !form.name.trim()}
-          >
-            {mutation.isPending ? "Se salvează…" : "Salvează"}
-          </Button>
+          <ActionTooltip content={mutation.isPending ? "Salvarea este în curs." : !form.name.trim() ? "Completează câmpul obligatoriu: denumire." : "Salvează seria"} isDisabled={mutation.isPending || !form.name.trim()}>
+            <Button
+              variant="primary"
+              onPress={submit}
+              isDisabled={mutation.isPending || !form.name.trim()}
+            >
+              {mutation.isPending ? "Se salvează…" : "Salvează"}
+            </Button>
+          </ActionTooltip>
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import {Avatar, Button, Input, Spinner} from "@heroui/react";
 import {DataGrid, type DataGridColumn, type DataGridSortDescriptor} from "@heroui-pro/react/data-grid";
 import {EmptyState} from "@heroui-pro/react/empty-state";
 import {Building2, Download, Pencil, Plus, RotateCcw, Search, Trash2, X} from "lucide-react";
+import {ActionTooltip} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
@@ -622,10 +623,12 @@ function AddCustomerModal({
           <Button variant="outline" onPress={onClose}>
             Anulează
           </Button>
-          <Button variant="primary" onPress={submit} isDisabled={create.isPending || !form.name.trim()}>
-            {create.isPending ? <Spinner size="sm" /> : null}
-            Salvează clientul
-          </Button>
+          <ActionTooltip content={create.isPending ? "Salvarea clientului este în curs." : !form.name.trim() ? "Completează câmpul obligatoriu: denumire." : "Salvează clientul"} isDisabled={create.isPending || !form.name.trim()}>
+            <Button variant="primary" onPress={submit} isDisabled={create.isPending || !form.name.trim()}>
+              {create.isPending ? <Spinner size="sm" /> : null}
+              Salvează clientul
+            </Button>
+          </ActionTooltip>
         </div>
       </div>
     </div>

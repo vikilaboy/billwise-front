@@ -2,6 +2,7 @@ import {useMutation, useQuery} from "@tanstack/react-query";
 import {Button, Chip, Spinner} from "@heroui/react";
 import {ArrowLeft, Download} from "lucide-react";
 import {useNavigate, useParams} from "react-router";
+import {ActionTooltip} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {api, apiErrorMessage, downloadApiFile} from "../lib/api";
 import {date, integer} from "../lib/format";
@@ -50,10 +51,14 @@ export function FiscalVaultDetailPage() {
   if (!item.data) return <p className="text-[var(--danger)]">{apiErrorMessage(item.error, "Documentul fiscal nu a putut fi încărcat.")}</p>;
 
   const document = item.data.data;
+  const downloadDisabled = !document.original || (download.isPending && !downloadBelongsToCurrentDocument);
+  const downloadReason = !document.original
+    ? "Originalul ANAF nu este disponibil pentru acest document."
+    : downloadDisabled ? "Așteaptă finalizarea descărcării curente." : "Descarcă originalul ANAF";
   return <div className="flex flex-col gap-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <Button variant="ghost" onPress={() => navigate("/seif-fiscal")}><ArrowLeft size={16}/> Înapoi la Seif</Button>
-      {can("fiscal_vault.download") ? <Button variant="primary" isDisabled={!document.original || (download.isPending && !downloadBelongsToCurrentDocument)} isPending={download.isPending && downloadBelongsToCurrentDocument} onPress={() => company && download.mutate({companyId: company.id, document})}><Download size={16}/> Descarcă originalul ANAF</Button> : null}
+      {can("fiscal_vault.download") ? <ActionTooltip content={downloadReason} isDisabled={downloadDisabled}><Button variant="primary" isDisabled={downloadDisabled} isPending={download.isPending && downloadBelongsToCurrentDocument} onPress={() => company && download.mutate({companyId: company.id, document})}><Download size={16}/> Descarcă originalul ANAF</Button></ActionTooltip> : null}
     </div>
     {download.isError && downloadBelongsToCurrentDocument ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(download.error, "Documentul nu a putut fi descărcat.")}</p> : null}
     <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow)]">

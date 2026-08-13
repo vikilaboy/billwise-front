@@ -1,6 +1,7 @@
 import {type FormEvent, type MouseEvent, useEffect, useId, useRef, useState} from "react";
 import {createPortal} from "react-dom";
 import {Button, Spinner} from "@heroui/react";
+import {ActionTooltip} from "./ActionTooltip";
 import {api, apiErrorMessage, setCsrfToken} from "../lib/api";
 import {
   STEP_UP_REQUIRED_EVENT,
@@ -155,9 +156,11 @@ export function StepUpDialog() {
               {pending ? <Spinner size="sm" /> : null} Repetă acțiunea
             </Button>
           ) : (
-            <Button type="submit" form="step-up-form" variant="primary" isDisabled={pending || !password}>
-              {pending ? <Spinner size="sm" /> : null} Reconfirmă
-            </Button>
+            <ActionTooltip content={pending ? "Verificarea este în curs." : !password ? "Completează câmpul obligatoriu: parola curentă." : "Reconfirmă identitatea"} isDisabled={pending || !password}>
+              <Button type="submit" form="step-up-form" variant="primary" isDisabled={pending || !password}>
+                {pending ? <Spinner size="sm" /> : null} Reconfirmă
+              </Button>
+            </ActionTooltip>
           )}
         </div>
       </div>

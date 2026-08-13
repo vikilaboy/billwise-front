@@ -3,6 +3,7 @@ import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Input, Modal, Pagination, Spinner, Switch} from "@heroui/react";
 import {useNavigate, useSearchParams} from "react-router";
 import {BadgePercent, Building2, Check, CircleAlert, Clock3, Coins, Globe, History, Landmark, Link2, Link2Off, MapPin, RefreshCw, Trash2} from "lucide-react";
+import {ActionTooltip, requiredFieldsReason} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {AppCheckbox, AppDatePicker} from "../components/FormControls";
 import {api} from "../lib/api";
@@ -619,14 +620,16 @@ export function SettingsPage() {
         </div>
 
         <div className="mt-5 flex items-center gap-3 border-t border-[var(--border)] pt-4">
-          <Button
-            variant="primary"
-            onPress={handleSave}
-            isDisabled={saveMutation.isPending || form.legal_name.trim() === ""}
-          >
-            {saveMutation.isPending ? <Spinner size="sm" /> : null}
-            Salvează
-          </Button>
+          <ActionTooltip content={saveMutation.isPending ? "Salvarea este în curs." : form.legal_name.trim() === "" ? "Completează câmpul obligatoriu: denumire legală." : "Salvează profilul firmei"} isDisabled={saveMutation.isPending || form.legal_name.trim() === ""}>
+            <Button
+              variant="primary"
+              onPress={handleSave}
+              isDisabled={saveMutation.isPending || form.legal_name.trim() === ""}
+            >
+              {saveMutation.isPending ? <Spinner size="sm" /> : null}
+              Salvează
+            </Button>
+          </ActionTooltip>
           {justSaved && !saveMutation.isPending ? (
             <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[var(--accent)]">
               <Check size={16} /> Salvat
@@ -884,9 +887,11 @@ export function SettingsPage() {
 
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-xs text-[var(--text-muted)]">ANAF permite preluarea documentelor disponibile din ultimele maximum 60 de zile.</p>
-                    <Button variant="primary" size="sm" isDisabled={spvSettingsMutation.isPending || !inboxSyncFrom || !outboxSyncFrom} onPress={() => spvSettingsMutation.mutate()}>
-                      {spvSettingsMutation.isPending ? <Spinner size="sm" /> : null} Salvează setările e-Factura
-                    </Button>
+                    <ActionTooltip content={spvSettingsMutation.isPending ? "Salvarea setărilor este în curs." : requiredFieldsReason([{label: "data de început pentru facturile primite", missing: !inboxSyncFrom}, {label: "data de început pentru facturile proprii", missing: !outboxSyncFrom}]) ?? "Salvează setările e-Factura"} isDisabled={spvSettingsMutation.isPending || !inboxSyncFrom || !outboxSyncFrom}>
+                      <Button variant="primary" size="sm" isDisabled={spvSettingsMutation.isPending || !inboxSyncFrom || !outboxSyncFrom} onPress={() => spvSettingsMutation.mutate()}>
+                        {spvSettingsMutation.isPending ? <Spinner size="sm" /> : null} Salvează setările e-Factura
+                      </Button>
+                    </ActionTooltip>
                   </div>
                 </div>
               </div>
@@ -1092,7 +1097,9 @@ export function SettingsPage() {
         <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_100px_auto]">
           <Input name="name" aria-label="Denumire profil TVA" placeholder="TVA standard" value={newVatName} onChange={(event) => setNewVatName(event.target.value)} />
           <Input name="rate" aria-label="Cotă TVA" type="number" min="0" max="100" value={newVatRate} onChange={(event) => setNewVatRate(event.target.value)} />
-          <Button variant="primary" isDisabled={!newVatName.trim() || vatProfileMutation.isPending} onPress={() => vatProfileMutation.mutate({create: true})}>Adaugă</Button>
+          <ActionTooltip content={vatProfileMutation.isPending ? "Salvarea profilului TVA este în curs." : !newVatName.trim() ? "Completează câmpul obligatoriu: denumire profil TVA." : "Adaugă profilul TVA"} isDisabled={!newVatName.trim() || vatProfileMutation.isPending}>
+            <Button variant="primary" isDisabled={!newVatName.trim() || vatProfileMutation.isPending} onPress={() => vatProfileMutation.mutate({create: true})}>Adaugă</Button>
+          </ActionTooltip>
         </div>
         {vatProfilesQuery.isLoading ? <Spinner size="sm" /> : (
           <div className="divide-y divide-[var(--border)]">

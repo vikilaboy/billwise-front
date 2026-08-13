@@ -4,6 +4,7 @@ import {Button, Calendar, DateField, DatePicker, Label, ListBox, Select, Spinner
 import {parseDate} from "@internationalized/date";
 import {Pause, Pencil, Play, Plus, Repeat, Trash2, X} from "lucide-react";
 import {useNavigate, useSearchParams} from "react-router";
+import {ActionTooltip, combineDisabledReasons, requiredFieldsReason} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {DataTablePagination} from "../components/DataTablePagination";
 import {AppCheckbox, AppSelect} from "../components/FormControls";
@@ -310,6 +311,30 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
     }));
   };
   const input = "h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-sm";
+  const recurringRequiredReason = requiredFieldsReason([
+    {label: "denumire", missing: !form.name.trim()},
+    {label: "client", missing: !form.customer_id},
+    {label: "serie de facturare", missing: !form.invoice_series_id},
+    {label: "contract", missing: form.billing_source === "contract" && !form.contract_id},
+    {label: "cel puțin o linie contractuală", missing: form.billing_source === "contract" && form.contract_line_ids.length === 0},
+    {label: "descrierea fiecărei linii", missing: form.billing_source !== "contract" && form.lines.some((line) => !line.description_template.trim())},
+    {label: "profilul TVA pentru fiecare linie", missing: form.billing_source !== "contract" && form.lines.some((line) => !line.vat_option_id)},
+  ]);
+  const cadenceReason = form.cadence === "custom_week" && form.weekdays.length === 0
+    ? "Alege cel puțin o zi a săptămânii."
+    : form.cadence === "custom_month" && form.month_days.length === 0
+      ? "Alege cel puțin o zi a lunii."
+      : null;
+  const lineQuantityReason = form.billing_source !== "contract" && form.lines.some((line) => Number(line.quantity) <= 0)
+    ? "Cantitatea fiecărei linii trebuie să fie mai mare decât zero."
+    : null;
+  const previewReason = previewedPayload !== JSON.stringify(payload())
+    ? "Previzualizează configurația curentă înainte de salvare."
+    : null;
+  const recurringDisabledReason = save.isPending
+    ? "Salvarea este în curs."
+    : combineDisabledReasons(recurringRequiredReason, cadenceReason, lineQuantityReason, previewReason);
+  const recurringSaveDisabled = save.isPending || recurringDisabledReason !== null;
   return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true">
     <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
       <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">{template?.is_locked ? "Versiune nouă a șablonului" : template ? "Editează șablonul" : "Șablon recurent nou"}</h2><p className="mt-1 text-xs text-[var(--text-muted)]">{template?.is_locked ? "Versiunea folosită la facturile emise rămâne neschimbată." : "Următoarea generare va crea numai o ciornă."}</p></div><Button isIconOnly variant="ghost" onPress={onClose}><X size={17} /></Button></header>
@@ -366,7 +391,7 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
           <div className="grid gap-3">
             {form.lines.map((line, index) => (
               <div key={index} className="grid gap-4 rounded-xl border border-[var(--border)] p-4">
-                <div className="flex items-center justify-between"><b className="text-sm">Linia {index + 1}</b><Button isIconOnly size="sm" variant="ghost" aria-label={`Șterge linia ${index + 1}`} isDisabled={form.lines.length === 1} onPress={() => set("lines", form.lines.filter((_, lineIndex) => lineIndex !== index))}><Trash2 size={15} /></Button></div>
+                <div className="flex items-center justify-between"><b className="text-sm">Linia {index + 1}</b><ActionTooltip content={form.lines.length === 1 ? "Șablonul trebuie să conțină cel puțin o linie." : `Șterge linia ${index + 1}`} isDisabled={form.lines.length === 1}><Button isIconOnly size="sm" variant="ghost" aria-label={`Șterge linia ${index + 1}`} isDisabled={form.lines.length === 1} onPress={() => set("lines", form.lines.filter((_, lineIndex) => lineIndex !== index))}><Trash2 size={15} /></Button></ActionTooltip></div>
                 <DescriptionTemplateEditor name={`lines.${index}.description_template`} value={line.description_template} onChange={(value) => setLine(index, "description_template", value)} />
                 <div className="grid gap-3 sm:grid-cols-3">
                   <Field label="Cantitate"><input name={`lines.${index}.quantity`} type="number" min="0.01" step="0.01" className={input} value={line.quantity} onChange={(event) => setLine(index, "quantity", event.target.value)} /></Field>
@@ -393,7 +418,7 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
           if (window.confirm(`Recuperezi perioada omisă din ${recurringDate(run.scheduled_for, template.timezone)}? Se va genera numai o ciornă.`)) recover.mutate(run.id);
         }}>Recuperează</Button> : null}</div>)}</div> : null}
       </div>
-      <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="outline" isDisabled={preview.isPending} onPress={() => preview.mutate()}>{preview.isPending ? <Spinner size="sm" /> : null} Previzualizează</Button><Button variant="primary" isDisabled={save.isPending || previewedPayload !== JSON.stringify(payload()) || !form.name.trim() || !form.customer_id || !form.invoice_series_id || (form.cadence === "custom_week" && form.weekdays.length === 0) || (form.cadence === "custom_month" && form.month_days.length === 0) || (form.billing_source === "contract" ? !form.contract_id || form.contract_line_ids.length === 0 : form.lines.some((line) => !line.description_template.trim() || !line.vat_option_id || Number(line.quantity) <= 0))} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null} {template?.is_locked ? "Creează versiunea" : "Salvează"}</Button></footer>
+      <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="outline" isDisabled={preview.isPending} onPress={() => preview.mutate()}>{preview.isPending ? <Spinner size="sm" /> : null} Previzualizează</Button><ActionTooltip content={recurringDisabledReason ?? (template?.is_locked ? "Creează versiunea" : "Salvează șablonul")} isDisabled={recurringSaveDisabled}><Button variant="primary" isDisabled={recurringSaveDisabled} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null} {template?.is_locked ? "Creează versiunea" : "Salvează"}</Button></ActionTooltip></footer>
     </div>
   </div>;
 }
