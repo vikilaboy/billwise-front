@@ -29,6 +29,14 @@ export function isCurrentVaultDownload(
     && variables.document.id === vaultItemId;
 }
 
+export function isVaultDownloadDisabled(
+  hasOriginal: boolean,
+  isPending: boolean,
+  belongsToCurrentDocument: boolean,
+): boolean {
+  return !hasOriginal || (isPending && belongsToCurrentDocument);
+}
+
 export function FiscalVaultDetailPage() {
   const {company, can} = useCompany();
   const {vaultItemId} = useParams();
@@ -51,7 +59,11 @@ export function FiscalVaultDetailPage() {
   if (!item.data) return <p className="text-[var(--danger)]">{apiErrorMessage(item.error, "Documentul fiscal nu a putut fi încărcat.")}</p>;
 
   const document = item.data.data;
-  const downloadDisabled = !document.original || (download.isPending && !downloadBelongsToCurrentDocument);
+  const downloadDisabled = isVaultDownloadDisabled(
+    document.original !== null,
+    download.isPending,
+    downloadBelongsToCurrentDocument,
+  );
   const downloadReason = !document.original
     ? "Originalul ANAF nu este disponibil pentru acest document."
     : downloadDisabled ? "Așteaptă finalizarea descărcării curente." : "Descarcă originalul ANAF";

@@ -3,8 +3,8 @@ import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import type {FiscalVaultItem} from "../lib/types";
-import {FiscalVaultPage, fiscalVaultExportRangeError, isCurrentExportDownload} from "./FiscalVaultPage";
-import {FiscalVaultDetailPage, isCurrentVaultDownload} from "./FiscalVaultDetailPage";
+import {FiscalVaultPage, fiscalVaultExportDisabledReason, fiscalVaultExportRangeError, isCurrentExportDownload} from "./FiscalVaultPage";
+import {FiscalVaultDetailPage, isCurrentVaultDownload, isVaultDownloadDisabled} from "./FiscalVaultDetailPage";
 import {PurchaseInvoiceDetailPage} from "./PurchaseInvoiceDetailPage";
 import {PurchaseInvoicesPage, PURCHASE_INVOICE_SYNC_POLLING_MS, shouldPollPurchaseInvoices} from "./PurchaseInvoicesPage";
 
@@ -336,9 +336,9 @@ describe("purchase invoice pages", () => {
       </QueryClientProvider>,
     );
 
-    const exportButton = await screen.findByRole("button", {name: "Exportă Seiful"});
-    await waitFor(() => expect(exportButton).toBeEnabled());
-    fireEvent.click(exportButton);
+    await screen.findByRole("button", {name: "Exportă Seiful"});
+    await waitFor(() => expect(screen.getByRole("button", {name: "Exportă Seiful"})).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", {name: "Exportă Seiful"}));
     expect(await screen.findByRole("status")).toHaveTextContent("Exportul pentru 1 document este în pregătire pe o coadă separată.");
 
     companyMock.current = {id: "company-2", legal_name: "Beta SRL"};
@@ -395,6 +395,50 @@ describe("purchase invoice pages", () => {
       expect.stringContaining("/companies/company-1/vault-exports/current"),
       expect.anything(),
     );
+  });
+
+  it("afișează motivul sigur furnizat de API când exportul a eșuat", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request) => {
+      if (String(input).endsWith("/companies/company-1/vault-exports/current")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          data: {
+            id: "export-failed",
+            status: "failed",
+            from_date: "2026-07-01",
+            to_date: "2026-07-26",
+            document_count: 2,
+            source_size_bytes: 100,
+            size_bytes: null,
+            sha256: null,
+            expires_at: null,
+            failure: {
+              code: "generation_failed",
+              message: "Exportul nu a putut fi generat. Încearcă din nou; dacă problema persistă, contactează suportul.",
+            },
+          },
+        }), {status: 200, headers: {"Content-Type": "application/json"}}));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        data: [],
+        meta: {pagination: {current_page: 1, last_page: 1, per_page: 20, total: 0}, storage: {used_bytes: 0}},
+      }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    }));
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter><FiscalVaultPage/></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Exportul nu a putut fi generat. Încearcă din nou; dacă problema persistă, contactează suportul.",
+    );
+    expect(screen.getByRole("button", {name: "Exportă Seiful"})).toBeEnabled();
   });
 
   it("nu readuce exportul vechi cât timp pornește unul nou", async () => {
@@ -461,6 +505,16 @@ describe("purchase invoice pages", () => {
     expect(fiscalVaultExportRangeError("2026-07-02", "2026-07-01")).toBe("Data de sfârșit trebuie să fie după data de început.");
   });
 
+  it("explică fiecare regulă care dezactivează exportul Seifului", () => {
+    expect(fiscalVaultExportDisabledReason("Selectează ambele date pentru export.", false, false))
+      .toBe("Selectează ambele date pentru export.");
+    expect(fiscalVaultExportDisabledReason(null, true, false))
+      .toBe("Se verifică dacă există deja un export în pregătire.");
+    expect(fiscalVaultExportDisabledReason(null, false, true))
+      .toBe("Se pregătește deja un export. Așteaptă finalizarea lui.");
+    expect(fiscalVaultExportDisabledReason(null, false, false)).toBeNull();
+  });
+
   it("asociază feedbackul descărcării originalului cu documentul curent", () => {
     const document = {id: "vault-1"} as FiscalVaultItem;
     const variables = {companyId: "company-1", document};
@@ -468,6 +522,13 @@ describe("purchase invoice pages", () => {
     expect(isCurrentVaultDownload(variables, "company-1", "vault-1")).toBe(true);
     expect(isCurrentVaultDownload(variables, "company-1", "vault-2")).toBe(false);
     expect(isCurrentVaultDownload(variables, "company-2", "vault-1")).toBe(false);
+  });
+
+  it("dezactivează descărcarea numai când lipsește originalul sau documentul curent se descarcă", () => {
+    expect(isVaultDownloadDisabled(false, false, false)).toBe(true);
+    expect(isVaultDownloadDisabled(true, true, true)).toBe(true);
+    expect(isVaultDownloadDisabled(true, true, false)).toBe(false);
+    expect(isVaultDownloadDisabled(true, false, true)).toBe(false);
   });
 
   it("nu afișează documentele fiscale ale firmei precedente cât se încarcă firma nouă", async () => {

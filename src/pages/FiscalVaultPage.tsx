@@ -62,6 +62,17 @@ export function fiscalVaultExportRangeError(from: string, to: string): string | 
   return null;
 }
 
+export function fiscalVaultExportDisabledReason(
+  intervalError: string | null,
+  isCheckingCurrentExport: boolean,
+  isExportBusy: boolean,
+): string | null {
+  if (intervalError) return intervalError;
+  if (isCheckingCurrentExport) return "Se verifică dacă există deja un export în pregătire.";
+  if (isExportBusy) return "Se pregătește deja un export. Așteaptă finalizarea lui.";
+  return null;
+}
+
 export function FiscalVaultPage() {
   const {company, can} = useCompany(); const navigate = useNavigate(); const client = useQueryClient(); const grid = useServerDataGridState({defaultSort: DEFAULT_SORT, sortColumns: ["archived_at", "issue_date", "supplier_name", "document_number"]});
   const [exportFrom, setExportFrom] = useState(() => dateInputValue(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
@@ -106,6 +117,7 @@ export function FiscalVaultPage() {
   );
   const exportBusy = (createExportBelongsToCurrentCompany && createExport.isPending) || preparedExport?.status === "queued" || preparedExport?.status === "processing";
   const exportReady = preparedExport?.status === "ready";
+  const exportDisabledReason = fiscalVaultExportDisabledReason(exportIntervalError, currentExport.isLoading, exportBusy);
   const resetPreparedExport = () => {
     createExport.reset();
     if (preparedExport?.status === "ready" || preparedExport?.status === "failed") setIgnoredExportId(preparedExport.id);
@@ -160,13 +172,15 @@ export function FiscalVaultPage() {
       </> : <>
         <AppDatePicker name="export_from" label="De la" ariaLabel="Export de la" className="min-w-[180px]" value={exportFrom} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportFrom(value);}}/>
         <AppDatePicker name="export_to" label="Până la" ariaLabel="Export până la" className="min-w-[180px]" value={exportTo} minValue={exportFrom || undefined} maxValue={exportFrom ? addDays(exportFrom, FISCAL_VAULT_MAX_EXPORT_DAYS - 1) : undefined} isDisabled={exportBusy} onChange={(value) => {resetPreparedExport(); setExportTo(value);}}/>
-        <Button variant="outline" isDisabled={exportIntervalError !== null || currentExport.isLoading} isPending={exportBusy} onPress={() => company && createExport.mutate({companyId: company.id, from: exportFrom, to: exportTo})}><Archive size={16}/> Exportă Seiful</Button>
+        <ActionTooltip content={exportDisabledReason ?? "Generează arhiva pentru perioada selectată"} isDisabled={exportDisabledReason !== null}>
+          <Button variant="outline" isDisabled={exportDisabledReason !== null} isPending={exportBusy} onPress={() => company && createExport.mutate({companyId: company.id, from: exportFrom, to: exportTo})}><Archive size={16}/> Exportă Seiful</Button>
+        </ActionTooltip>
         <p className={`text-xs ${exportIntervalError ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>{exportIntervalError ?? `Maximum ${FISCAL_VAULT_MAX_EXPORT_DOCUMENTS} documente și ${FISCAL_VAULT_MAX_EXPORT_MB} MB per export. Dacă perioada depășește limita, restrânge intervalul.`}</p>
       </>}
     </section> : null}
     {createExportBelongsToCurrentCompany && createExport.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(createExport.error, "Exportul nu a putut fi pornit.")}</p> : null}
     {currentExport.isError ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(currentExport.error, "Starea exportului nu a putut fi verificată.")}</p> : null}
-    {preparedExport?.status === "failed" ? <p role="alert" className="text-sm text-[var(--danger)]">Exportul a eșuat. Încearcă din nou.</p> : null}
+    {preparedExport?.status === "failed" ? <p role="alert" className="text-sm text-[var(--danger)]">{preparedExport.failure?.message ?? "Exportul a eșuat. Încearcă din nou."}</p> : null}
     {(preparedExport?.status === "queued" || preparedExport?.status === "processing") ? <p role="status" className="text-sm text-[var(--text-muted)]">Exportul pentru {preparedExport.document_count} {preparedExport.document_count === 1 ? "document" : "documente"} este în pregătire pe o coadă separată.</p> : null}
     {download.isError && downloadBelongsToCurrentCompany ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(download.error, "Documentul nu a putut fi descărcat.")}</p> : null}
     {legalHold.isError && legalHoldBelongsToCurrentCompany ? <p role="alert" className="text-sm text-[var(--danger)]">{apiErrorMessage(legalHold.error, "Politica de retenție nu a putut fi actualizată.")}</p> : null}
