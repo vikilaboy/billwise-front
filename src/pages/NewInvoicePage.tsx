@@ -105,6 +105,18 @@ export function manualRonTotalsAreValid(
     && confirmed;
 }
 
+export function submissionDisabledState(
+  baseInvalid: boolean,
+  isCreditNote: boolean,
+  creditContextValid: boolean,
+  referencesValid: boolean,
+) {
+  return {
+    issue: baseInvalid || (isCreditNote && !creditContextValid),
+    draft: baseInvalid || (isCreditNote && !referencesValid),
+  };
+}
+
 const cardClass =
   "bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-5 shadow-[var(--shadow)]";
 
@@ -400,14 +412,14 @@ export function NewInvoicePage() {
     return {
       ...common,
       adjustment_reason: adjustmentReason,
-      adjustment_description: adjustmentDescription.trim(),
+      adjustment_description: adjustmentDescription.trim() || null,
       billing_period_start: billingPeriodStart || null,
       billing_period_end: billingPeriodEnd || null,
       references: referencesPayload,
       ...creditNoteSeriesPayload(id, selectedSeries?.id),
       ...(isForeign && selectedReferenceIds.length > 0 ? {
         exchange_rate_basis: "referenced_invoices",
-      } : isForeign ? {
+      } : isForeign && manualRonValid ? {
         exchange_rate_basis: "manual_documented",
         exchange_rate_basis_note: exchangeRateBasisNote.trim(),
         subtotal_cents_ron: Math.round(Number(subtotalRon) * 100),
@@ -456,7 +468,8 @@ export function NewInvoicePage() {
   );
   const hasPeriod = Boolean(billingPeriodStart) && Boolean(billingPeriodEnd) && billingPeriodEnd >= billingPeriodStart;
   const creditContextValid = !isCreditNote || (Boolean(adjustmentDescription.trim()) && (hasPeriod || selectedReferenceIds.length > 0) && referencesValid && manualRonValid);
-  const disabled = pending || !company?.id || !customerId || rows.some((row) => !row.description.trim() || row.quantity <= 0 || row.unit_price < 0 || !row.vat_profile_id) || !creditContextValid;
+  const baseInvalid = pending || !company?.id || !customerId || rows.some((row) => !row.description.trim() || row.quantity <= 0 || row.unit_price < 0 || !row.vat_profile_id);
+  const disabled = submissionDisabledState(baseInvalid, isCreditNote, creditContextValid, referencesValid);
 
   return (
     <div className="flex flex-col gap-5">
@@ -765,7 +778,7 @@ export function NewInvoicePage() {
               <Button
                 variant="primary"
                 fullWidth
-                isDisabled={disabled}
+                isDisabled={disabled.issue}
                 onPress={() => submit(true)}
               >
                 {pending ? <Spinner size="sm" /> : <Send size={16} />} {isCreditNote ? "Emite nota de credit" : "Emite factura"}
@@ -773,7 +786,7 @@ export function NewInvoicePage() {
               <Button
                 variant="outline"
                 fullWidth
-                isDisabled={disabled}
+                isDisabled={disabled.draft}
                 onPress={() => submit(false)}
               >
                 {pending ? <Loader2 size={16} className="animate-spin" /> : null} Salvează ca ciornă
