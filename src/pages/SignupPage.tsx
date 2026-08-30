@@ -2,7 +2,7 @@ import {FormEvent, useState} from "react";
 import {Link, Navigate, useNavigate} from "react-router";
 import {Button} from "@heroui/react";
 import {Eye, EyeOff} from "lucide-react";
-import {api, session} from "../lib/api";
+import {api, ApiError, session} from "../lib/api";
 import type {RegisterPayload} from "../lib/types";
 import {AuthLayout, authInputCls, authLabelCls} from "../components/AuthLayout";
 
@@ -16,6 +16,7 @@ export function SignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [passwordMismatch, setPasswordMismatch] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   if (session.token()) return <Navigate to="/dashboard" replace />;
@@ -24,6 +25,7 @@ export function SignupPage() {
     e.preventDefault();
     setLoading(true);
     setPasswordMismatch(false);
+    setPasswordError(null);
     if (password !== confirm) {
       setPasswordMismatch(true);
       setLoading(false);
@@ -41,8 +43,11 @@ export function SignupPage() {
         }),
       });
       navigate(`/verifica-email?email=${encodeURIComponent(r.data.email)}`, {replace: true});
-    } catch {
+    } catch (error) {
       // The API client presents the error globally.
+      if (error instanceof ApiError) {
+        setPasswordError(error.problem.errors?.password?.[0] ?? null);
+      }
     } finally {
       setLoading(false);
     }
@@ -103,10 +108,15 @@ export function SignupPage() {
               name="password"
               type={showPassword ? "text" : "password"}
               required
-              minLength={8}
+              minLength={12}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Minim 8 caractere"
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setPasswordError(null);
+              }}
+              placeholder="Minim 12 caractere"
+              aria-describedby={passwordError ? "signup-password-help signup-password-error" : "signup-password-help"}
+              aria-invalid={passwordError ? true : undefined}
               className={`${authInputCls} pr-11`}
             />
             <button
@@ -118,7 +128,8 @@ export function SignupPage() {
               {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
             </button>
           </div>
-          <p className="mt-1 text-xs text-[var(--text-muted)]">Minimum 8 caractere.</p>
+          <p id="signup-password-help" className="mt-1 text-xs text-[var(--text-muted)]">Minimum 12 caractere.</p>
+          {passwordError ? <p id="signup-password-error" role="alert" className="mt-1 text-[12px] text-[var(--danger)]">{passwordError}</p> : null}
           {passwordMismatch ? <div className="mt-1 text-[12px] text-[var(--danger)]">Parolele nu coincid.</div> : null}
         </div>
 
@@ -130,7 +141,7 @@ export function SignupPage() {
               name="password_confirmation"
               type={showConfirmation ? "text" : "password"}
               required
-              minLength={8}
+              minLength={12}
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               placeholder="Reintrodu parola"
