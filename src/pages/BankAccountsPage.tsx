@@ -377,7 +377,6 @@ export function BankAccountsPage() {
         >
           <div
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={closeModal}
             aria-hidden="true"
           />
           <div className="relative z-10 flex max-h-[90vh] w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)]">
