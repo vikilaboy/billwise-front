@@ -191,4 +191,49 @@ describe("RecurringPage", () => {
       vat_exemption_reason: "Neînregistrat în scopuri de TVA / Not registered for VAT",
     });
   });
+
+  it("permite alegerea facturii bilingve și pentru sursa contractuală", async () => {
+    const emptyList = {data: [], meta: {pagination: {current_page: 1, per_page: 100, total: 0, last_page: 1}}};
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (String(url).endsWith("/preview")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          data: {
+            scheduled_for: "2028-01-01T07:00:00Z",
+            issue_date: "2028-01-01",
+            due_date: "2028-01-16",
+            period: {start: "2027-12-01", end: "2027-12-31"},
+            lines: [{description: "Servicii"}],
+          },
+        }), {status: 200, headers: {"Content-Type": "application/json"}}));
+      }
+
+      return Promise.resolve(new Response(JSON.stringify(emptyList), {
+        status: 200,
+        headers: {"Content-Type": "application/json"},
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}, mutations: {retry: false}}})}>
+        <MemoryRouter>
+          <RecurringPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: "Șablon nou"}));
+    fireEvent.click(screen.getByRole("button", {name: /Sursa valorilor/}));
+    fireEvent.click(await screen.findByRole("option", {name: "Contract activ"}));
+    fireEvent.click(screen.getByRole("button", {name: /Limbă/}));
+    fireEvent.click(await screen.findByRole("option", {name: "Bilingv · română și engleză"}));
+    fireEvent.click(screen.getByRole("button", {name: "Previzualizează"}));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/preview"))).toBe(true));
+    const previewCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/preview"));
+    expect(JSON.parse(String(previewCall?.[1]?.body))).toMatchObject({
+      billing_source: "contract",
+      locale: "en",
+    });
+  });
 });
