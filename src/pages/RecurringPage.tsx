@@ -1,6 +1,6 @@
 import {useRef, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
-import {Button, Calendar, DateField, DatePicker, Label, ListBox, Select, Spinner, TextArea, TextField} from "@heroui/react";
+import {Button, Calendar, Chip, DateField, DatePicker, Label, ListBox, Select, Spinner, TextArea, TextField} from "@heroui/react";
 import {parseDate} from "@internationalized/date";
 import {Pause, Pencil, Play, Plus, Repeat, Trash2, X} from "lucide-react";
 import {useNavigate, useSearchParams} from "react-router";
@@ -64,6 +64,14 @@ const scheduleLabel = (template: RecurringInvoiceTemplate) => {
   if (schedule.unit === "week") return schedule.interval === 1 ? "Săptămânal" : `La ${schedule.interval} săptămâni`;
   return schedule.interval === 1 ? "Lunar" : schedule.interval === 3 ? "Trimestrial" : `La ${schedule.interval} luni`;
 };
+const templateStatus = {
+  active: {label: "Activ", color: "success"},
+  paused: {label: "Pauzat", color: "warning"},
+  archived: {label: "Arhivat", color: "default"},
+} as const satisfies Record<RecurringInvoiceTemplate["status"], {
+  label: string;
+  color: "success" | "warning" | "default";
+}>;
 const EMPTY: Form = {
   billing_source: "custom", contract_id: "", contract_line_ids: [],
   name: "", customer_id: "", invoice_series_id: "", cadence: "monthly", weekday: "1",
@@ -136,7 +144,7 @@ export function RecurringPage() {
           : templates.isError ? <div className="py-20 text-center text-sm text-[var(--danger)]">Șabloanele nu au putut fi încărcate.</div>
           : rows.length === 0 ? <div className="flex flex-col items-center gap-2 py-20 text-center"><Repeat size={26} className="text-[var(--faint)]" /><b>Niciun șablon recurent</b><span className="text-sm text-[var(--text-muted)]">Configurează prima generare controlată de ciorne.</span></div>
           : <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="bg-[var(--bg-muted)] text-left text-xs uppercase text-[var(--text-muted)]"><tr><th className="p-3">Șablon</th><th className="p-3">Client</th><th className="p-3">Frecvență</th><th className="p-3">Următoarea rulare</th><th className="p-3">Status</th><th className="p-3 text-right">Acțiuni</th></tr></thead><tbody>
-            {rows.map((template) => <tr key={template.id} className="border-t border-[var(--border)]"><td className="p-3 font-semibold">{template.name}{template.billing_source === "contract" ? <span className="ml-2 rounded bg-[var(--bg-muted)] px-2 py-0.5 text-xs">contract</span> : null}{template.is_locked ? <span className="ml-2 text-xs text-[var(--text-muted)]">versiune blocată</span> : null}</td><td className="p-3">{template.customer?.name ?? "—"}</td><td className="p-3">{scheduleLabel(template)}</td><td className="p-3">{recurringDate(template.next_run_at, template.schedule?.timezone ?? template.timezone)}</td><td className="p-3">{template.status === "active" ? "Activ" : template.status === "paused" ? "Pauzat" : "Arhivat"}</td><td className="p-3"><div className="flex justify-end gap-1">
+            {rows.map((template) => <tr key={template.id} className="border-t border-[var(--border)]"><td className="p-3 font-semibold">{template.name}{template.billing_source === "contract" ? <span className="ml-2 rounded bg-[var(--bg-muted)] px-2 py-0.5 text-xs">contract</span> : null}{template.is_locked ? <span className="ml-2 text-xs text-[var(--text-muted)]">versiune blocată</span> : null}</td><td className="p-3">{template.customer?.name ?? "—"}</td><td className="p-3">{scheduleLabel(template)}</td><td className="p-3">{recurringDate(template.next_run_at, template.schedule?.timezone ?? template.timezone)}</td><td className="p-3"><Chip size="sm" variant="soft" color={templateStatus[template.status].color}><span aria-hidden="true" className="size-1.5 rounded-full bg-current"/><Chip.Label>{templateStatus[template.status].label}</Chip.Label></Chip></td><td className="p-3"><div className="flex justify-end gap-1">
               <Button isIconOnly size="sm" variant="ghost" aria-label={template.is_locked ? "Creează versiune nouă" : "Editează"} onPress={() => setEditing(template)}><Pencil size={14} /></Button>
               <Button isIconOnly size="sm" variant="ghost" aria-label={template.status === "active" ? "Pauză" : "Reia"} onPress={() => mutate.mutate({template, action: "toggle"})}>{template.status === "active" ? <Pause size={14} /> : <Play size={14} />}</Button>
               <Button size="sm" variant="outline" isDisabled={template.status !== "active"} onPress={() => {

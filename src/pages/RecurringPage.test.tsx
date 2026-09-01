@@ -44,6 +44,51 @@ describe("RecurringPage", () => {
     )).toBe(true));
   });
 
+  it("diferențiază semantic statusurile șabloanelor", async () => {
+    const template = {
+      id: "template-active",
+      name: "Abonament lunar",
+      customer_id: "customer-1",
+      invoice_series_id: "series-1",
+      frequency: "monthly",
+      timezone: "Europe/Bucharest",
+      start_date: "2028-01-01",
+      end_date: null,
+      next_run_at: "2028-02-01T07:00:00Z",
+      payment_terms_days: 15,
+      currency: "RON",
+      locale: "ro",
+      lines: [],
+      notes: null,
+      status: "active",
+      mode: "create_draft",
+      customer: {id: "customer-1", name: "Client Test"},
+      series: {id: "series-1", name: "Factura"},
+      runs: [],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: [
+        template,
+        {...template, id: "template-paused", name: "Abonament pauzat", status: "paused"},
+        {...template, id: "template-archived", name: "Abonament arhivat", status: "archived"},
+      ],
+      meta: {pagination: {current_page: 1, per_page: 20, total: 3, last_page: 1}},
+    }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter>
+          <RecurringPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect((await screen.findByText("Activ")).closest(".chip")).toHaveClass("chip--success", "chip--soft");
+    expect(screen.getByText("Pauzat").closest(".chip")).toHaveClass("chip--warning", "chip--soft");
+    expect(screen.getByText("Arhivat").closest(".chip")).toHaveClass("chip--default", "chip--soft");
+  });
+
   it("publică global motivul când generarea manuală nu creează ciorna", async () => {
     const template = {
       id: "template-1",
