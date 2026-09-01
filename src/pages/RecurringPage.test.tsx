@@ -223,9 +223,12 @@ describe("RecurringPage", () => {
     );
 
     fireEvent.click(await screen.findByRole("button", {name: "Șablon nou"}));
+    const languageSelect = screen.getByRole("button", {name: /Limbă/});
+    const frequencySelect = screen.getByRole("button", {name: /Frecvență/});
+    expect(languageSelect.compareDocumentPosition(frequencySelect) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(screen.getByRole("button", {name: /Sursa valorilor/}));
     fireEvent.click(await screen.findByRole("option", {name: "Contract activ"}));
-    fireEvent.click(screen.getByRole("button", {name: /Limbă/}));
+    fireEvent.click(languageSelect);
     fireEvent.click(await screen.findByRole("option", {name: "Bilingv · română și engleză"}));
     fireEvent.click(screen.getByRole("button", {name: "Previzualizează"}));
 

@@ -349,6 +349,7 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
       <div className="grid flex-1 gap-4 overflow-y-auto p-5 sm:grid-cols-2">
         <Field label="Denumire"><input name="name" className={input} value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
         <HeroSelectField name="billing_source" label="Sursa valorilor" value={form.billing_source} onChange={(value) => setForm((current) => ({...current, billing_source: value as Form["billing_source"], contract_id: "", contract_line_ids: []}))} options={[{id:"custom",label:"Valori definite în șablon"},{id:"contract",label:"Contract activ"}]} />
+        <HeroSelectField name="locale" label="Limbă" value={form.locale} onChange={(value) => set("locale", value as Form["locale"])} options={[{id: "ro", label: "Română"}, {id: "en", label: "Bilingv · română și engleză"}]} />
         {form.billing_source === "contract" ? <>
           <HeroSelectField name="contract_id" label="Contract" value={form.contract_id} onChange={(value) => {
             const next = (contracts.data?.data ?? []).find((item) => item.id === value);
@@ -416,7 +417,6 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
           </div>
         </div>
         </> : <div className="rounded-xl bg-[var(--bg-muted)] p-4 text-xs sm:col-span-2">Clientul, moneda, termenul, descrierea, cantitatea și tariful sunt preluate din versiunea contractuală selectată. Limba facturii se alege separat.</div>}
-        <HeroSelectField name="locale" label="Limbă" value={form.locale} onChange={(value) => set("locale", value as Form["locale"])} options={[{id: "ro", label: "Română"}, {id: "en", label: "Bilingv · română și engleză"}]} />
         {preview.data ? <div className="rounded-xl bg-[var(--bg-muted)] p-4 text-xs sm:col-span-2">
           <b>Previzualizare</b>
           <div className="mt-2">Generare: {recurringDate(preview.data.data.scheduled_for)} · perioadă: {preview.data.data.period.start} – {preview.data.data.period.end} · scadență: {preview.data.data.due_date}</div>
