@@ -645,6 +645,7 @@ export type ContractVersion = {
   version: number;
   status: "draft" | "active" | "superseded";
   effective_from: string;
+  currency_id: string;
   currency: string;
   payment_terms_days: number;
   locale: "ro" | "en";

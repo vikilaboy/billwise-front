@@ -17,7 +17,7 @@ const line = {
   vat_exemption_code: null, vat_exemption_reason: null, position: 1,
 };
 const activeVersion = {
-  id: "version-1", version: 1, status: "active", effective_from: "2026-01-01", currency: "RON",
+  id: "version-1", version: 1, status: "active", effective_from: "2026-01-01", currency_id: "currency-ron", currency: "RON",
   payment_terms_days: 15, locale: "ro", timezone: "Europe/Bucharest", working_weekdays: [1, 2, 3, 4, 5],
   holiday_calendar_code: "RO", default_hours_per_day: "8.00", notes: null, lines: [line],
 };
@@ -81,6 +81,12 @@ describe("ContractsPage", () => {
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/versions") && init?.method === "POST")).toBe(true));
     expect(await screen.findByText("Ciornă v2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name: "Salvează ciorna"}));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => {
+      if (!String(url).endsWith("/versions/version-2") || init?.method !== "PUT" || typeof init.body !== "string") return false;
+      const body = JSON.parse(init.body) as Record<string, unknown>;
+      return body.currency_id === "currency-ron" && !("currency" in body);
+    })).toBe(true));
     const activateButton = screen.getByRole("button", {name: /Activează v2/});
     await waitFor(() => expect(activateButton).toBeEnabled());
     fireEvent.click(activateButton);
@@ -118,6 +124,30 @@ describe("ContractsPage", () => {
     fireEvent.click(await screen.findByRole("button", {name: "Arhivează contractul"}));
 
     await waitFor(() => expect(archiveCalls).toBe(1));
+  });
+
+  it("șterge definitiv o ciornă numai după confirmare", async () => {
+    const draftContract = {...contract, status: "draft", current_version: {...activeVersion, status: "draft"}};
+    let deleteCalls = 0;
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/contracts?")) return Promise.resolve(response([draftContract]));
+      if (url.endsWith("/contracts/contract-1") && init?.method === "DELETE") {
+        deleteCalls += 1;
+        return Promise.resolve(response(null));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}, mutations: {retry: false}}})}><MemoryRouter><ContractsPage/></MemoryRouter></QueryClientProvider>);
+
+    fireEvent.click(await screen.findByRole("button", {name: "Șterge contractul CTR-001"}));
+    expect(await screen.findByText("Ștergi definitiv ciorna CTR-001?")).toBeInTheDocument();
+    expect(deleteCalls).toBe(0);
+    fireEvent.click(screen.getByRole("button", {name: "Șterge definitiv"}));
+
+    await waitFor(() => expect(deleteCalls).toBe(1));
   });
 
   it("restaurează un contract arhivat în fluxul anterior", async () => {
