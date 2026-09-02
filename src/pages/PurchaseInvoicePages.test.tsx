@@ -38,6 +38,9 @@ describe("purchase invoice pages", () => {
         subtotal_cents: 10000,
         vat_cents: 1900,
         total_cents: 11900,
+        prepaid_cents: 0,
+        payable_rounding_cents: 0,
+        payable_cents: 11900,
         import_status: "imported",
         review_status: "needs_attention",
         reviewed_at: null,
@@ -59,6 +62,32 @@ describe("purchase invoice pages", () => {
     );
 
     expect(await screen.findByText("Necesită atenție")).toBeInTheDocument();
+  });
+
+  it("afișează separat totalul facturii și suma rămasă de plată", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        id: "invoice-1", document_type: "invoice", number: "PREPAID-1", issue_date: "2026-08-21", due_date: "2026-08-21",
+        currency: "RON", subtotal_cents: 56679, vat_cents: 11902, total_cents: 68581,
+        prepaid_cents: 68581, payable_rounding_cents: 0, payable_cents: 0, import_status: "imported",
+        review_status: "reviewed", reviewed_at: "2026-08-21T10:00:00Z",
+        supplier: {id: "supplier-1", name: "Furnizor", tax_id: "12751583", country_code: "RO", email: null, address: null},
+        vault_item_id: "vault-1", lines: [], created_at: "2026-08-21T10:00:00Z",
+      },
+    }), {status: 200, headers: {"Content-Type": "application/json"}})));
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/achizitii/invoice-1"]}>
+          <Routes><Route path="/achizitii/:id" element={<PurchaseInvoiceDetailPage/>}/></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect((await screen.findAllByText("685,81 RON")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Achitat în avans")).toBeInTheDocument();
+    expect(screen.getByText("−685,81 RON")).toBeInTheDocument();
+    expect(screen.getAllByText("0,00 RON")).toHaveLength(2);
   });
 
   it("limitează polling-ul după sincronizare la fereastra configurată", () => {
@@ -180,7 +209,7 @@ describe("purchase invoice pages", () => {
       return Promise.resolve(new Response(JSON.stringify({
         data: [{
           id: "invoice-a", document_type: "invoice", number: "FACTURA-A", issue_date: "2026-07-25", due_date: null,
-          currency: "RON", subtotal_cents: 10000, vat_cents: 1900, total_cents: 11900, import_status: "imported",
+          currency: "RON", subtotal_cents: 10000, vat_cents: 1900, total_cents: 11900, prepaid_cents: 0, payable_rounding_cents: 0, payable_cents: 11900, import_status: "imported",
           review_status: "unreviewed", reviewed_at: null,
           supplier: {id: "supplier-a", name: "Furnizor A", tax_id: "1590082", country_code: "RO", email: null, address: null},
           vault_item_id: "vault-a", lines: [], created_at: "2026-07-25T10:00:00Z",
@@ -219,7 +248,7 @@ describe("purchase invoice pages", () => {
       return Promise.resolve(new Response(JSON.stringify({
         data: {
           id: "invoice-1", document_type: "invoice", number: "OMV-1", issue_date: "2026-07-25", due_date: null,
-          currency: "RON", subtotal_cents: 10000, vat_cents: 1900, total_cents: 11900, import_status: "imported",
+          currency: "RON", subtotal_cents: 10000, vat_cents: 1900, total_cents: 11900, prepaid_cents: 0, payable_rounding_cents: 0, payable_cents: 11900, import_status: "imported",
           review_status: "unreviewed", reviewed_at: null,
           supplier: {id: "supplier-1", name: "OMV Petrom", tax_id: "1590082", country_code: "RO", email: null, address: null},
           vault_item_id: "vault-1", lines: [], created_at: "2026-07-25T10:00:00Z",
@@ -247,7 +276,7 @@ describe("purchase invoice pages", () => {
       const companyId = String(input).includes("company-2") ? "B" : "A";
       return Promise.resolve(new Response(JSON.stringify({data: {
         id: "invoice-1", document_type: "invoice", number: `FACTURA-${companyId}`, issue_date: "2026-07-25", due_date: null,
-        currency: "RON", subtotal_cents: 10000, vat_cents: 1900, total_cents: 11900, import_status: "imported",
+        currency: "RON", subtotal_cents: 10000, vat_cents: 1900, total_cents: 11900, prepaid_cents: 0, payable_rounding_cents: 0, payable_cents: 11900, import_status: "imported",
         review_status: "unreviewed", reviewed_at: null,
         supplier: {id: `supplier-${companyId}`, name: `Furnizor ${companyId}`, tax_id: "1590082", country_code: "RO", email: null, address: null},
         vault_item_id: `vault-${companyId}`, lines: [], created_at: "2026-07-25T10:00:00Z",

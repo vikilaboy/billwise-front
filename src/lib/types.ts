@@ -91,7 +91,8 @@ export type PurchaseInvoiceLine = {id: string; position: number; description: st
 export type PurchaseInvoice = {
   id: string; document_type: "invoice" | "credit_note"; number: string; issue_date: string; due_date: string | null; currency: string;
   referenced_invoice_number: string | null; referenced_invoice_issue_date: string | null; corrects_purchase_invoice_id: string | null;
-  subtotal_cents: number; vat_cents: number; total_cents: number; import_status: string; review_status: "unreviewed" | "reviewed" | "needs_attention";
+  subtotal_cents: number; vat_cents: number; total_cents: number; prepaid_cents: number; payable_rounding_cents: number; payable_cents: number;
+  import_status: string; review_status: "unreviewed" | "reviewed" | "needs_attention";
   reviewed_at: string | null; supplier: Supplier | null; vault_item_id: string; lines: PurchaseInvoiceLine[]; created_at: string | null;
 };
 export type FiscalVaultItem = {
