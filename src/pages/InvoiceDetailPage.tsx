@@ -4,7 +4,7 @@ import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Card, Chip, Dropdown, Label, Spinner, Tooltip} from "@heroui/react";
 import {Timeline} from "@heroui-pro/react/timeline";
 import type {TimelineStatus} from "@heroui-pro/react/timeline";
-import {Banknote, Ban, Check, ChevronLeft, Copy, Download, FileCode2, Mail, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X} from "lucide-react";
+import {Banknote, Ban, Check, ChevronDown, ChevronLeft, Copy, Download, FileCode2, Mail, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X} from "lucide-react";
 import {ActionTooltip, combineDisabledReasons, requiredFieldsReason} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {ConfirmDialog} from "../components/ConfirmDialog";
@@ -15,6 +15,7 @@ import type {CustomerCreditUsage, EfacturaSubmission, EfacturaSubmissionEvent, I
 import {
   cents,
   date,
+  dateTimeSeconds,
   displayStatus,
   displayStatusLabels,
   money,
@@ -130,6 +131,49 @@ const submissionEventLabels: Record<string, string> = {
   submission_failed: "Trimitere eșuată",
 };
 
+const deliveryEventLabels: Record<string, string> = {
+  accepted: "Acceptată pentru trimitere",
+  send: "Preluată de Amazon SES",
+  sent: "Trimisă",
+  delivery: "Livrată serverului destinatar",
+  delivered: "Livrată serverului destinatar",
+  delivery_delay: "Livrare întârziată",
+  bounce: "Returnată de serverul destinatar",
+  bounced: "Returnată de serverul destinatar",
+  complaint: "Reclamație raportată",
+  failed: "Livrare eșuată",
+  reject: "Respinsă de Amazon SES",
+  rejected: "Respinsă de furnizor",
+  rendering_failure: "Emailul nu a putut fi generat",
+  open: "Activitate detectată",
+  click: "Link accesat",
+};
+
+function deliveryEventLabel(event: NonNullable<InvoiceDelivery["events"]>[number]): string {
+  if (event.is_bot && event.type === "open") return "Activitate automată detectată";
+  if (event.is_bot && event.type === "click") return "Accesare automată a unui link";
+
+  let label = deliveryEventLabels[event.type] ?? event.type;
+  if (event.type === "complaint") {
+    if (["OnAccountSuppressionList", "OnTenantSuppressionList"].includes(String(event.metadata?.complaint_subtype))) {
+      label = "Trimitere blocată de Amazon SES";
+    } else if (event.metadata?.feedback_type === "not-spam") {
+      label = "Raport: nu este spam";
+    }
+  }
+  return event.metadata?.recipient_scope === "copy" ? `${label} (CC)` : label;
+}
+
+function deliveryEventTone(event: NonNullable<InvoiceDelivery["events"]>[number]): TimelineStatus {
+  if (event.type === "complaint" && event.metadata?.feedback_type === "not-spam"
+    && !["OnAccountSuppressionList", "OnTenantSuppressionList"].includes(String(event.metadata?.complaint_subtype))) return "muted";
+  if (["bounce", "bounced", "complaint", "failed", "reject", "rejected", "rendering_failure"].includes(event.type)) return "danger";
+  if (event.type === "delivery_delay") return "warning";
+  if (["delivery", "delivered"].includes(event.type)) return "success";
+
+  return "muted";
+}
+
 export function InvoiceDetailPage() {
   const {id} = useParams();
   const navigate = useNavigate();
@@ -143,6 +187,7 @@ export function InvoiceDetailPage() {
   const [creditUsageMode, setCreditUsageMode] = useState<"allocation" | "refund" | null>(null);
   const [confirmation, setConfirmation] = useState<DetailConfirmation>(null);
   const [cancellationReason, setCancellationReason] = useState("");
+  const [expandedDeliveryIds, setExpandedDeliveryIds] = useState<Set<string>>(() => new Set());
 
   const invoiceQuery = useQuery({
     queryKey: ["invoice", company?.id, id],
@@ -198,7 +243,12 @@ export function InvoiceDetailPage() {
     queryKey: ["invoice", company?.id, id, "deliveries"],
     queryFn: () => api<InvoiceDelivery[]>(`/companies/${company!.id}/invoices/${id}/deliveries`),
     enabled: Boolean(company?.id && id),
-    refetchInterval: (query) => query.state.data?.data.some((delivery) => ["queued", "preparing", "sending"].includes(delivery.status)) ? 5000 : false,
+    refetchInterval: (query) => {
+      const deliveries = query.state.data?.data ?? [];
+      if (deliveries.some((delivery) => ["queued", "preparing", "sending"].includes(delivery.status))) return 5000;
+
+      return deliveries.length > 0 ? 15000 : false;
+    },
   });
   const retryDelivery = useMutation({
     mutationFn: ({deliveryId, confirmPossibleDuplicate}: {deliveryId: string; confirmPossibleDuplicate?: boolean}) =>
@@ -578,19 +628,82 @@ export function InvoiceDetailPage() {
                     <p className="mt-2 text-xs text-[var(--text-muted)]">Documentul nu a fost trimis încă.</p>
                   ) : (
                     <div className="mt-2 flex flex-col">
-                      {(deliveriesQuery.data?.data ?? []).map((delivery) => (
-                        <div key={delivery.id} className="flex items-center gap-2 border-b border-[var(--border)] py-2.5 text-xs last:border-0">
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate font-semibold">{delivery.recipient}</div>
-                            <div className={["failed", "outcome_unknown"].includes(delivery.status) ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}>
-                              {delivery.status === "sent" ? `Trimisă ${delivery.sent_at ? date(delivery.sent_at) : ""}` : ["queued", "preparing", "sending"].includes(delivery.status) ? "În curs de trimitere" : delivery.status === "outcome_unknown" ? "Rezultat incert — verifică inboxul destinatarului înainte de retransmitere." : delivery.error ?? "Livrare eșuată"}
+                      {(deliveriesQuery.data?.data ?? []).map((delivery) => {
+                        const expanded = expandedDeliveryIds.has(delivery.id);
+                        const events = delivery.events ?? [];
+                        const historyId = `delivery-history-${delivery.id}`;
+
+                        return (
+                          <div key={delivery.id} className="border-b border-[var(--border)] py-2.5 text-xs last:border-0">
+                            <div className="flex items-start gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate font-semibold">{delivery.recipient}</div>
+                                <div className={["failed", "outcome_unknown"].includes(delivery.status) ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}>
+                                  {delivery.status === "sent" && delivery.delivered_at ? (
+                                    <>Livrată <time dateTime={delivery.delivered_at}>{dateTimeSeconds(delivery.delivered_at)}</time></>
+                                  ) : delivery.status === "sent" ? (
+                                    <>Trimisă {delivery.sent_at ? <time dateTime={delivery.sent_at}>{dateTimeSeconds(delivery.sent_at)}</time> : null}</>
+                                  ) : ["queued", "preparing", "sending"].includes(delivery.status) ? "În curs de trimitere" : delivery.status === "outcome_unknown" ? "Rezultat incert — verifică inboxul destinatarului înainte de retransmitere." : delivery.error ?? "Livrare eșuată"}
+                                </div>
+                                {delivery.complained_at ? (
+                                  <div className="mt-0.5 text-[11px] text-[var(--danger)]">
+                                    Reclamație raportată <time dateTime={delivery.complained_at}>{dateTimeSeconds(delivery.complained_at)}</time>
+                                  </div>
+                                ) : null}
+                                {delivery.retried_at ? (
+                                  <div className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                                    Retrimisă <time dateTime={delivery.retried_at}>{dateTimeSeconds(delivery.retried_at)}</time>
+                                  </div>
+                                ) : null}
+                                {delivery.open_count > 0 || delivery.click_count > 0 ? (
+                                  <div className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                                    {delivery.open_count > 0 ? `Activitate detectată${delivery.open_count > 1 ? ` de ${delivery.open_count} ori` : ""}` : null}
+                                    {delivery.open_count > 0 && delivery.click_count > 0 ? " · " : null}
+                                    {delivery.click_count > 0 ? `Link accesat${delivery.click_count > 1 ? ` de ${delivery.click_count} ori` : ""}` : null}
+                                  </div>
+                                ) : null}
+                                {delivery.cc.length > 0 && (delivery.open_count > 0 || delivery.click_count > 0) ? (
+                                  <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">Activitatea poate proveni și de la destinatarii în CC.</p>
+                                ) : null}
+                                {events.length > 0 ? (
+                                  <button
+                                    type="button"
+                                    className="mt-1.5 inline-flex items-center gap-1 font-medium text-[var(--accent)] hover:underline focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+                                    aria-expanded={expanded}
+                                    aria-controls={historyId}
+                                    onClick={() => setExpandedDeliveryIds((current) => {
+                                      const next = new Set(current);
+                                      if (next.has(delivery.id)) next.delete(delivery.id);
+                                      else next.add(delivery.id);
+                                      return next;
+                                    })}
+                                  >
+                                    {expanded ? "Ascunde istoricul" : "Vezi istoricul"}
+                                    <ChevronDown size={13} className={expanded ? "rotate-180 transition-transform" : "transition-transform"} />
+                                  </button>
+                                ) : null}
+                              </div>
+                              {!delivery.retried_at && (delivery.status === "failed" || delivery.status === "outcome_unknown") ? (
+                                <Button isIconOnly size="sm" variant="ghost" aria-label="Reîncearcă livrarea" onPress={() => delivery.status === "outcome_unknown" ? setConfirmation({kind: "retry-delivery", delivery}) : retryDelivery.mutate({deliveryId: delivery.id})}><RefreshCw size={14} /></Button>
+                              ) : null}
                             </div>
+                            {expanded ? (
+                              <Timeline id={historyId} density="compact" size="sm" className="mt-2.5">
+                                {events.map((event) => (
+                                  <Timeline.Item key={event.id} status={deliveryEventTone(event)}>
+                                    <Timeline.Content className="gap-0.5">
+                                      <div className="font-medium text-[var(--text)]">{deliveryEventLabel(event)}</div>
+                                      <time dateTime={event.occurred_at} className="text-[11px] tabular-nums text-[var(--text-muted)]">
+                                        {dateTimeSeconds(event.occurred_at)}
+                                      </time>
+                                    </Timeline.Content>
+                                  </Timeline.Item>
+                                ))}
+                              </Timeline>
+                            ) : null}
                           </div>
-                          {delivery.status === "failed" || delivery.status === "outcome_unknown" ? (
-                            <Button isIconOnly size="sm" variant="ghost" aria-label="Reîncearcă livrarea" onPress={() => delivery.status === "outcome_unknown" ? setConfirmation({kind: "retry-delivery", delivery}) : retryDelivery.mutate({deliveryId: delivery.id})}><RefreshCw size={14} /></Button>
-                          ) : null}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

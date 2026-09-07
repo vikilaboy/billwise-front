@@ -1,6 +1,12 @@
 import {describe, expect, it} from "vitest";
 import type {Invoice} from "./types";
-import {displayStatus} from "./format";
+import {dateTimeSeconds, displayStatus} from "./format";
+
+describe("dateTimeSeconds", () => {
+  it("includes date, hour, minute, and second", () => {
+    expect(dateTimeSeconds("2026-09-07T12:34:56Z")).toMatch(/^07\.09\.2026, \d{2}:34:56$/);
+  });
+});
 
 describe("displayStatus", () => {
   const today = new Date("2026-07-24T12:00:00Z");

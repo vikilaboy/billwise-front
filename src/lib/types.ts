@@ -410,9 +410,28 @@ export type InvoiceDelivery = {
   status: "queued" | "preparing" | "sending" | "sent" | "failed" | "outcome_unknown";
   provider_message_id: string | null;
   requires_duplicate_confirmation: boolean;
+  retried_at?: string | null;
   error: string | null;
   sent_at: string | null;
+  delivered_at: string | null;
+  first_opened_at: string | null;
+  last_opened_at: string | null;
+  open_count: number;
+  first_clicked_at: string | null;
+  last_clicked_at: string | null;
+  click_count: number;
+  complained_at: string | null;
+  events?: InvoiceDeliveryProviderEvent[];
   created_at: string | null;
+};
+
+export type InvoiceDeliveryProviderEvent = {
+  id: string;
+  provider: string;
+  type: string;
+  is_bot: boolean;
+  metadata: Record<string, boolean | number | string | null> | null;
+  occurred_at: string;
 };
 
 export type DashboardSummary = {
