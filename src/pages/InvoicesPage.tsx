@@ -1,5 +1,6 @@
-import {useEffect, useMemo, useState} from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
 import {useNavigate, useSearchParams} from "react-router";
+import {I18nProvider} from "react-aria-components";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
 import {Button, Chip, Dropdown, Label, Separator, Spinner, Tooltip, type Selection} from "@heroui/react";
 import {ActionBar} from "@heroui-pro/react/action-bar";
@@ -10,7 +11,9 @@ import {useCompany} from "../components/AppShell";
 import {ConfirmDialog} from "../components/ConfirmDialog";
 import {DataTableLoadingOverlay} from "../components/DataTableLoadingOverlay";
 import {DataTablePagination} from "../components/DataTablePagination";
-import {AppCheckbox} from "../components/FormControls";
+import {AppCheckbox, AppDatePicker, AppSelect} from "../components/FormControls";
+import {invoiceMonth, validInvoiceDate, loadInvoiceCustomers, loadFilteredInvoices, MAX_PDF_EXPORT, type InvoicePdfExport} from "../lib/invoiceExport";
+import {useInvoiceSelection} from "../lib/useInvoiceSelection";
 import {api, downloadApiFile, listQuery, openApiFile, type ListParams} from "../lib/api";
 import type {Invoice, InvoiceDocumentType, InvoicePayment} from "../lib/types";
 import {date, displayStatus, displayStatusLabels, money, statusTone} from "../lib/format";
@@ -69,8 +72,7 @@ type Confirmation =
 type BatchResult = {id: string; label: string; success: boolean};
 
 function isSelectable(invoice: Invoice): boolean {
-  return invoice.status === "draft"
-    || (invoice.status === "issued" && invoice.document_type === "invoice" && invoice.balance_cents > 0);
+  return invoice.status === "draft" || invoice.status === "issued";
 }
 
 function canSettle(invoice: Invoice): boolean {
@@ -82,7 +84,6 @@ export function InvoicesPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmation, setConfirmation] = useState<Confirmation>(null);
   const [batchResult, setBatchResult] = useState<{kind: "delete" | "settle"; results: BatchResult[]} | null>(null);
   const [previewingPdfId, setPreviewingPdfId] = useState<string | null>(null);
@@ -90,13 +91,18 @@ export function InvoicesPage() {
     defaultSort: DEFAULT_SORT,
     sortColumns: SORT_COLUMNS,
     filter: FILTER_CONFIG,
-    extraParams: ["payment_status", "efactura_status", "issue_from", "issue_to", "aging", "document_type"],
+    extraParams: ["payment_status", "efactura_status", "issue_from", "issue_to", "aging", "document_type", "customer_id"],
   });
   const filter = grid.filter ?? "toate";
   const dashboardPaymentStatus = searchParams.get("payment_status");
   const efacturaStatus = searchParams.get("efactura_status");
-  const issueFrom = searchParams.get("issue_from");
-  const issueTo = searchParams.get("issue_to");
+  const issueFrom = validInvoiceDate(searchParams.get("issue_from"));
+  const issueTo = validInvoiceDate(searchParams.get("issue_to"));
+  const customerId = searchParams.get("customer_id") ?? "";
+  const malformedDate = Boolean((searchParams.get('issue_from') && !issueFrom) || (searchParams.get('issue_to') && !issueTo));
+  const invalidPeriod = malformedDate || Boolean(issueFrom && issueTo && issueFrom > issueTo);
+  const customers = useQuery({queryKey: ["invoice-filter-customers", company?.id],
+    queryFn: ({signal}) => loadInvoiceCustomers(company!.id, signal), enabled: Boolean(company?.id)});
   const agingBucket = searchParams.get("aging");
   const requestedDocumentType = searchParams.get("document_type");
   const documentType = DOCUMENT_FILTERS.some((item) => item.key === requestedDocumentType) ? requestedDocumentType as "all" | InvoiceDocumentType : "all";
@@ -104,6 +110,7 @@ export function InvoicesPage() {
   if (issueFrom) issueDateFilter.gte = issueFrom;
   if (issueTo) issueDateFilter.lte = issueTo;
   const dashboardFilters: NonNullable<ListParams["filter"]> = {
+    ...(customerId ? {customer_id: customerId} : {}),
     ...(dashboardPaymentStatus ? {payment_status: dashboardPaymentStatus} : {}),
     ...(efacturaStatus ? {efactura_status: efacturaStatus} : {}),
     ...(issueFrom || issueTo ? {issue_date: issueDateFilter} : {}),
@@ -121,8 +128,8 @@ export function InvoicesPage() {
   });
 
   const invoices = useQuery({
-    queryKey: ["invoices", company?.id, "list", grid.page, filter, documentType, grid.debouncedSearch, grid.apiSort, dashboardPaymentStatus, efacturaStatus, issueFrom, issueTo, agingBucket],
-    queryFn: () =>
+    queryKey: ["invoices", company?.id, "list", grid.page, filter, documentType, grid.debouncedSearch, grid.apiSort, dashboardPaymentStatus, efacturaStatus, issueFrom, issueTo, agingBucket, customerId],
+    queryFn: ({signal}) =>
       api<Invoice[]>(
         `/companies/${company!.id}/invoices${listQuery({
           page: grid.page,
@@ -135,25 +142,78 @@ export function InvoicesPage() {
             ...dashboardFilters,
           },
         })}`,
+        {signal},
       ),
-    enabled: Boolean(company?.id),
-    placeholderData: (previous) => previous,
+    enabled: Boolean(company?.id) && !invalidPeriod,
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === company?.id ? previous : undefined,
   });
 
   const rows = useMemo(() => invoices.data?.data ?? [], [invoices.data]);
+  const selectionReady = Boolean(company?.id) && !invalidPeriod && !invoices.isFetching && !invoices.isPlaceholderData
+    && invoices.isSuccess && grid.search.trim() === grid.debouncedSearch;
+  const selectionScope = JSON.stringify([company?.id, filter, documentType, grid.search, dashboardPaymentStatus, efacturaStatus, issueFrom, issueTo, agingBucket, customerId]);
+  const {selectedIds, selectedRows, setSelectedIds, selectRows} = useInvoiceSelection(rows, selectionScope);
   const selectableRows = useMemo(() => rows.filter(isSelectable), [rows]);
-  const selectedRows = useMemo(() => rows.filter((invoice) => selectedIds.has(invoice.id)), [rows, selectedIds]);
   const selectedDrafts = useMemo(() => selectedRows.filter((invoice) => invoice.status === "draft"), [selectedRows]);
   const selectedOutstanding = useMemo(() => selectedRows.filter(canSettle), [selectedRows]);
   const allSelectableSelected = selectableRows.length > 0 && selectableRows.every((invoice) => selectedIds.has(invoice.id));
 
-  useEffect(() => {
-    setSelectedIds((current) => {
-      const visible = new Set(rows.map((invoice) => invoice.id));
-      const next = new Set([...current].filter((id) => visible.has(id)));
-      return next.size === current.size ? current : next;
+  const selectionRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => selectionRequest.current?.abort(), [selectionScope]);
+  const selectFiltered = useMutation({
+    mutationFn: async () => {
+      selectionRequest.current?.abort();
+      const controller = new AbortController();
+      selectionRequest.current = controller;
+      const result = await loadFilteredInvoices(company!.id, {sort: grid.apiSort, filter: {
+        ...(filter in displayFilter ? {display_status: displayFilter[filter]} : {}),
+        ...(paymentFilter[filter] ? {payment_status: paymentFilter[filter]} : {}),
+        ...(grid.debouncedSearch ? {formatted_number: {contains: grid.debouncedSearch}} : {}),
+        ...dashboardFilters,
+      }}, controller.signal);
+      if (!controller.signal.aborted) {
+        if (!result.length) throw new Error('Nu există documente emise pentru filtrele selectate.');
+        selectRows(result);
+      }
+    },
+  });
+  const exportKey = ["invoice-pdf-export", company?.id];
+  const pdfExport = useQuery({
+    queryKey: exportKey,
+    queryFn: ({signal}) => api<InvoicePdfExport | null>(`/companies/${company!.id}/invoice-pdf-exports/current`, {signal}),
+    enabled: Boolean(company?.id),
+    refetchInterval: (query) => ['queued', 'processing'].includes(query.state.data?.data?.status ?? '') ? 2000 : false,
+  });
+  const currentExport = pdfExport.data?.data;
+  const exportBusy = currentExport?.status === 'queued' || currentExport?.status === 'processing';
+  const createPdfExport = useMutation({
+    onMutate: ({companyId}: {companyId: string; ids: string[]}) => queryClient.cancelQueries({queryKey: ["invoice-pdf-export", companyId]}),
+    mutationFn: ({companyId, ids}: {companyId: string; ids: string[]}) => api<InvoicePdfExport>(`/companies/${companyId}/invoice-pdf-exports`, {
+      method: 'POST', body: JSON.stringify({invoice_ids: ids}),
+    }),
+    onSuccess: async (result, variables) => {
+      const key = ["invoice-pdf-export", variables.companyId];
+      await queryClient.cancelQueries({queryKey: key});
+      queryClient.setQueryData(key, result);
+    },
+    onError: () => { void queryClient.invalidateQueries({queryKey: exportKey}); },
+  });
+  const downloadPdfExport = useMutation({
+    mutationFn: () => downloadApiFile(`/companies/${company!.id}/invoice-pdf-exports/${currentExport!.id}/download`, currentExport!.filename),
+    onError: () => { void queryClient.invalidateQueries({queryKey: exportKey}); },
+  });
+  const exportUnavailable = selectedRows.some((invoice) => invoice.status !== 'issued')
+    ? 'Exportul PDF acceptă doar documente emise. Elimină ciornele și documentele anulate din selecție.'
+    : selectedRows.length > MAX_PDF_EXPORT ? `Selectează maximum ${MAX_PDF_EXPORT} de documente.` : null;
+
+  function setInvoiceFilters(values: Record<string, string>) {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      Object.entries(values).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key));
+      next.delete('page');
+      return next;
     });
-  }, [rows]);
+  }
 
   const invalidateInvoiceData = () => {
     void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
@@ -253,9 +313,14 @@ export function InvoicesPage() {
             name="select_all_invoices"
             slot="selection"
             ariaLabel="Selectează facturile eligibile de pe pagină"
+            isDisabled={!selectionReady}
             isSelected={allSelectableSelected}
-            isIndeterminate={!allSelectableSelected && selectedRows.length > 0}
-            onChange={(selected) => setSelectedIds(selected ? new Set(selectableRows.map((invoice) => invoice.id)) : new Set())}
+            isIndeterminate={!allSelectableSelected && selectableRows.some((invoice) => selectedIds.has(invoice.id))}
+            onChange={(selected) => setSelectedIds((previous) => {
+              const next = new Set(previous);
+              selectableRows.forEach((invoice) => selected ? next.add(invoice.id) : next.delete(invoice.id));
+              return next;
+            })}
           >
             <span className="sr-only">Selectează pagina</span>
           </AppCheckbox>
@@ -267,6 +332,7 @@ export function InvoicesPage() {
             slot="selection"
             value={invoice.id}
             ariaLabel={`Selectează ${invoice.formatted_number}`}
+            isDisabled={!selectionReady}
             isSelected={selectedIds.has(invoice.id)}
             onChange={(selected) => setSelectedIds((current) => {
               const next = new Set(current);
@@ -430,7 +496,7 @@ export function InvoicesPage() {
         ),
       },
     ],
-    [action, allSelectableSelected, navigate, previewingPdfId, selectableRows, selectedIds, selectedRows.length],
+    [action, allSelectableSelected, navigate, previewingPdfId, selectableRows, selectedIds, selectedRows.length, setSelectedIds, selectionReady],
   );
 
   return (
@@ -473,8 +539,8 @@ export function InvoicesPage() {
           </Button>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button variant="outline" isDisabled={exportInvoices.isPending} onPress={() => exportInvoices.mutate()}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" isDisabled={exportInvoices.isPending || !selectionReady} onPress={() => exportInvoices.mutate()}>
             <Download size={16} /> Exportă CSV
           </Button>
           <Button variant="primary" onPress={() => navigate("/facturi/noi")}>
@@ -493,6 +559,34 @@ export function InvoicesPage() {
           setSearchParams(next);
         }}>{item.label}</button>)}
       </div>
+      <div className="flex flex-wrap items-end gap-3" aria-label="Filtre facturi">
+        <AppSelect ariaLabel="Filtrează după client" label="Client" className="w-full sm:w-64" value={customerId || 'all'}
+          isDisabled={customers.isLoading} options={[{id: 'all', label: 'Toți clienții'}, ...(customers.data ?? []).map((customer) => ({id: customer.id, label: customer.name}))]}
+          onChange={(value) => setInvoiceFilters({customer_id: value === 'all' ? '' : value})} />
+        <I18nProvider locale="ro-RO">
+          <AppDatePicker name="issue_from" label="Emise de la" ariaLabel="Emise de la" className="w-full min-w-0 sm:w-44" value={issueFrom} maxValue={issueTo || undefined} onChange={(value) => setInvoiceFilters({issue_from: value})} />
+          <AppDatePicker name="issue_to" label="Până la" ariaLabel="Emise până la" className="w-full min-w-0 sm:w-44" value={issueTo} minValue={issueFrom || undefined} onChange={(value) => setInvoiceFilters({issue_to: value})} />
+        </I18nProvider>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" onPress={() => setInvoiceFilters(invoiceMonth(0))}>Luna curentă</Button>
+          <Button variant="ghost" onPress={() => setInvoiceFilters(invoiceMonth(-1))}>Luna trecută</Button>
+        </div>
+      </div>
+      {customers.isError ? <p role="alert" className="text-sm text-[var(--danger)]">Clienții nu au putut fi încărcați. <Button variant="ghost" onPress={() => void customers.refetch()}>Reîncearcă</Button></p> : null}
+      {invalidPeriod ? <p role="alert" className="text-sm text-[var(--danger)]">{malformedDate ? 'Perioada din adresă conține o dată invalidă. Alege din nou perioada sau resetează filtrele.' : 'Data de început trebuie să fie înaintea datei de sfârșit.'}</p> : null}
+      {currentExport ? <div role="status" className="flex flex-wrap items-center gap-3 text-sm text-[var(--text-muted)]">
+        {exportBusy ? <><Spinner size="sm" /> Se pregătesc {currentExport.document_count} PDF-uri. Poți reveni aici pentru descărcare.</> : null}
+        {currentExport.status === 'ready' ? <>{currentExport.document_count} PDF-uri pregătite · Disponibile până la {date(currentExport.expires_at)}
+          <Button variant="outline" isDisabled={downloadPdfExport.isPending} onPress={() => downloadPdfExport.mutate()}><Download size={16} /> Descarcă arhiva ZIP</Button></> : null}
+        {currentExport.status === 'failed' ? <span className="text-[var(--danger)]">{currentExport.failure}</span> : null}
+      </div> : null}
+      {selectedRows.length > 0 ? <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--text-muted)]">
+        <span>{selectedRows.length} documente selectate, inclusiv de pe alte pagini.</span>
+        <Button variant="ghost" isDisabled={selectFiltered.isPending || !selectionReady}
+          className="h-auto max-w-full whitespace-normal text-left" onPress={() => selectFiltered.mutate()}>Selectează toate documentele emise pentru PDF</Button>
+        {exportUnavailable ? <span>{exportUnavailable}</span> : null}
+      </div> : null}
+      {selectFiltered.isError && !(selectFiltered.error instanceof DOMException && selectFiltered.error.name === 'AbortError') ? <p role="alert" className="text-sm text-[var(--danger)]">{selectFiltered.error.message}</p> : null}
       {batchResult ? (
         <p role="status" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--text-muted)]">
           {batchResult.results.filter((result) => result.success).length} facturi {
@@ -506,7 +600,7 @@ export function InvoicesPage() {
       {/* Table card */}
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
         <DataTableLoadingOverlay isLoading={invoices.isFetching && !invoices.isLoading} />
-        {invoices.isLoading ? (
+        {invalidPeriod ? <p className="p-8 text-sm">Corectează perioada pentru a afișa facturile.</p> : invoices.isLoading ? (
           <div className="flex items-center justify-center gap-2.5 py-24 text-sm text-[var(--text-muted)]">
             <Spinner size="sm" /> Se încarcă facturile…
           </div>
@@ -542,17 +636,22 @@ export function InvoicesPage() {
             columns={columns}
             data={rows}
             getRowId={(invoice) => invoice.id}
-            selectedKeys={selectedIds}
+            selectedKeys={new Set(rows.filter((invoice) => selectedIds.has(invoice.id)).map((invoice) => invoice.id))}
             selectionBehavior="toggle"
             selectionMode="multiple"
+            disabledKeys={!selectionReady ? rows.map((invoice) => invoice.id) : []}
             sortDescriptor={grid.sort}
             onSelectionChange={(keys: Selection) => {
+              if (!selectionReady) return;
               if (keys === "all") {
-                setSelectedIds(new Set(selectableRows.map((invoice) => invoice.id)));
+                setSelectedIds((previous) => new Set([...previous, ...selectableRows.map((invoice) => invoice.id)]));
                 return;
               }
               const eligibleIds = new Set(selectableRows.map((invoice) => invoice.id));
-              setSelectedIds(new Set([...keys].map(String).filter((id) => eligibleIds.has(id))));
+              setSelectedIds((previous) => new Set([
+                ...[...previous].filter((id) => !rows.some((row) => row.id === id)),
+                ...[...keys].map(String).filter((id) => eligibleIds.has(id)),
+              ]));
             }}
             onSortChange={grid.setSort}
             onRowAction={(key) => navigate(`/facturi/${String(key)}`)}
@@ -569,6 +668,11 @@ export function InvoicesPage() {
         </ActionBar.Prefix>
         <Separator orientation="vertical" />
         <ActionBar.Content>
+          <Button size="sm" variant="ghost" aria-label="Exportă PDF-urile selectate"
+            isDisabled={Boolean(exportUnavailable) || exportBusy || createPdfExport.isPending || selectFiltered.isPending || !selectionReady}
+            onPress={() => createPdfExport.mutate({companyId: company!.id, ids: [...selectedIds]})}>
+            <Download size={15} /><span className="action-bar__label">Exportă PDF-uri</span>
+          </Button>
           {selectedOutstanding.length > 0 ? (
             <Button
               size="sm"
