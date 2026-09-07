@@ -1,5 +1,5 @@
 import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
-import {fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {act, fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {MemoryRouter, Route, Routes} from "react-router";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {
@@ -72,6 +72,7 @@ const invoice = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -98,6 +99,159 @@ describe("InvoiceDetailPage credit cancellation", () => {
 });
 
 describe("InvoiceDetailPage SPV", () => {
+  it("distinge suprimarea SES și raportul nu-este-spam de o reclamație", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/invoices/invoice-1")) return Promise.resolve(json(invoice));
+      if (url.endsWith("/deliveries")) return Promise.resolve(json([{
+        id: "suppressed", recipient: "client@example.test", cc: [], status: "failed",
+        open_count: 0, click_count: 0, complained_at: null,
+        events: [
+          {id: "blocked", type: "complaint", metadata: {complaint_subtype: "OnAccountSuppressionList"}, occurred_at: "2026-09-07T12:00:01Z"},
+          {id: "not-spam", type: "complaint", metadata: {feedback_type: "not-spam", recipient_scope: "copy"}, occurred_at: "2026-09-07T12:00:02Z"},
+        ],
+      }]));
+      if (url.endsWith("/payments") || url.endsWith("/efactura/submissions")) return Promise.resolve(json([]));
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/facturi/invoice-1"]}>
+          <Routes><Route path="/facturi/:id" element={<InvoiceDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", {name: /Vezi istoricul/}));
+    expect(screen.getByText("Trimitere blocată de Amazon SES")).toBeInTheDocument();
+    expect(screen.getByText("Raport: nu este spam (CC)")).toBeInTheDocument();
+    expect(screen.queryByText("Reclamație raportată")).not.toBeInTheDocument();
+  });
+
+  it("continuă să preia evenimentele SES după ce emailul a fost trimis", async () => {
+    vi.useFakeTimers({toFake: ["setInterval", "clearInterval"]});
+    let deliveryFetches = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/invoices/invoice-1")) return Promise.resolve(json(invoice));
+      if (url.endsWith("/deliveries")) {
+        deliveryFetches++;
+        return Promise.resolve(json([{
+          id: "sent-attempt", recipient: "client@example.test", cc: [], status: "sent",
+          sent_at: "2026-09-07T12:00:00Z", open_count: deliveryFetches > 1 ? 1 : 0, click_count: 0, events: [],
+        }]));
+      }
+      if (url.endsWith("/payments") || url.endsWith("/efactura/submissions")) return Promise.resolve(json([]));
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/facturi/invoice-1"]}>
+          <Routes><Route path="/facturi/:id" element={<InvoiceDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("client@example.test")).toBeInTheDocument();
+    expect(screen.queryByText("Activitate detectată")).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+    expect(await screen.findByText("Activitate detectată")).toBeInTheDocument();
+    expect(deliveryFetches).toBeGreaterThan(1);
+  });
+
+  it("afișează cronologic istoricul livrării și păstrează secundele", async () => {
+    const deliveries = [{
+      id: "delivery-1",
+      channel: "email",
+      recipient: "client@example.test",
+      cc: [],
+      subject: "Factura INV-0001",
+      message: null,
+      status: "sent",
+      provider_message_id: "ses-message-1",
+      requires_duplicate_confirmation: false,
+      error: null,
+      sent_at: "2026-09-07T12:00:01Z",
+      delivered_at: "2026-09-07T12:00:02Z",
+      first_opened_at: "2026-09-07T12:00:03Z",
+      last_opened_at: "2026-09-07T12:00:04Z",
+      open_count: 2,
+      first_clicked_at: null,
+      last_clicked_at: null,
+      click_count: 0,
+      complained_at: "2026-09-07T12:00:05Z",
+      created_at: "2026-09-07T12:00:00Z",
+      events: [
+        {id: "event-send", provider: "ses", type: "send", is_bot: false, metadata: null, occurred_at: "2026-09-07T12:00:01Z"},
+        {id: "event-delivery", provider: "ses", type: "delivery", is_bot: false, metadata: null, occurred_at: "2026-09-07T12:00:02Z"},
+        {id: "event-open", provider: "ses", type: "open", is_bot: true, metadata: null, occurred_at: "2026-09-07T12:00:03Z"},
+      ],
+    }];
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/invoices/invoice-1")) return Promise.resolve(json(invoice));
+      if (url.endsWith("/deliveries")) return Promise.resolve(json(deliveries));
+      if (url.endsWith("/payments") || url.endsWith("/efactura/submissions")) return Promise.resolve(json([]));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const {container} = render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/facturi/invoice-1"]}>
+          <Routes><Route path="/facturi/:id" element={<InvoiceDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Activitate detectată de 2 ori")).toBeInTheDocument();
+    expect(screen.getByText(/Reclamație raportată/)).toHaveTextContent(/:\d{2}:\d{2}$/);
+    fireEvent.click(screen.getByRole("button", {name: /Vezi istoricul/}));
+
+    const items = Array.from(container.querySelectorAll("#delivery-history-delivery-1 li"));
+    expect(items.map((item) => item.querySelector("div.font-medium")?.textContent)).toEqual([
+      "Preluată de Amazon SES",
+      "Livrată serverului destinatar",
+      "Activitate automată detectată",
+    ]);
+    expect(items.map((item) => item.querySelector("time")?.getAttribute("datetime"))).toEqual([
+      "2026-09-07T12:00:01Z",
+      "2026-09-07T12:00:02Z",
+      "2026-09-07T12:00:03Z",
+    ]);
+    expect(items.every((item) => /:\d{2}:\d{2}$/.test(item.querySelector("time")?.textContent ?? ""))).toBe(true);
+  });
+
+  it("păstrează încercarea retransmisă în istoric fără a permite încă un retry și separă evenimentele CC", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/invoices/invoice-1")) return Promise.resolve(json(invoice));
+      if (url.endsWith("/deliveries")) return Promise.resolve(json([{
+        id: "old-attempt", recipient: "client@example.test", cc: ["copy@example.test"], status: "failed",
+        retried_at: "2026-09-07T12:05:00Z", open_count: 1, click_count: 0,
+        events: [{id: "cc-bounce", provider: "ses", type: "bounce", is_bot: false, metadata: {recipient_scope: "copy"}, occurred_at: "2026-09-07T12:00:03Z"}],
+      }]));
+      if (url.endsWith("/payments") || url.endsWith("/efactura/submissions")) return Promise.resolve(json([]));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+        <MemoryRouter initialEntries={["/facturi/invoice-1"]}>
+          <Routes><Route path="/facturi/:id" element={<InvoiceDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(/Retrimisă/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "Reîncearcă livrarea"})).not.toBeInTheDocument();
+    expect(screen.getByText("Activitatea poate proveni și de la destinatarii în CC.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name: /Vezi istoricul/}));
+    expect(screen.getByText("Returnată de serverul destinatar (CC)")).toBeInTheDocument();
+  });
+
   it("păstrează layoutul facturii fără stiluri inline incompatibile cu CSP", async () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
       const url = String(input);

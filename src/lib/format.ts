@@ -2,6 +2,15 @@ import type {InvoiceStatus, Invoice, SpvSubmissionStatus} from "./types";
 
 const ronFmt = new Intl.NumberFormat("ro-RO", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const intFmt = new Intl.NumberFormat("ro-RO");
+const dateTimeSecondsFmt = new Intl.DateTimeFormat("ro-RO", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
 
 // Integer cents → "1.234,56" (no currency suffix).
 export function cents(value: number | null | undefined): string {
@@ -30,6 +39,13 @@ export function date(value: string | null | undefined): string {
   if (!value) return "—";
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
   return m ? `${m[3]}.${m[2]}.${m[1]}` : value;
+}
+
+export function dateTimeSeconds(value: string | null | undefined): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+
+  return Number.isNaN(parsed.getTime()) ? value : dateTimeSecondsFmt.format(parsed);
 }
 
 // The API only models draft/issued/cancelled. "overdue" is derived below.
