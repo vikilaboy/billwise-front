@@ -8,6 +8,7 @@ import {Banknote, Ban, Check, ChevronDown, ChevronLeft, Copy, Download, FileCode
 import {ActionTooltip, combineDisabledReasons, requiredFieldsReason} from "../components/ActionTooltip";
 import {useCompany} from "../components/AppShell";
 import {ConfirmDialog} from "../components/ConfirmDialog";
+import {invoiceDateError, localToday} from "../lib/invoiceChronology";
 import {AppDatePicker, AppSelect} from "../components/FormControls";
 import {InvoiceDocumentPreview} from "../components/InvoiceDocumentPreview";
 import {api, downloadApiFile, listQuery} from "../lib/api";
@@ -345,11 +346,17 @@ export function InvoiceDetailPage() {
     onSuccess: (result, {action}) => {
       setConfirmation(null);
       setCancellationReason("");
+      void queryClient.invalidateQueries({queryKey: ["invoice-series"]});
       void queryClient.invalidateQueries({queryKey: ["invoices", company?.id]});
       void queryClient.invalidateQueries({queryKey: ["dashboard", company?.id]});
       if (action === "delete") navigate("/facturi", {replace: true});
       else if (action === "duplicate" && result) navigate(`/facturi/${result.data.id}`);
       else void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id]});
+    },
+    onError: () => {
+      setConfirmation(null);
+      void queryClient.invalidateQueries({queryKey: ["invoice", company?.id, id]});
+      void queryClient.invalidateQueries({queryKey: ["invoice-series"]});
     },
   });
 
@@ -387,6 +394,7 @@ export function InvoiceDetailPage() {
   const payments = paymentsQuery.data?.data ?? [];
   const creditUsages = creditUsagesQuery.data?.data ?? [];
   const isDraft = invoice.status === "draft";
+  const issueDateError = isDraft ? invoiceDateError(invoice.issue_date, invoice.minimum_issue_date, localToday()) : null;
   const formattedNumber = invoice.formatted_number;
   const hasBlockingSubmission = Boolean(latest && ["queued", "sending", "sent", "processing", "accepted", "delivery_unknown"].includes(latest.status));
   const creditCancellationUnavailable = isCreditCancellationUnavailable(
@@ -478,9 +486,10 @@ export function InvoiceDetailPage() {
             <Button variant="outline" onPress={() => invoice.document_type === "correction" ? setCorrectionOpen(true) : navigate(`/facturi/${id}/editeaza`)}>
               <Pencil size={16} /> Editează
             </Button>
-            <Button variant="primary" isDisabled={lifecycleMutation.isPending} onPress={() => setConfirmation({kind: "issue"})}>
+            <Button variant="primary" isDisabled={lifecycleMutation.isPending || Boolean(issueDateError)} onPress={() => setConfirmation({kind: "issue"})}>
               <Send size={16} /> Emite
             </Button>
+            {issueDateError ? <p role="alert" className="text-xs text-[var(--danger)]">{issueDateError} Editează ciorna pentru a corecta data.</p> : null}
           </>
         ) : (
           <>
@@ -999,6 +1008,7 @@ export function InvoiceDetailPage() {
           if (!isOpen) {
             setConfirmation(null);
             setCancellationReason("");
+      void queryClient.invalidateQueries({queryKey: ["invoice-series"]});
           }
         }}
         onConfirm={confirmDetailAction}
@@ -1126,6 +1136,7 @@ function CorrectionEditModal({companyId, invoice, originalId, onClose, onSaved}:
   });
   const originalLines = original.data?.data.lines ?? [];
   const correctionEditReason = save.isPending ? "Salvarea este în curs." : combineDisabledReasons(
+    invoiceDateError(issueDate, invoice.minimum_issue_date, localToday()),
     requiredFieldsReason([{label: "explicație", missing: !description.trim()}]),
     !Object.values(quantities).some((value) => Number(value) > 0) && "Introdu o cantitate mai mare decât zero pentru cel puțin o linie.",
   );
@@ -1134,7 +1145,8 @@ function CorrectionEditModal({companyId, invoice, originalId, onClose, onSaved}:
     <div className="w-full max-w-xl rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
       <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">Editează ciorna storno</h2><p className="mt-1 text-xs text-[var(--text-muted)]">Clientul, moneda, TVA-ul și prețurile rămân cele din factura originală.</p></div><Button isIconOnly variant="ghost" onPress={onClose}><X size={17} /></Button></header>
       <div className="grid gap-4 p-5">
-        <label className="text-xs font-semibold text-[var(--text-muted)]">Data emiterii<AppDatePicker name="issue_date" ariaLabel="Data emiterii" value={issueDate} onChange={setIssueDate} /></label>
+        <label className="text-xs font-semibold text-[var(--text-muted)]">Data emiterii<AppDatePicker name="issue_date" ariaLabel="Data emiterii" value={issueDate} minValue={invoice.minimum_issue_date ?? undefined} maxValue={localToday()} onChange={setIssueDate} /></label>
+        {invoiceDateError(issueDate, invoice.minimum_issue_date, localToday()) ? <p role="alert" className="text-xs text-[var(--danger)]">{invoiceDateError(issueDate, invoice.minimum_issue_date, localToday())}</p> : null}
         <label className="text-xs font-semibold text-[var(--text-muted)]">Motiv<AppSelect name="adjustment_reason" ariaLabel="Motiv ajustare" value={reason} onChange={(value) => setReason(value as InvoiceAdjustmentReason)} options={[{id: "return", label: "Retur"}, {id: "price_correction", label: "Corecție de preț"}, {id: "post_sale_discount", label: "Reducere ulterioară"}, {id: "volume_rebate", label: "Rebate de volum"}, {id: "contract_adjustment", label: "Ajustare contractuală"}, {id: "cancellation", label: "Anulare"}, {id: "other", label: "Alt motiv"}]} /></label>
         <label className="text-xs font-semibold text-[var(--text-muted)]">Explicație<textarea className="mt-1.5 min-h-24 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 text-sm" value={description} onChange={(event) => setDescription(event.target.value)} /></label>
         <div><div className="text-xs font-semibold text-[var(--text-muted)]">Cantități corectate</div><div className="mt-2 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">{original.isLoading ? <div className="p-4"><Spinner size="sm" /></div> : originalLines.map((line) => <label key={line.id} className="flex items-center gap-3 p-3 text-sm"><span className="min-w-0 flex-1 truncate">{line.description}</span><input className="h-9 w-24 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-2" type="number" min="0" max={Number(line.quantity)} step="0.01" value={quantities[line.id] ?? ""} onChange={(event) => setQuantities((current) => ({...current, [line.id]: event.target.value}))} /></label>)}</div></div>

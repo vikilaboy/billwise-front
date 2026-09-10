@@ -277,7 +277,8 @@ export type Invoice = {
     signed_total_cents: number;
     currency: string;
   }>;
-  number: number;
+  number: number | null;
+  minimum_issue_date?: string | null;
   formatted_number: string;
   invoice_series_id?: string;
   issue_date: string | null;

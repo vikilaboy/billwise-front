@@ -9,10 +9,8 @@ import {AppCheckbox, AppDatePicker, AppSelect} from "../components/FormControls"
 import {api, listQuery} from "../lib/api";
 import type {Currency, Customer, Invoice, InvoiceAdjustmentReason, Product, VatCategory, VatProfile} from "../lib/types";
 import {exchangeRate, money} from "../lib/format";
+import {invoiceDateError, localToday} from "../lib/invoiceChronology";
 
-// The API create contract (StoreInvoiceRequest) accepts NO invoice_series_id — the
-// series is resolved server-side from the company's default series. We still show a
-// Serie select for the number preview, but it is intentionally not part of the payload.
 type InvoiceSeries = {
   id: string;
   name: string;
@@ -20,6 +18,7 @@ type InvoiceSeries = {
   document_type: string;
   next_number: number;
   formatted_next_number: string;
+  minimum_issue_date?: string | null;
   is_default: boolean;
   is_active: boolean;
 };
@@ -51,7 +50,7 @@ const UNIT_LABEL = "buc";
 const UNIT_CODE = "C62"; // "One (piece)"
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localToday();
 }
 
 function isoPlusDays(days: number): string {
@@ -172,7 +171,7 @@ export function NewInvoicePage() {
 
   const series = useQuery({
     queryKey: ["invoice-series", company?.id],
-    queryFn: () => api<InvoiceSeries[]>(`/companies/${company!.id}/invoice-series`),
+    queryFn: () => api<InvoiceSeries[]>(`/companies/${company!.id}/invoice-series?_per_page=100`),
     enabled: Boolean(company?.id),
   });
   const products = useQuery({
@@ -276,19 +275,21 @@ export function NewInvoicePage() {
   }, [invoiceQuery.data, navigate]);
 
   const customerList = customers.data?.data ?? [];
-  const seriesList = series.data?.data ?? [];
+  const seriesList = (series.data?.data ?? []).filter((item) => item.is_active || item.id === loadedInvoice?.invoice_series_id);
 
   // Default-select the client's default series once loaded.
   const selectedSeries =
-    seriesList.find((s) => s.id === seriesId) ??
-    seriesList.find((s) => s.is_default) ??
-    seriesList[0];
+    id ? seriesList.find((s) => s.id === loadedInvoice?.invoice_series_id) : (
+      seriesList.find((s) => s.id === seriesId) ??
+      seriesList.find((s) => s.is_default) ??
+      seriesList[0]
+    );
 
-  const numberPreview = id && loadedInvoice
-    ? loadedInvoice.formatted_number
-    : selectedSeries
-      ? selectedSeries.formatted_next_number ?? `${selectedSeries.prefix}${selectedSeries.next_number}`
-      : "—";
+  const minimumIssueDate = selectedSeries?.minimum_issue_date ?? loadedInvoice?.minimum_issue_date;
+  const dateError = invoiceDateError(issueDate, minimumIssueDate, todayIso());
+  const numberPreview = selectedSeries
+    ? selectedSeries.formatted_next_number ?? `${selectedSeries.prefix}${selectedSeries.next_number}`
+    : "—";
 
   const isForeign = currency !== "RON";
   const referenceCandidates = useQuery({
@@ -408,7 +409,7 @@ export function NewInvoicePage() {
         vat_exemption_reason: r.vat_exemption_reason,
       })),
     };
-    if (!isCreditNote) return {...common, due_date: dueDate || null};
+    if (!isCreditNote) return {...common, due_date: dueDate || null, ...creditNoteSeriesPayload(id, selectedSeries?.id)};
 
     return {
       ...common,
@@ -440,21 +441,29 @@ export function NewInvoicePage() {
       });
       let invoice = created.data;
       if (opts.issue) {
-        const issued = await api<Invoice>(
-          `/companies/${company!.id}/invoices/${invoice.id}/issue`,
-          {method: "POST"},
-        );
-        invoice = issued.data;
+        try {
+          const issued = await api<Invoice>(
+            `/companies/${company!.id}/invoices/${invoice.id}/issue`,
+            {method: "POST"},
+          );
+          invoice = issued.data;
+        } catch (error) {
+          queryClient.invalidateQueries({queryKey: ["invoice-series"]});
+          if (!id) navigate(`/facturi/${invoice.id}/editeaza`, {replace: true});
+          throw error;
+        }
       }
       return invoice;
     },
     onSuccess: (invoice) => {
+      queryClient.invalidateQueries({queryKey: ["invoice-series"]});
       queryClient.invalidateQueries({queryKey: ["invoices"]});
       navigate(`/facturi/${invoice.id}`);
     },
   });
 
   function submit(issue: boolean) {
+    if (dateError || !selectedSeries || series.isPending || series.isError) return;
     mutation.mutate({issue});
   }
 
@@ -469,9 +478,13 @@ export function NewInvoicePage() {
   );
   const hasPeriod = Boolean(billingPeriodStart) && Boolean(billingPeriodEnd) && billingPeriodEnd >= billingPeriodStart;
   const creditContextValid = !isCreditNote || (Boolean(adjustmentDescription.trim()) && (hasPeriod || selectedReferenceIds.length > 0) && referencesValid && manualRonValid);
-  const baseInvalid = pending || !company?.id || !customerId || rows.some((row) => !row.description.trim() || row.quantity <= 0 || row.unit_price < 0 || !row.vat_profile_id);
+  const baseInvalid = Boolean(dateError) || series.isPending || series.isError || !selectedSeries || pending || !company?.id || !customerId || rows.some((row) => !row.description.trim() || row.quantity <= 0 || row.unit_price < 0 || !row.vat_profile_id);
   const disabled = submissionDisabledState(baseInvalid, isCreditNote, creditContextValid, referencesValid);
   const baseDisabledReason = combineDisabledReasons(
+    dateError,
+    series.isError && "Nu s-au putut verifica seria și data minimă. Reîncarcă pagina.",
+    series.isPending && "Se verifică seria și data minimă.",
+    !selectedSeries && "Selectează o serie activă.",
     requiredFieldsReason([
       {label: "firmă", missing: !company?.id},
       {label: "client", missing: !customerId},
@@ -535,20 +548,21 @@ export function NewInvoicePage() {
               </div>
 
               <div>
-                <FieldLabel>Număr</FieldLabel>
+                <FieldLabel>Următorul număr estimat</FieldLabel>
                 <input
-                  name="issue_date"
+                  name="number_preview"
                   disabled
                   aria-label="Număr factură"
                   value={numberPreview}
                   readOnly
                   className={inputBase + " font-semibold tabular-nums"}
                 />
+                <p className="mt-1 text-xs text-[var(--text-muted)]">Numărul definitiv se atribuie la emitere. Ciorna nu consumă un număr.</p>
               </div>
-
               <div>
                 <FieldLabel>Data emiterii</FieldLabel>
-                <AppDatePicker name="issue_date" ariaLabel="Data emiterii" value={issueDate} onChange={setIssueDate} />
+                <AppDatePicker name="issue_date" ariaLabel="Data emiterii" value={issueDate} minValue={minimumIssueDate ?? undefined} maxValue={todayIso()} onChange={setIssueDate} />
+                {dateError ? <p role="alert" className="mt-1 text-xs text-[var(--danger)]">{dateError}</p> : minimumIssueDate ? <p className="mt-1 text-xs text-[var(--text-muted)]">Data minimă în această serie: {minimumIssueDate.split("-").reverse().join(".")}.</p> : null}
               </div>
 
               {!isCreditNote ? <div>

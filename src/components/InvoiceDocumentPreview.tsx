@@ -123,7 +123,7 @@ export function InvoiceDocumentPreview({invoice}: {invoice: Invoice}) {
           <div className="text-[20px] font-extrabold uppercase leading-none">
             <LabelPair name={documentTitle} bilingual={bilingual} />
           </div>
-          <div className="mt-2 text-[13px] font-extrabold text-[#16a34a]">{invoice.formatted_number}</div>
+          <div className="mt-2 text-[13px] font-extrabold text-[#16a34a]">{invoice.status === "draft" ? "Ciornă · număr atribuit la emitere" : invoice.formatted_number}</div>
           {invoice.corrected_invoice ? (
             <div className="mt-1 text-[#64716a]">
               <LabelPair name="corrects" bilingual={bilingual} /> {invoice.corrected_invoice.formatted_number}

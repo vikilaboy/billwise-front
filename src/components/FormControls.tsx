@@ -162,7 +162,7 @@ export function AppDatePicker({
         </DateField.Suffix>
       </DateField.Group>
       <DatePicker.Popover>
-        <Calendar aria-label={ariaLabel}>
+        <Calendar aria-label={ariaLabel} minValue={minValue ? parseDate(minValue) : undefined} maxValue={maxValue ? parseDate(maxValue) : undefined}>
           <Calendar.Header>
             <Calendar.YearPickerTrigger>
               <Calendar.YearPickerTriggerHeading />
