@@ -51,7 +51,7 @@ const META: Record<string, [string, string]> = {
   "/facturi": ["Facturi", "Toate documentele emise"],
   "/achizitii": ["Facturi furnizori", "Documente primite din SPV prin RO e-Factura"],
   "/seif-fiscal": ["Seif fiscal", "Originalele ANAF păstrate în spațiul privat al firmei"],
-  "/recurente": ["Facturi recurente", "Generare controlată de ciorne"],
+  "/recurente": ["Facturi recurente", "Generare, emitere și notificări automate"],
   "/contracte": ["Contracte", "Termeni comerciali și facturare dinamică"],
   "/clienti": ["Clienți", "Firmele cu care lucrezi"],
   "/produse": ["Produse și servicii", "Catalogul firmei selectate"],

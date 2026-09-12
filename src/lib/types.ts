@@ -628,11 +628,14 @@ export type RecurringInvoiceTemplate = {
   }>;
   notes: string | null;
   status: "active" | "paused" | "archived";
-  mode: "create_draft";
+  mode: "create_draft" | "issue_invoice";
+  auto_issue: boolean;
+  notification_emails: string[];
   customer: {id: string; name: string} | null;
   series: {id: string; name: string} | null;
   runs: Array<{
     id: string;
+    automation_snapshot?: {auto_issue: boolean; notification_emails: string[]; outcome: "draft" | "issued" | "issue_failed"; issue_error: string | null} | null;
     scheduled_for: string;
     status: "running" | "created" | "failed" | "skipped";
     error: string | null;

@@ -35,7 +35,7 @@ describe("RecurringPage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText(/Șabloanele generează numai ciorne/)).toBeInTheDocument();
+    expect(await screen.findByText(/Recurențele generează ciorne sau emit facturi automat/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {name: /Starea șabloanelor recurente/}));
     fireEvent.click(await screen.findByRole("option", {name: "Active"}));
 
@@ -139,7 +139,7 @@ describe("RecurringPage", () => {
 
     await expect(apiErrorEvent).resolves.toMatchObject({
       problem: {
-        title: "Ciorna recurentă nu a putut fi generată",
+        title: "Factura recurentă nu a putut fi generată",
         detail: "Seria nu mai este activă.",
       },
     });
@@ -239,4 +239,46 @@ describe("RecurringPage", () => {
       locale: "en",
     });
   });
+  it("salvează automatizarea unui șablon blocat fără versiune nouă sau previzualizare", async () => {
+    const template = {id: "locked", name: "Abonament", status: "active", is_locked: true,
+      auto_issue: false, notification_emails: ["old@example.com"], frequency: "monthly",
+      next_run_at: "2028-02-01T07:00:00Z", timezone: "Europe/Bucharest"};
+    const fetchMock = vi.fn().mockImplementation(async (_url, options) => new Response(JSON.stringify({
+      data: options?.method === "PATCH" ? {...template, auto_issue: true} : [template],
+      meta: {pagination: {current_page: 1, per_page: 20, total: 1, last_page: 1}},
+    }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}}})}>
+      <MemoryRouter><RecurringPage /></MemoryRouter></QueryClientProvider>);
+    fireEvent.click(await screen.findByRole("button", {name: "Automatizare"}));
+    expect(screen.getByText(/fără o versiune nouă/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", {name: "Emite automat factura"}));
+    fireEvent.change(screen.getByRole("textbox", {name: "Adrese de email pentru notificări"}), {target: {value: " One@Example.com; two@example.com\nONE@example.com "}});
+    fireEvent.click(screen.getByRole("button", {name: "Salvează setările"}));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => String(url).endsWith("/locked/automation") && options.method === "PATCH")).toBe(true));
+    const [, options] = fetchMock.mock.calls.find(([, options]) => options?.method === "PATCH")!;
+    expect(JSON.parse(options.body)).toEqual({auto_issue: true, notification_emails: ["one@example.com", "two@example.com"]});
+    expect(fetchMock.mock.calls.some(([url]) => /new-version|preview/.test(String(url)))).toBe(false);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("păstrează setările în formular dacă salvarea adreselor eșuează", async () => {
+    const template = {id: "locked", name: "Abonament", status: "active", is_locked: true,
+      auto_issue: true, notification_emails: [], frequency: "monthly",
+      next_run_at: "2028-02-01T07:00:00Z", timezone: "Europe/Bucharest"};
+    const fetchMock = vi.fn().mockImplementation(async (_url, options) => new Response(JSON.stringify(options?.method === "PATCH"
+      ? {title: "Adresa nu este validă", status: 422, errors: {"notification_emails.0": ["Adresa nu este validă"]}}
+      : {data: [template]}), {status: options?.method === "PATCH" ? 422 : 200, headers: {"Content-Type": "application/json"}}));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false}, mutations: {retry: false}}})}>
+      <MemoryRouter><RecurringPage /></MemoryRouter></QueryClientProvider>);
+    fireEvent.click(await screen.findByRole("button", {name: "Automatizare"}));
+    fireEvent.change(screen.getByRole("textbox", {name: "Adrese de email pentru notificări"}), {target: {value: "bad-email"}});
+    fireEvent.click(screen.getByRole("button", {name: "Salvează setările"}));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Setările nu au fost salvate");
+    expect(screen.getByRole("textbox", {name: "Adrese de email pentru notificări"})).toHaveValue("bad-email");
+    const [, options] = fetchMock.mock.calls.find(([, options]) => options?.method === "PATCH")!;
+    expect(JSON.parse(options.body)).toEqual({notification_emails: ["bad-email"]});
+  });
+
 });

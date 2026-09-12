@@ -1,6 +1,6 @@
 import {useRef, useState} from "react";
 import {useMutation, useQuery, useQueryClient} from "@tanstack/react-query";
-import {Button, Calendar, Chip, DateField, DatePicker, Label, ListBox, Select, Spinner, TextArea, TextField} from "@heroui/react";
+import {Button, Calendar, Chip, DateField, DatePicker, Label, ListBox, Modal, Select, Spinner, TextArea, TextField} from "@heroui/react";
 import {parseDate} from "@internationalized/date";
 import {Pause, Pencil, Play, Plus, Repeat, Trash2, X} from "lucide-react";
 import {useNavigate, useSearchParams} from "react-router";
@@ -12,7 +12,7 @@ import {api, listQuery, reportApiError} from "../lib/api";
 import type {Contract, Currency, Customer, RecurringInvoiceTemplate, VatProfile} from "../lib/types";
 
 type Series = {id: string; name: string; is_active: boolean};
-type RecurringRunResult = {status: string; error: string | null; invoice_id: string | null};
+type RecurringRunResult = {status: string; error: string | null; invoice_id: string | null; automation_snapshot?: {outcome: string; issue_error: string | null} | null};
 type RecurringLineForm = {
   description_template: string;
   quantity: string;
@@ -95,6 +95,7 @@ export function RecurringPage() {
   const status: "all" | "active" | "paused" = requestedStatus === "active" || requestedStatus === "paused" ? requestedStatus : "all";
   const page = Math.max(1, Number(params.get("page")) || 1);
   const [editing, setEditing] = useState<RecurringInvoiceTemplate | null | undefined>(undefined);
+  const [automation, setAutomation] = useState<RecurringInvoiceTemplate | null>(null);
   const templates = useQuery({
     queryKey: ["recurring-invoices", company?.id, status, page],
     queryFn: () => api<RecurringInvoiceTemplate[]>(`/companies/${company!.id}/recurring-invoices${listQuery({page, perPage: 20, filter: status === "all" ? undefined : {status}})}`),
@@ -107,10 +108,13 @@ export function RecurringPage() {
         const result = await api<RecurringRunResult>(`/companies/${company!.id}/recurring-invoices/${template.id}/run`, {method: "POST"});
         if (result.data.status !== "created" || !result.data.invoice_id) {
           throw reportApiError({
-            title: "Ciorna recurentă nu a putut fi generată",
+            title: "Factura recurentă nu a putut fi generată",
             status: 422,
             detail: result.data.error ?? "Operațiunea a eșuat.",
           });
+        }
+        if (result.data.automation_snapshot?.outcome === "issue_failed") {
+          reportApiError({title: "Ciorna a fost păstrată; emiterea automată a eșuat", status: 422, detail: result.data.automation_snapshot.issue_error ?? "Verifică factura înainte de emitere."});
         }
         return result;
       }
@@ -125,7 +129,7 @@ export function RecurringPage() {
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm text-[var(--text-muted)]">Șabloanele generează numai ciorne. Emiterea, emailul și SPV rămân acțiuni explicite.</p>
+          <p className="text-sm text-[var(--text-muted)]">Recurențele generează ciorne sau emit facturi automat, conform setărilor. Primești o notificare la fiecare generare.</p>
           <AppSelect ariaLabel="Starea șabloanelor recurente" className="mt-3 w-48" value={status} options={[
             {id: "all", label: "Toate"},
             {id: "active", label: "Active"},
@@ -142,13 +146,14 @@ export function RecurringPage() {
       <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]">
         {templates.isLoading ? <div className="flex justify-center gap-2 py-20"><Spinner size="sm" /> Se încarcă…</div>
           : templates.isError ? <div className="py-20 text-center text-sm text-[var(--danger)]">Șabloanele nu au putut fi încărcate.</div>
-          : rows.length === 0 ? <div className="flex flex-col items-center gap-2 py-20 text-center"><Repeat size={26} className="text-[var(--faint)]" /><b>Niciun șablon recurent</b><span className="text-sm text-[var(--text-muted)]">Configurează prima generare controlată de ciorne.</span></div>
+          : rows.length === 0 ? <div className="flex flex-col items-center gap-2 py-20 text-center"><Repeat size={26} className="text-[var(--faint)]" /><b>Niciun șablon recurent</b><span className="text-sm text-[var(--text-muted)]">Configurează prima factură recurentă.</span></div>
           : <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="bg-[var(--bg-muted)] text-left text-xs uppercase text-[var(--text-muted)]"><tr><th className="p-3">Șablon</th><th className="p-3">Client</th><th className="p-3">Frecvență</th><th className="p-3">Următoarea rulare</th><th className="p-3">Status</th><th className="p-3 text-right">Acțiuni</th></tr></thead><tbody>
-            {rows.map((template) => <tr key={template.id} className="border-t border-[var(--border)]"><td className="p-3 font-semibold">{template.name}{template.billing_source === "contract" ? <span className="ml-2 rounded bg-[var(--bg-muted)] px-2 py-0.5 text-xs">contract</span> : null}{template.is_locked ? <span className="ml-2 text-xs text-[var(--text-muted)]">versiune blocată</span> : null}</td><td className="p-3">{template.customer?.name ?? "—"}</td><td className="p-3">{scheduleLabel(template)}</td><td className="p-3">{recurringDate(template.next_run_at, template.schedule?.timezone ?? template.timezone)}</td><td className="p-3"><Chip size="sm" variant="soft" color={templateStatus[template.status].color}>{templateStatus[template.status].label}</Chip></td><td className="p-3"><div className="flex justify-end gap-1">
+            {rows.map((template) => <tr key={template.id} className="border-t border-[var(--border)]"><td className="p-3 font-semibold">{template.name}<span className="ml-2 text-xs font-normal text-[var(--text-muted)]">{template.auto_issue ? "Emitere automată" : "Ciornă"}</span>{template.billing_source === "contract" ? <span className="ml-2 rounded bg-[var(--bg-muted)] px-2 py-0.5 text-xs">contract</span> : null}{template.is_locked ? <span className="ml-2 text-xs text-[var(--text-muted)]">versiune blocată</span> : null}</td><td className="p-3">{template.customer?.name ?? "—"}</td><td className="p-3">{scheduleLabel(template)}</td><td className="p-3">{recurringDate(template.next_run_at, template.schedule?.timezone ?? template.timezone)}</td><td className="p-3"><Chip size="sm" variant="soft" color={templateStatus[template.status].color}>{templateStatus[template.status].label}</Chip></td><td className="p-3"><div className="flex justify-end gap-1">
+              <Button size="sm" variant="outline" onPress={() => setAutomation(template)}>Automatizare</Button>
               <Button isIconOnly size="sm" variant="ghost" aria-label={template.is_locked ? "Creează versiune nouă" : "Editează"} onPress={() => setEditing(template)}><Pencil size={14} /></Button>
               <Button isIconOnly size="sm" variant="ghost" aria-label={template.status === "active" ? "Pauză" : "Reia"} onPress={() => mutate.mutate({template, action: "toggle"})}>{template.status === "active" ? <Pause size={14} /> : <Play size={14} />}</Button>
               <Button size="sm" variant="outline" isDisabled={template.status !== "active"} onPress={() => {
-                if (window.confirm("Generezi acum o ciornă? Nu se va emite și nu se va trimite automat.")) mutate.mutate({template, action: "run"});
+                if (window.confirm(template.auto_issue ? "Generezi și emiți acum factura? Se vor trimite notificările configurate." : "Generezi acum o ciornă? Se vor trimite notificările configurate.")) mutate.mutate({template, action: "run"});
               }}><Play size={14} /> Generează acum</Button>
               <Button isIconOnly size="sm" variant="ghost" aria-label="Șterge" onPress={() => {
                 if (window.confirm("Ștergi șablonul? Facturile deja generate rămân neschimbate.")) mutate.mutate({template, action: "delete"});
@@ -161,6 +166,11 @@ export function RecurringPage() {
           setParams(next);
         }} />
       </div>
+      {automation && company?.id ? <AutomationModal key={automation.id} companyId={company.id} template={automation} onClose={() => setAutomation(null)} onSaved={() => {
+        void queryClient.invalidateQueries({queryKey: ["recurring-invoices", company.id]});
+        void queryClient.invalidateQueries({queryKey: ["recurring-invoice", company.id, automation.id]});
+        setAutomation(null);
+      }} /> : null}
       {editing !== undefined && company?.id ? <TemplateModal companyId={company.id} template={editing} onClose={() => setEditing(undefined)} onSaved={() => {
         void queryClient.invalidateQueries({queryKey: ["recurring-invoices", company.id]});
         setEditing(undefined);
@@ -172,6 +182,8 @@ export function RecurringPage() {
 function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
   companyId: string; template: RecurringInvoiceTemplate | null; onClose: () => void; onSaved: () => void; onOpenInvoice: (id: string) => void;
 }) {
+  const [autoIssue, setAutoIssue] = useState(false);
+  const [notificationEmails, setNotificationEmails] = useState("");
   const [previewedPayload, setPreviewedPayload] = useState<string | null>(null);
   const [form, setForm] = useState<Form>(() => template ? {
     billing_source: template.billing_source ?? "custom",
@@ -222,6 +234,7 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
   const contracts = useQuery({queryKey: ["contracts", companyId, "recurring"], queryFn: () => api<Contract[]>(`/companies/${companyId}/contracts${listQuery({perPage: 100, filter: {status: {eq: "active"}}})}`)});
   const selectedContract = (contracts.data?.data ?? []).find((item) => item.id === form.contract_id);
   const payload = () => ({
+    ...(!template ? {auto_issue: autoIssue, notification_emails: parseNotificationEmails(notificationEmails)} : {}),
     billing_source: form.billing_source,
     ...(form.billing_source === "contract" ? {
       contract_id: form.contract_id,
@@ -345,7 +358,7 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
   const recurringSaveDisabled = save.isPending || recurringDisabledReason !== null;
   return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-4" role="dialog" aria-modal="true">
     <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-lg)]">
-      <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">{template?.is_locked ? "Versiune nouă a șablonului" : template ? "Editează șablonul" : "Șablon recurent nou"}</h2><p className="mt-1 text-xs text-[var(--text-muted)]">{template?.is_locked ? "Versiunea folosită la facturile emise rămâne neschimbată." : "Următoarea generare va crea numai o ciornă."}</p></div><Button isIconOnly variant="ghost" onPress={onClose}><X size={17} /></Button></header>
+      <header className="flex items-center justify-between border-b border-[var(--border)] p-5"><div><h2 className="font-semibold">{template?.is_locked ? "Versiune nouă a șablonului" : template ? "Editează șablonul" : "Șablon recurent nou"}</h2><p className="mt-1 text-xs text-[var(--text-muted)]">{template?.is_locked ? "Versiunea folosită la facturile emise rămâne neschimbată." : (template?.auto_issue || (!template && autoIssue) ? "Următoarea generare va emite automat factura." : "Următoarea generare va crea o ciornă.")}</p></div><Button isIconOnly variant="ghost" onPress={onClose}><X size={17} /></Button></header>
       <div className="grid flex-1 gap-4 overflow-y-auto p-5 sm:grid-cols-2">
         <Field label="Denumire"><input name="name" className={input} value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
         <HeroSelectField name="billing_source" label="Sursa valorilor" value={form.billing_source} onChange={(value) => setForm((current) => ({...current, billing_source: value as Form["billing_source"], contract_id: "", contract_line_ids: []}))} options={[{id:"custom",label:"Valori definite în șablon"},{id:"contract",label:"Contract activ"}]} />
@@ -417,19 +430,74 @@ function TemplateModal({companyId, template, onClose, onSaved, onOpenInvoice}: {
           </div>
         </div>
         </> : <div className="rounded-xl bg-[var(--bg-muted)] p-4 text-xs sm:col-span-2">Clientul, moneda, termenul, descrierea, cantitatea și tariful sunt preluate din versiunea contractuală selectată. Limba facturii se alege separat.</div>}
+        {!template ? <div className="sm:col-span-2"><AutomationFields autoIssue={autoIssue} emails={notificationEmails} onAutoIssue={setAutoIssue} onEmails={setNotificationEmails} /></div> : null}
         {preview.data ? <div className="rounded-xl bg-[var(--bg-muted)] p-4 text-xs sm:col-span-2">
           <b>Previzualizare</b>
           <div className="mt-2">Generare: {recurringDate(preview.data.data.scheduled_for)} · perioadă: {preview.data.data.period.start} – {preview.data.data.period.end} · scadență: {preview.data.data.due_date}</div>
           {preview.data.data.working_days ? <div className="mt-1 font-semibold">{preview.data.data.working_days.working_days} zile lucrătoare{preview.data.data.totals ? ` · total ${preview.data.data.totals.total_cents / 100} ${form.currency}` : ""}</div> : null}
           {preview.data.data.lines.map((line, index) => <pre key={index} className="mt-2 whitespace-pre-wrap font-sans">{line.description}</pre>)}
         </div> : null}
-        {template && (detail.data?.data.runs ?? []).length > 0 ? <div className="sm:col-span-2"><b className="text-xs">Istoric rulări</b>{detail.data!.data.runs.map((run) => <div key={run.id} className="mt-2 flex items-center gap-2 rounded-lg bg-[var(--bg-muted)] px-3 py-2 text-xs"><button type="button" disabled={!run.invoice_id} onClick={() => run.invoice_id && onOpenInvoice(run.invoice_id)} className="flex flex-1 justify-between text-left"><span>{recurringDate(run.scheduled_for, template.timezone)}</span><span>{run.status === "created" ? "Ciornă creată" : run.error ?? run.status}</span></button>{run.status === "skipped" ? <Button size="sm" variant="outline" isDisabled={recover.isPending} onPress={() => {
-          if (window.confirm(`Recuperezi perioada omisă din ${recurringDate(run.scheduled_for, template.timezone)}? Se va genera numai o ciornă.`)) recover.mutate(run.id);
+        {template && (detail.data?.data.runs ?? []).length > 0 ? <div className="sm:col-span-2"><b className="text-xs">Istoric rulări</b>{detail.data!.data.runs.map((run) => <div key={run.id} className="mt-2 flex items-center gap-2 rounded-lg bg-[var(--bg-muted)] px-3 py-2 text-xs"><button type="button" disabled={!run.invoice_id} onClick={() => run.invoice_id && onOpenInvoice(run.invoice_id)} className="flex flex-1 justify-between text-left"><span>{recurringDate(run.scheduled_for, template.timezone)}</span><span>{run.status === "created" ? (run.automation_snapshot?.outcome === "issued" ? "Factură emisă" : run.automation_snapshot?.outcome === "issue_failed" ? `Ciornă păstrată · emitere eșuată: ${run.automation_snapshot.issue_error}` : "Ciornă creată") : run.error ?? run.status}</span></button>{run.status === "skipped" ? <Button size="sm" variant="outline" isDisabled={recover.isPending} onPress={() => {
+          if (window.confirm(`Recuperezi perioada omisă din ${recurringDate(run.scheduled_for, template.timezone)}? ${template.auto_issue ? "Factura va fi emisă automat." : "Se va genera o ciornă."}`)) recover.mutate(run.id);
         }}>Recuperează</Button> : null}</div>)}</div> : null}
       </div>
       <footer className="flex justify-end gap-2 border-t border-[var(--border)] p-4"><Button variant="outline" onPress={onClose}>Anulează</Button><Button variant="outline" isDisabled={preview.isPending} onPress={() => preview.mutate()}>{preview.isPending ? <Spinner size="sm" /> : null} Previzualizează</Button><ActionTooltip content={recurringDisabledReason ?? (template?.is_locked ? "Creează versiunea" : "Salvează șablonul")} isDisabled={recurringSaveDisabled}><Button variant="primary" isDisabled={recurringSaveDisabled} onPress={() => save.mutate()}>{save.isPending ? <Spinner size="sm" /> : null} {template?.is_locked ? "Creează versiunea" : "Salvează"}</Button></ActionTooltip></footer>
     </div>
   </div>;
+}
+
+function parseNotificationEmails(value: string): string[] {
+  return [...new Set(value.split(/[\s,;]+/).map((email) => email.trim().toLowerCase()).filter(Boolean))];
+}
+
+function AutomationFields({autoIssue, emails, onAutoIssue, onEmails}: {
+  autoIssue: boolean; emails: string; onAutoIssue: (value: boolean) => void; onEmails: (value: string) => void;
+}) {
+  return <div className="grid gap-4">
+    <div>
+      <AppCheckbox name="auto_issue" isSelected={autoIssue} onChange={onAutoIssue}>Emite automat factura</AppCheckbox>
+      <p className="mt-2 text-xs text-[var(--text-muted)]">Se aplică rulărilor viitoare. Ciornele existente rămân neschimbate. Dacă emiterea eșuează, păstrăm ciorna și te notificăm.</p>
+    </div>
+    <TextField name="notification_emails" value={emails} onChange={onEmails}>
+      <Label>Adrese de email pentru notificări</Label>
+      <TextArea rows={3} variant="secondary" className="w-full" placeholder="contabil@firma.ro, coleg@firma.ro" />
+    </TextField>
+    <p className="text-xs text-[var(--text-muted)]">Opțional, maximum 20 de adrese, separate prin virgulă sau rând nou. Primesc notificări despre documentele generate. Notificarea în aplicație este activă permanent. Trimiterea facturii către client și în SPV rămâne manuală.</p>
+  </div>;
+}
+
+function AutomationModal({companyId, template, onClose, onSaved}: {
+  companyId: string; template: RecurringInvoiceTemplate; onClose: () => void; onSaved: () => void;
+}) {
+  const [autoIssue, setAutoIssue] = useState(template.auto_issue ?? false);
+  const [emails, setEmails] = useState((template.notification_emails ?? []).join("\n"));
+  const save = useMutation({
+    mutationFn: () => api(`/companies/${companyId}/recurring-invoices/${template.id}/automation`, {
+      method: "PATCH", body: JSON.stringify({
+        ...(autoIssue !== (template.auto_issue ?? false) ? {auto_issue: autoIssue} : {}),
+        notification_emails: parseNotificationEmails(emails),
+      }),
+    }),
+    onSuccess: onSaved,
+  });
+  return <Modal.Backdrop isOpen onOpenChange={(open) => { if (!open && !save.isPending) onClose(); }}>
+    <Modal.Container size="md" scroll="inside" placement="center">
+      <Modal.Dialog>
+        <Modal.Header>
+          <Modal.Heading>Automatizare · {template.name}</Modal.Heading>
+          <p className="text-xs text-[var(--text-muted)]">Setările se salvează pe aceeași recurență, fără o versiune nouă.</p>
+        </Modal.Header>
+        <Modal.Body>
+          <AutomationFields autoIssue={autoIssue} emails={emails} onAutoIssue={setAutoIssue} onEmails={setEmails} />
+          {save.isError ? <p role="alert" className="mt-3 text-sm text-[var(--danger)]">Setările nu au fost salvate. Verifică adresele și mesajul erorii.</p> : null}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="outline" onPress={onClose} isDisabled={save.isPending}>Anulează</Button>
+          <Button onPress={() => save.mutate()} isDisabled={save.isPending}>{save.isPending ? <Spinner size="sm" /> : null} Salvează setările</Button>
+        </Modal.Footer>
+      </Modal.Dialog>
+    </Modal.Container>
+  </Modal.Backdrop>;
 }
 
 type SelectOption = {id: string; label: string};
